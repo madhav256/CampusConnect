@@ -665,3 +665,214 @@ A component is complete only if it:
 - is documented
 - avoids duplicated logic
 - can be reused elsewhere without modification
+
+---
+
+# Component Enhancements (v2)
+
+These guidelines extend the existing component definitions.
+
+## Button
+
+Every button must support:
+
+- loading state
+- disabled state
+- keyboard focus
+- optional leading icon
+- optional trailing icon
+
+Primary buttons should be visually dominant.
+
+---
+
+## Card
+
+Cards should support:
+
+- header
+- body
+- footer
+- optional actions
+
+Cards should never contain excessive nesting.
+
+Prefer composition over specialized card variants.
+
+---
+
+## Avatar
+
+Avatar should support:
+
+- image
+- initials fallback
+
+Future support:
+
+- online indicator
+- profile upload
+- status badge
+
+Avatar should align consistently across:
+
+- profile
+- feed
+- comments
+- messaging
+- search
+
+---
+
+## Textarea
+
+Textarea should support:
+
+- multiline content
+- preserved line breaks
+- validation
+- character count (future)
+
+Rendered content should preserve user formatting.
+
+---
+
+## Section
+
+Every page should be divided into reusable sections.
+
+A section may contain:
+
+- title
+- subtitle
+- actions
+- children
+
+Future support:
+
+- collapsible sections
+
+---
+
+# Feed Components
+
+## Feed
+
+Responsibilities:
+
+- render PostComposer
+- render PostCard list
+- loading state
+- empty state
+- error state
+
+Feed must not directly query Firestore.
+
+Use services and hooks.
+
+---
+
+## PostComposer
+
+Responsibilities:
+
+- create posts
+- validate content
+- prevent empty submissions
+- loading state
+
+Future support:
+
+- image upload
+- emoji picker
+- markdown
+- mentions
+
+---
+
+## PostCard
+
+Responsibilities:
+
+- display author
+- timestamp
+- content
+- actions
+
+Future support:
+
+- likes
+- comments
+- bookmarks
+- sharing
+- edited badge
+
+---
+
+# Future Components
+
+The following components should be introduced only when required by future milestones:
+
+Comments
+
+- CommentComposer
+- CommentItem
+- CommentList
+
+Likes
+
+- LikeButton
+
+Notifications
+
+- NotificationCard
+
+Messaging
+
+- ConversationList
+- MessageBubble
+- MessageComposer
+
+Search
+
+- UserSearchResult
+
+Friends
+
+- FriendCard
+- FriendRequestCard
+
+Settings
+
+- SettingsCard
+- PreferenceToggle
+
+Avoid implementing these components until the associated feature is being developed.
+
+---
+
+# Reusability Rule
+
+Before creating a new component, always ask:
+
+Can an existing component be extended?
+
+If yes, extend it.
+
+If no, create a new reusable component.
+
+Avoid one-off components unless they represent a unique feature.
+
+---
+
+# Visual Consistency
+
+All reusable components must follow:
+
+- DESIGN_SYSTEM.md
+- consistent spacing
+- accessible interactions
+- responsive layouts
+- predictable APIs
+
+Consistency is more important than introducing new visual styles.

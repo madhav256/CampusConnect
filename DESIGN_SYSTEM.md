@@ -600,3 +600,204 @@ When designing any new page or component, prioritize:
 If a design decision is uncertain, choose the simpler option.
 
 Consistency is more important than visual novelty.
+
+---
+
+# Visual Refinements (v2)
+
+The following design decisions supersede earlier generic guidelines and should be treated as the preferred implementation across the application.
+
+## Overall Feel
+
+CampusConnect should resemble a polished SaaS application rather than a traditional college project.
+
+Design inspiration remains:
+
+- Linear
+- GitHub
+- Notion
+- Threads
+- Discord
+- Vercel Dashboard
+
+Prioritize:
+
+- generous whitespace
+- subtle elevation
+- consistent spacing
+- clean typography
+- calm color palette
+- minimal visual noise
+
+Avoid adding visual effects simply because they look impressive.
+
+---
+
+# Profile Layout
+
+The profile page is the visual identity of every user.
+
+Requirements:
+
+- Cover banner at the top.
+- Circular avatar overlapping the lower portion of the banner.
+- User information must never overlap the banner.
+- Maintain generous spacing between:
+  - banner
+  - avatar
+  - user information
+
+- Profile cards should feel spacious rather than compressed.
+
+Future profile enhancements should integrate naturally into this layout.
+
+---
+
+# Typography
+
+User-generated content should always preserve formatting.
+
+Examples:
+
+- Bio
+- About
+- Posts
+- Comments
+- Messages
+
+Render multiline text correctly.
+
+Never collapse intentional line breaks into a single paragraph.
+
+---
+
+# Card Design
+
+Cards are the primary content container throughout CampusConnect.
+
+Requirements:
+
+- white background
+- subtle border
+- soft shadow
+- rounded corners
+- generous padding
+- consistent spacing
+
+Cards should support:
+
+- optional header
+- optional footer
+- optional actions
+
+Avoid visually heavy cards.
+
+---
+
+# Feed Design
+
+The feed is the primary focus after authentication.
+
+Posts should feel lightweight.
+
+Each post should have clear visual separation using spacing rather than heavy borders.
+
+Content hierarchy:
+
+Avatar
+
+↓
+
+Author
+
+↓
+
+Timestamp
+
+↓
+
+Post Content
+
+↓
+
+Actions
+
+---
+
+# Buttons
+
+Interactive elements should provide subtle feedback.
+
+Preferred interactions:
+
+- hover elevation
+- slight color transition
+- loading spinner
+- disabled opacity
+
+Avoid exaggerated animations.
+
+---
+
+# Icons
+
+Icons should enhance readability.
+
+Preferred usage:
+
+- section titles
+- navigation
+- actions
+- metadata
+
+Avoid decorative icons without purpose.
+
+Use Lucide React consistently.
+
+---
+
+# Empty States
+
+Every feature must include a thoughtful empty state.
+
+Examples:
+
+No posts yet.
+
+No comments yet.
+
+No notifications yet.
+
+No friends yet.
+
+Include:
+
+- meaningful icon
+- concise explanation
+- primary action
+
+---
+
+# Loading States
+
+Prefer skeleton loaders.
+
+Use spinners only for short operations.
+
+Loading should never cause large layout shifts.
+
+---
+
+# Future Visual Enhancements
+
+These are intentionally deferred until later milestones:
+
+- Dark mode
+- Theme switching
+- Profile cover customization
+- Profile picture upload
+- Image posts
+- Rich media
+- Motion enhancements
+
+The application should remain clean and consistent before introducing advanced visual effects.

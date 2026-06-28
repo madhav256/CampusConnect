@@ -52,12 +52,11 @@ Stores feed posts.
 
 ---
 
-### 3. `comments`
-Stores comments on posts.
+### 3. `comments` (Subcollection)
+Stores comments on posts. Located at `posts/{postId}/comments/{commentId}`.
 
 **Fields:**
 - `id` (string): Auto-generated Document ID.
-- `postId` (string): Reference to `posts.id`.
 - `authorId` (string): Reference to `users.uid`.
 - `authorName` (string): Denormalized user name.
 - `authorAvatar` (string | null): Denormalized user avatar.
@@ -66,7 +65,7 @@ Stores comments on posts.
 - `updatedAt` (timestamp).
 
 **Indexing & Scalability:**
-- Index on `postId` + `createdAt` (ascending) to show comments in chronological order under a post.
+- Index on `createdAt` (ascending) to show comments in chronological order under a post. No composite index needed on `postId` since it's a subcollection.
 
 ---
 

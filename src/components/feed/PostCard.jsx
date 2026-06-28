@@ -1,6 +1,8 @@
+import { useState } from "react";
 import Card from "../ui/Card";
 import Avatar from "../ui/Avatar";
 import Button from "../ui/Button";
+import CommentList from "./CommentList";
 
 function formatTimestamp(timestamp) {
   if (!timestamp) return "Just now";
@@ -17,6 +19,7 @@ function formatTimestamp(timestamp) {
 }
 
 export default function PostCard({ post, currentUserId, onDelete }) {
+  const [showComments, setShowComments] = useState(false);
   const isAuthor = currentUserId === post.authorId;
 
   return (
@@ -48,6 +51,20 @@ export default function PostCard({ post, currentUserId, onDelete }) {
       <div className="mt-4 whitespace-pre-wrap text-slate-800">
         {post.content}
       </div>
+
+      <div className="mt-4 flex items-center border-t border-slate-100 pt-4">
+        <button
+          onClick={() => setShowComments(!showComments)}
+          className="flex items-center gap-2 text-sm font-medium text-slate-500 transition hover:text-indigo-600"
+        >
+          <span>💬</span>
+          <span>
+            {post.commentsCount || 0} {post.commentsCount === 1 ? "Comment" : "Comments"}
+          </span>
+        </button>
+      </div>
+
+      {showComments && <CommentList postId={post.id} />}
     </Card>
   );
 }

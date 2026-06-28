@@ -7,6 +7,8 @@ import {
   query,
   orderBy,
   serverTimestamp,
+  updateDoc,
+  increment,
 } from "firebase/firestore";
 import { db, isFirebaseConfigured } from "../firebase/config";
 
@@ -58,4 +60,12 @@ export function subscribeToPosts(callback, onError) {
 export async function deletePost(postId) {
   const postRef = doc(requireDb(), "posts", postId);
   await deleteDoc(postRef);
+}
+
+export async function updateCommentsCount(postId, amount) {
+  const postRef = doc(requireDb(), "posts", postId);
+  await updateDoc(postRef, {
+    commentsCount: increment(amount),
+    updatedAt: serverTimestamp(),
+  });
 }

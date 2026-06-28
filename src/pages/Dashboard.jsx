@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 
 export default function Dashboard() {
@@ -40,6 +40,12 @@ export default function Dashboard() {
       >
         {isLoggingOut ? "Logging out..." : "Logout"}
       </button>
+      <Link
+        to="/profile"
+        className="ml-3 inline-block rounded bg-indigo-600 p-2 text-white hover:bg-indigo-700"
+      >
+        View Profile
+      </Link>
     </div>
   );
 }

@@ -10,6 +10,7 @@ import {
   subscribeToAuthChanges,
   toAuthUser,
 } from "../services/authService";
+import { createUserProfile } from "../services/userService";
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
@@ -64,6 +65,12 @@ export function AuthProvider({ children }) {
 
     try {
       const createdUser = await signUpWithEmail(credentials);
+      await createUserProfile({
+        uid: createdUser.uid,
+        displayName: createdUser.name,
+        email: createdUser.email,
+        photoURL: createdUser.photoURL,
+      });
       setUser(createdUser);
       return createdUser;
     } catch (error) {

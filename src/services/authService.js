@@ -88,3 +88,13 @@ export function logoutUser() {
 export function sendPasswordReset(email) {
   return sendPasswordResetEmail(requireAuth(), email);
 }
+
+export async function updateCurrentUserDisplayName(displayName) {
+  const currentUser = requireAuth().currentUser;
+
+  if (!currentUser) {
+    throw new Error("You must be logged in to update your profile.");
+  }
+
+  await updateProfile(currentUser, { displayName });
+}

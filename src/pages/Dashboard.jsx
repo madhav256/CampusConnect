@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
+import Feed from "../components/feed/Feed";
 
 export default function Dashboard() {
   const { user, logout } = useAuth();
@@ -23,29 +24,44 @@ export default function Dashboard() {
   };
 
   return (
-    <div className="p-6">
-      <h1 className="text-2xl font-bold">
-        Welcome, {user?.name}
-      </h1>
-      {error && (
-        <p className="mt-4 rounded border border-red-100 bg-red-50 p-2 text-sm text-red-700">
-          {error}
-        </p>
-      )}
+    <div className="min-h-screen bg-slate-50">
+      <header className="sticky top-0 z-10 border-b border-slate-200 bg-white">
+        <div className="mx-auto flex max-w-5xl items-center justify-between p-4">
+          <h1 className="text-xl font-bold text-indigo-600">CampusConnect</h1>
+          <div className="flex items-center gap-4">
+            <Link
+              to="/profile"
+              className="text-sm font-medium text-slate-600 hover:text-indigo-600"
+            >
+              Profile
+            </Link>
+            <button
+              onClick={handleLogout}
+              disabled={isLoggingOut}
+              className="text-sm font-medium text-slate-600 hover:text-red-600 disabled:opacity-50"
+            >
+              {isLoggingOut ? "Logging out..." : "Logout"}
+            </button>
+          </div>
+        </div>
+      </header>
 
-      <button
-        onClick={handleLogout}
-        disabled={isLoggingOut}
-        className="mt-4 bg-red-500 text-white p-2 rounded disabled:cursor-not-allowed disabled:bg-red-300"
-      >
-        {isLoggingOut ? "Logging out..." : "Logout"}
-      </button>
-      <Link
-        to="/profile"
-        className="ml-3 inline-block rounded bg-indigo-600 p-2 text-white hover:bg-indigo-700"
-      >
-        View Profile
-      </Link>
+      <main className="mx-auto max-w-5xl p-4 sm:p-6 md:p-8">
+        {error && (
+          <p className="mb-6 rounded border border-red-100 bg-red-50 p-3 text-sm text-red-700">
+            {error}
+          </p>
+        )}
+
+        <div className="mb-8">
+          <h2 className="text-2xl font-bold text-slate-900">
+            Welcome back, {user?.name?.split(" ")[0] || "Student"}!
+          </h2>
+          <p className="text-slate-500">Here's what's happening on campus today.</p>
+        </div>
+
+        <Feed />
+      </main>
     </div>
   );
 }

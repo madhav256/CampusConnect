@@ -36,6 +36,12 @@ export default function Dashboard() {
               Discover
             </Link>
             <Link
+              to="/connections"
+              className="text-sm font-medium text-slate-600 hover:text-indigo-600"
+            >
+              Connections
+            </Link>
+            <Link
               to="/profile"
               className="text-sm font-medium text-slate-600 hover:text-indigo-600"
             >

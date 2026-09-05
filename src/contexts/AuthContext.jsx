@@ -26,8 +26,17 @@ export function AuthProvider({ children }) {
         await configureAuthPersistence();
         unsubscribe = subscribeToAuthChanges((firebaseUser) => {
           if (isMounted) {
-            setUser(toAuthUser(firebaseUser));
+            const authUser = toAuthUser(firebaseUser);
+            setUser(authUser);
             setLoading(false);
+            if (authUser) {
+              createUserProfile({
+                uid: authUser.uid,
+                displayName: authUser.name,
+                email: authUser.email,
+                photoURL: authUser.photoURL,
+              }).catch(() => {});
+            }
           }
         });
       } catch (error) {

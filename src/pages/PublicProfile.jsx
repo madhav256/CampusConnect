@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { fetchUserById } from "../services/userService";
 import { useAuth } from "../hooks/useAuth";
+import { useConnectionState } from "../hooks/useConnectionState";
 import Section from "../components/layout/Section";
 import Avatar from "../components/ui/Avatar";
 import Card from "../components/ui/Card";
@@ -20,6 +21,18 @@ export default function PublicProfile() {
   });
 
   const isOwnProfile = authUser?.uid === uid;
+
+  const {
+    connectionState,
+    isConnLoading,
+    isPending,
+    connError,
+    handleConnect,
+    handleCancel,
+    handleAccept,
+    handleDecline,
+    handleRemove,
+  } = useConnectionState(isOwnProfile ? null : uid);
 
   useEffect(() => {
     let isMounted = true;
@@ -160,16 +173,95 @@ export default function PublicProfile() {
                   {/* Note: email is purposefully NOT displayed for public profiles */}
                 </div>
               </div>
-              <div className="flex flex-wrap gap-2">
-                {profile.department && (
-                  <span className="rounded-full bg-indigo-50 px-3 py-1 text-sm font-medium text-indigo-700">
-                    {profile.department}
-                  </span>
-                )}
-                {profile.year && (
-                  <span className="rounded-full bg-slate-100 px-3 py-1 text-sm font-medium text-slate-700">
-                    {profile.year}
-                  </span>
+              <div className="flex flex-col items-end gap-3">
+                <div className="flex flex-wrap gap-2">
+                  {profile.department && (
+                    <span className="rounded-full bg-indigo-50 px-3 py-1 text-sm font-medium text-indigo-700">
+                      {profile.department}
+                    </span>
+                  )}
+                  {profile.year && (
+                    <span className="rounded-full bg-slate-100 px-3 py-1 text-sm font-medium text-slate-700">
+                      {profile.year}
+                    </span>
+                  )}
+                </div>
+
+                {/* Connection Actions — hidden on own profile and while loading */}
+                {!isOwnProfile && !isConnLoading && (
+                  <div className="flex flex-col items-end gap-1">
+                    <div className="flex items-center gap-2">
+                      {connectionState === "none" && (
+                        <button
+                          id="btn-connect"
+                          onClick={handleConnect}
+                          disabled={isPending}
+                          className="inline-flex items-center justify-center rounded-xl bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white transition hover:bg-indigo-700 disabled:opacity-50"
+                        >
+                          {isPending ? "Sending…" : "Connect"}
+                        </button>
+                      )}
+
+                      {connectionState === "outgoing_pending" && (
+                        <>
+                          <span className="rounded-full bg-amber-50 px-3 py-1 text-sm font-medium text-amber-700">
+                            Request Sent
+                          </span>
+                          <button
+                            id="btn-cancel-request"
+                            onClick={handleCancel}
+                            disabled={isPending}
+                            className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-600 transition hover:bg-slate-50 disabled:opacity-50"
+                          >
+                            {isPending ? "Cancelling…" : "Cancel"}
+                          </button>
+                        </>
+                      )}
+
+                      {connectionState === "incoming_pending" && (
+                        <>
+                          <button
+                            id="btn-accept-request"
+                            onClick={handleAccept}
+                            disabled={isPending}
+                            className="inline-flex items-center justify-center rounded-xl bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white transition hover:bg-indigo-700 disabled:opacity-50"
+                          >
+                            {isPending ? "Accepting…" : "Accept"}
+                          </button>
+                          <button
+                            id="btn-decline-request"
+                            onClick={handleDecline}
+                            disabled={isPending}
+                            className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-600 transition hover:bg-slate-50 disabled:opacity-50"
+                          >
+                            {isPending ? "Declining…" : "Decline"}
+                          </button>
+                        </>
+                      )}
+
+                      {connectionState === "connected" && (
+                        <>
+                          <span className="rounded-full bg-emerald-50 px-3 py-1 text-sm font-medium text-emerald-700">
+                            Connected
+                          </span>
+                          <button
+                            id="btn-remove-connection"
+                            onClick={handleRemove}
+                            disabled={isPending}
+                            className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-500 transition hover:border-red-300 hover:text-red-600 disabled:opacity-50"
+                          >
+                            {isPending ? "Removing…" : "Remove"}
+                          </button>
+                        </>
+                      )}
+                    </div>
+
+                    {connError && (
+                      <p className="text-xs text-red-600" role="alert">
+                        {connError}
+                      </p>
+                    )}
+                  </div>
                 )}
               </div>
             </div>

@@ -92,5 +92,73 @@ service cloud.firestore {
         allow update: if false;
       }
     }
+
+    // 5. Connections collection
+    match /connections/{connectionId} {
+      // Helper: Validates canonical sorted ID: min(uid1, uid2) + "_" + max(uid1, uid2)
+      function isValidConnectionId(connId, sId, rId) {
+        return connId == (sId < rId ? sId + '_' + rId : rId + '_' + sId);
+      }
+
+      // Helper: Validates users array strictly matches sorted participant pair
+      function isValidUsersArray(users, sId, rId) {
+        return users.size() == 2 &&
+               users.hasAll([sId, rId]) &&
+               users[0] == (sId < rId ? sId : rId) &&
+               users[1] == (sId < rId ? rId : sId);
+      }
+
+      // Single-document get: allow if caller is participant, or if doc does not exist yet (needed for getDoc and atomic transaction pre-checks)
+      allow get: if isAuthenticated() && (resource == null || request.auth.uid in resource.data.users);
+
+      // List queries: participant-only for array-contains queries
+      allow list: if isAuthenticated() && request.auth.uid in resource.data.users;
+
+      // Create pending request with strict invariants
+      allow create: if isAuthenticated() &&
+        // Caller must be sender
+        request.resource.data.senderId == request.auth.uid &&
+        // Sender cannot connect with themselves
+        request.resource.data.receiverId != request.auth.uid &&
+        // Enforce exact canonical connectionId
+        isValidConnectionId(connectionId, request.resource.data.senderId, request.resource.data.receiverId) &&
+        // Enforce exact sorted users array
+        isValidUsersArray(request.resource.data.users, request.resource.data.senderId, request.resource.data.receiverId) &&
+        // State must be initialized to pending
+        request.resource.data.status == 'pending' &&
+        // Timestamps must be valid server timestamps
+        request.resource.data.createdAt == request.time &&
+        request.resource.data.updatedAt == request.time &&
+        // No extraneous or arbitrary fields
+        request.resource.data.keys().hasOnly(['users', 'senderId', 'receiverId', 'status', 'createdAt', 'updatedAt']) &&
+        request.resource.data.keys().hasAll(['users', 'senderId', 'receiverId', 'status', 'createdAt', 'updatedAt']);
+
+      // Update: Only pending -> accepted transition allowed by receiverId
+      allow update: if isAuthenticated() &&
+        // Only receiver can accept
+        resource.data.receiverId == request.auth.uid &&
+        // Must transition strictly from pending to accepted
+        resource.data.status == 'pending' &&
+        request.resource.data.status == 'accepted' &&
+        // Core participant identity and creation time are completely immutable
+        request.resource.data.senderId == resource.data.senderId &&
+        request.resource.data.receiverId == resource.data.receiverId &&
+        request.resource.data.users == resource.data.users &&
+        request.resource.data.createdAt == resource.data.createdAt &&
+        // Only status and updatedAt may change
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt']) &&
+        // UpdatedAt must be server timestamp
+        request.resource.data.updatedAt == request.time;
+
+      // Delete: Granular delete permissions
+      allow delete: if isAuthenticated() && (
+        // Sender cancels their own pending outgoing request
+        (resource.data.status == 'pending' && resource.data.senderId == request.auth.uid) ||
+        // Receiver declines their own pending incoming request
+        (resource.data.status == 'pending' && resource.data.receiverId == request.auth.uid) ||
+        // Either connected participant removes an accepted connection
+        (resource.data.status == 'accepted' && request.auth.uid in resource.data.users)
+      );
+    }
   }
 }

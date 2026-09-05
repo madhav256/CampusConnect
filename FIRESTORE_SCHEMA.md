@@ -183,3 +183,41 @@ Allows users to save posts.
 
 **Indexing & Scalability:**
 - Index on `userId` + `createdAt` (descending) to get a user's saved posts.
+
+---
+
+### 11. `connections` *(Milestone 7)*
+Stores bidirectional student connection relationships with a deterministic document ID that enforces exactly one document per pair.
+
+**Document ID:** `min(uid1, uid2) + "_" + max(uid1, uid2)` — lexicographically sorted so any two UIDs produce one canonical ID regardless of who initiates the request.
+
+**Fields:**
+- `users` (array of strings, size 2): Always `[min(uid1, uid2), max(uid1, uid2)]`. Enables the `array-contains` query.
+- `senderId` (string): UID of the student who initiated the request.
+- `receiverId` (string): UID of the student receiving the request.
+- `status` (string): `"pending"` | `"accepted"`.
+- `createdAt` (timestamp): Server-generated timestamp when the request was created.
+- `updatedAt` (timestamp): Server-generated timestamp when the status was last changed.
+
+**State Machine:**
+```
+none (doc absent)
+  └─[senderId sends request]─▶ pending
+         ├─[senderId cancels]──▶ none (doc deleted)
+         ├─[receiverId declines]▶ none (doc deleted)
+         └─[receiverId accepts]▶ accepted
+                  └─[either participant removes]─▶ none (doc deleted)
+```
+
+**Security Invariants (enforced in `firestore.rules`):**
+- Document ID must exactly equal the canonical sorted pair.
+- `users` array must contain exactly both participants in sorted order.
+- `senderId !== receiverId`.
+- On create: `status` must be `"pending"`, caller must be `senderId`, all timestamps must be `serverTimestamp()`.
+- On update: Only `receiverId` may update; only `status: "pending" → "accepted"` is permitted; all other fields are immutable.
+- On delete: Only `senderId` may cancel pending, only `receiverId` may decline pending, either participant may remove accepted.
+
+**Indexing & Scalability:**
+- Single-field index on `users` (array) is auto-created by Firestore and is sufficient for `where("users", "array-contains", uid)` — **no composite index required**.
+- Point lookup `doc("connections", getConnectionDocId(a, b))` costs exactly 1 read.
+

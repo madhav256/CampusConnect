@@ -7,6 +7,7 @@ import Discover from "./pages/Discover";
 import PublicProfile from "./pages/PublicProfile";
 import Connections from "./pages/Connections";
 import Notifications from "./pages/Notifications";
+import Settings from "./pages/Settings";
 import ProtectedRoute from "./components/ProtectedRoute";
 
 function App() {
@@ -61,6 +62,14 @@ function App() {
           element={
             <ProtectedRoute>
               <Notifications />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/settings"
+          element={
+            <ProtectedRoute>
+              <Settings />
             </ProtectedRoute>
           }
         />

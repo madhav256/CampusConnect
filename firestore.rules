@@ -52,7 +52,29 @@ service cloud.firestore {
     match /users/{userId} {
       allow read: if isAuthenticated();
       allow create: if isOwner(userId);
-      allow update: if isOwner(userId);
+      allow update: if isOwner(userId) &&
+        // Protect identity and creation immutability
+        request.resource.data.uid == resource.data.uid &&
+        request.resource.data.email == resource.data.email &&
+        request.resource.data.createdAt == resource.data.createdAt &&
+        
+        // Strictly prevent arbitrary field injection
+        request.resource.data.keys().hasOnly([
+          'uid', 'displayName', 'email', 'photoURL', 'bio', 
+          'department', 'year', 'skills', 'socialLinks', 
+          'isDiscoverable', 'notificationPreferences', 
+          'createdAt', 'updatedAt'
+        ]) &&
+        
+        // Validate settings types when present
+        (!('isDiscoverable' in request.resource.data) || request.resource.data.isDiscoverable is bool) &&
+        (!('notificationPreferences' in request.resource.data) || (
+          request.resource.data.notificationPreferences is map &&
+          request.resource.data.notificationPreferences.keys().hasOnly(['connectionRequests', 'connectionAccepted']) &&
+          (!('connectionRequests' in request.resource.data.notificationPreferences) || request.resource.data.notificationPreferences.connectionRequests is bool) &&
+          (!('connectionAccepted' in request.resource.data.notificationPreferences) || request.resource.data.notificationPreferences.connectionAccepted is bool)
+        ));
+
       allow delete: if isOwner(userId);
     }
 

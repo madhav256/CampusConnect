@@ -66,6 +66,12 @@ export default function Notifications() {
               )}
             </Link>
             <Link
+              to="/settings"
+              className="text-sm font-medium text-slate-600 hover:text-indigo-600"
+            >
+              Settings
+            </Link>
+            <Link
               to="/profile"
               className="text-sm font-medium text-slate-600 hover:text-indigo-600"
             >

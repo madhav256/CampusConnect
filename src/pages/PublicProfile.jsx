@@ -160,6 +160,13 @@ export default function PublicProfile() {
                 </span>
               )}
             </Link>
+            <span className="text-slate-300">|</span>
+            <Link
+              to="/settings"
+              className="text-sm font-medium text-slate-600 hover:text-slate-900"
+            >
+              Settings
+            </Link>
           </div>
 
           {isOwnProfile && (

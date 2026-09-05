@@ -24,14 +24,16 @@ Stores user profile information.
 - `year` (string): Academic year.
 - `skills` (array of strings): Tags for skills.
 - `socialLinks` (map): Keys like `github`, `linkedin`, `portfolio`, `website`.
+- `isDiscoverable` (boolean): Whether the student is searchable via the Discover page (default `true`).
+- `notificationPreferences` (map): Notification toggles (defaults: `connectionRequests: true`, `connectionAccepted: true`).
 - `createdAt` (timestamp).
 - `updatedAt` (timestamp).
 
 **Indexing & Scalability:**
 - Index on `updatedAt` (descending) for the student discovery and search query (`fetchAllUsers(100)`). Single-field ascending/descending indexes are provisioned automatically by Firestore.
-- Bounded fetch (up to 100 users) with client-side multi-field filtering across `displayName`, `department`, `year`, and `skills` is utilized as an intentional MVP scalability trade-off.
+- Bounded fetch (up to 100 users) with client-side multi-field filtering across `displayName`, `department`, `year`, and `skills`, plus client-side filtering on `isDiscoverable !== false`.
 - Future scalability: For platforms with thousands of users, an external search service (e.g., Algolia, Typesense) or search indexing can be introduced without changing the core user schema.
-- Security & Privacy: Document-level security rules in `firestore.rules` enforce that only authenticated users can read profiles, and users can only mutate their own document. The `email` field is strictly omitted from public UI components (`PublicProfile`, `StudentCard`).
+- Security & Privacy: Document-level security rules in `firestore.rules` enforce that only authenticated users can read profiles, and users can only mutate their own document. `uid`, `email`, and `createdAt` are immutable on updates. Type invariants enforce that `isDiscoverable` and notification preferences are booleans. The `email` field is strictly omitted from public UI components (`PublicProfile`, `StudentCard`).
 
 ---
 

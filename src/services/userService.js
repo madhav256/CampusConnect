@@ -25,6 +25,11 @@ const defaultProfile = {
     portfolio: "",
     website: "",
   },
+  isDiscoverable: true,
+  notificationPreferences: {
+    connectionRequests: true,
+    connectionAccepted: true,
+  },
 };
 
 function requireDb() {
@@ -54,6 +59,13 @@ export function normalizeProfile(uid, data) {
     socialLinks: {
       ...defaultProfile.socialLinks,
       ...(data?.socialLinks || {}),
+    },
+    isDiscoverable: data?.isDiscoverable !== false,
+    notificationPreferences: {
+      connectionRequests:
+        data?.notificationPreferences?.connectionRequests !== false,
+      connectionAccepted:
+        data?.notificationPreferences?.connectionAccepted !== false,
     },
     createdAt: data?.createdAt || null,
     updatedAt: data?.updatedAt || null,
@@ -108,6 +120,48 @@ export async function updateUserProfile(uid, updates) {
   };
 
   await updateDoc(userDocRef(uid), profileUpdates);
+  usersCache = null;
+}
+
+export async function updateUserSettings(uid, settingsUpdates) {
+  if (!uid) {
+    throw new Error("User ID is required to update settings.");
+  }
+
+  const updates = {
+    updatedAt: serverTimestamp(),
+  };
+
+  if (typeof settingsUpdates.isDiscoverable === "boolean") {
+    updates.isDiscoverable = settingsUpdates.isDiscoverable;
+  }
+
+  if (
+    settingsUpdates.notificationPreferences &&
+    typeof settingsUpdates.notificationPreferences === "object"
+  ) {
+    const prefs = {};
+    if (
+      typeof settingsUpdates.notificationPreferences.connectionRequests ===
+      "boolean"
+    ) {
+      prefs.connectionRequests =
+        settingsUpdates.notificationPreferences.connectionRequests;
+    }
+    if (
+      typeof settingsUpdates.notificationPreferences.connectionAccepted ===
+      "boolean"
+    ) {
+      prefs.connectionAccepted =
+        settingsUpdates.notificationPreferences.connectionAccepted;
+    }
+    if (Object.keys(prefs).length > 0) {
+      updates.notificationPreferences = prefs;
+    }
+  }
+
+  await updateDoc(userDocRef(uid), updates);
+  usersCache = null;
 }
 
 let usersCache = null;

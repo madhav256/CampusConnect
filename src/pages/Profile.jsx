@@ -202,9 +202,15 @@ export default function Profile() {
     <main className="min-h-screen bg-slate-50 px-4 py-8 text-slate-950">
       <div className="mx-auto max-w-5xl space-y-6">
         <div className="flex items-center justify-between">
-          <Link to="/dashboard" className="text-sm font-medium text-indigo-600 hover:text-indigo-700">
-            Back to dashboard
-          </Link>
+          <div className="flex items-center gap-3">
+            <Link to="/dashboard" className="text-sm font-medium text-indigo-600 hover:text-indigo-700">
+              &larr; Back to dashboard
+            </Link>
+            <span className="text-slate-300">|</span>
+            <Link to="/settings" className="text-sm font-medium text-slate-600 hover:text-slate-900">
+              Settings
+            </Link>
+          </div>
           <Button variant="outline" onClick={handleStartEditing}>
             Edit profile
           </Button>

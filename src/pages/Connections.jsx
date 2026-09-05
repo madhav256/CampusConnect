@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 import { useUserRelationships } from "../hooks/useUserRelationships";
+import { useNotifications } from "../hooks/useNotifications";
 import {
   acceptConnectionRequest,
   rejectConnectionRequest,
@@ -258,6 +259,8 @@ export default function Connections() {
     error,
   } = useUserRelationships();
 
+  const { unreadCount } = useNotifications();
+
   const [activeTab, setActiveTab] = useState("connections");
 
   const tabs = [
@@ -296,6 +299,17 @@ export default function Connections() {
               className="text-sm font-semibold text-indigo-600"
             >
               Connections
+            </Link>
+            <Link
+              to="/notifications"
+              className="relative text-sm font-medium text-slate-600 hover:text-indigo-600"
+            >
+              Notifications
+              {unreadCount > 0 && (
+                <span className="ml-1.5 inline-flex items-center justify-center rounded-full bg-indigo-600 px-1.5 py-0.5 text-xs font-semibold text-white">
+                  {unreadCount}
+                </span>
+              )}
             </Link>
             <Link
               to="/profile"

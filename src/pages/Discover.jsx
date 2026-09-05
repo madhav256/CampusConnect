@@ -1,12 +1,14 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useUserSearch } from "../hooks/useUserSearch";
+import { useNotifications } from "../hooks/useNotifications";
 import StudentCard from "../components/search/StudentCard";
 import Card from "../components/ui/Card";
 
 export default function Discover() {
   const [searchTerm, setSearchTerm] = useState("");
   const { results, isLoading, error, debouncedTerm } = useUserSearch(searchTerm);
+  const { unreadCount } = useNotifications();
 
   const trimmedTerm = debouncedTerm.trim();
   const isQueryTooShort = trimmedTerm.length < 2;
@@ -36,6 +38,17 @@ export default function Discover() {
               className="text-sm font-medium text-slate-600 hover:text-indigo-600"
             >
               Connections
+            </Link>
+            <Link
+              to="/notifications"
+              className="relative text-sm font-medium text-slate-600 hover:text-indigo-600"
+            >
+              Notifications
+              {unreadCount > 0 && (
+                <span className="ml-1.5 inline-flex items-center justify-center rounded-full bg-indigo-600 px-1.5 py-0.5 text-xs font-semibold text-white">
+                  {unreadCount}
+                </span>
+              )}
             </Link>
             <Link
               to="/profile"

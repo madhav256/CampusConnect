@@ -1,10 +1,12 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
+import { useNotifications } from "../hooks/useNotifications";
 import Feed from "../components/feed/Feed";
 
 export default function Dashboard() {
   const { user, logout } = useAuth();
+  const { unreadCount } = useNotifications();
   const navigate = useNavigate();
   const [error, setError] = useState("");
   const [isLoggingOut, setIsLoggingOut] = useState(false);
@@ -40,6 +42,17 @@ export default function Dashboard() {
               className="text-sm font-medium text-slate-600 hover:text-indigo-600"
             >
               Connections
+            </Link>
+            <Link
+              to="/notifications"
+              className="relative text-sm font-medium text-slate-600 hover:text-indigo-600"
+            >
+              Notifications
+              {unreadCount > 0 && (
+                <span className="ml-1.5 inline-flex items-center justify-center rounded-full bg-indigo-600 px-1.5 py-0.5 text-xs font-semibold text-white">
+                  {unreadCount}
+                </span>
+              )}
             </Link>
             <Link
               to="/profile"

@@ -160,5 +160,103 @@ service cloud.firestore {
         (resource.data.status == 'accepted' && request.auth.uid in resource.data.users)
       );
     }
+
+    // 6. User Notifications subcollection
+    match /users/{userId}/notifications/{notificationId} {
+      
+      // Helper: Validates exact schema keys, types, and baseline invariants
+      function isValidNotificationSchema(uId) {
+        let d = request.resource.data;
+        let keys = d.keys();
+        return keys.hasOnly(['id', 'recipientId', 'actorId', 'actorName', 'actorAvatar', 'type', 'referenceId', 'isRead', 'createdAt']) &&
+               keys.hasAll(['id', 'recipientId', 'actorId', 'actorName', 'actorAvatar', 'type', 'referenceId', 'isRead', 'createdAt']) &&
+               d.id == notificationId &&
+               d.recipientId == uId &&
+               d.actorId == request.auth.uid &&
+               d.actorId != uId &&
+               d.isRead == false &&
+               d.createdAt == request.time &&
+               d.recipientId is string &&
+               d.actorId is string &&
+               d.actorName is string &&
+               (d.actorAvatar == null || d.actorAvatar is string) &&
+               d.type is string &&
+               d.referenceId is string &&
+               d.isRead is bool &&
+               d.createdAt is timestamp;
+      }
+
+      // Helper: Validates actor name and avatar against the actor's real /users document
+      function isValidActorProfile() {
+        let actorDoc = get(/databases/$(database)/documents/users/$(request.auth.uid));
+        return actorDoc != null &&
+               request.resource.data.actorName == actorDoc.data.get('displayName', 'CampusConnect Student') &&
+               request.resource.data.actorAvatar == actorDoc.data.get('photoURL', null);
+      }
+
+      // Helper: Validates connection_request notification matches atomic connection transaction
+      function isValidConnectionRequestNotification(uId, notifId) {
+        let connId = request.resource.data.referenceId;
+        let connPath = /databases/$(database)/documents/connections/$(connId);
+        return notifId == 'req_' + connId &&
+               request.resource.data.type == 'connection_request' &&
+               existsAfter(connPath) &&
+               getAfter(connPath).data.status == 'pending' &&
+               getAfter(connPath).data.senderId == request.auth.uid &&
+               getAfter(connPath).data.receiverId == uId;
+      }
+
+      // Helper: Validates connection_accepted notification matches atomic connection transaction
+      function isValidConnectionAcceptedNotification(uId, notifId) {
+        let connId = request.resource.data.referenceId;
+        let connPath = /databases/$(database)/documents/connections/$(connId);
+        return notifId == 'acc_' + connId &&
+               request.resource.data.type == 'connection_accepted' &&
+               existsAfter(connPath) &&
+               getAfter(connPath).data.status == 'accepted' &&
+               getAfter(connPath).data.receiverId == request.auth.uid &&
+               getAfter(connPath).data.senderId == uId;
+      }
+
+      // 1. Read: 
+      // - List queries: strictly recipient-only (protects privacy)
+      allow list: if isAuthenticated() && request.auth.uid == userId;
+
+      // - Single document get: allow recipient, or actor of the specific request notification,
+      //   or pre-check reads when the document does not exist
+      allow get: if isAuthenticated() && (
+        request.auth.uid == userId ||
+        (resource != null && resource.data.actorId == request.auth.uid) ||
+        (resource == null && notificationId.matches('^req_.*') && notificationId.matches('.*' + request.auth.uid + '.*'))
+      );
+
+      // 2. Create: Strictly bound to an atomic connection transaction with verified profile
+      allow create: if isAuthenticated() &&
+        isValidNotificationSchema(userId) &&
+        isValidActorProfile() &&
+        (
+          isValidConnectionRequestNotification(userId, notificationId) ||
+          isValidConnectionAcceptedNotification(userId, notificationId)
+        );
+
+      // 3. Update: Only recipient may update, and only the 'isRead' field
+      allow update: if isAuthenticated() &&
+        request.auth.uid == userId &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead']) &&
+        request.resource.data.isRead is bool;
+
+      // 4. Delete:
+      // - Recipient can delete any notification in their inbox
+      // - Sender/actor may ONLY delete an outgoing connection_request notification
+      //   if the connection document is deleted in the same transaction
+      allow delete: if isAuthenticated() && (
+        request.auth.uid == userId ||
+        (
+          resource.data.actorId == request.auth.uid &&
+          resource.data.type == 'connection_request' &&
+          !existsAfter(/databases/$(database)/documents/connections/$(resource.data.referenceId))
+        )
+      );
+    }
   }
 }

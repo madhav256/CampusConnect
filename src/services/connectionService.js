@@ -8,6 +8,7 @@ import {
   serverTimestamp,
 } from "firebase/firestore";
 import { db, isFirebaseConfigured } from "../firebase/config";
+import { fetchUserById } from "./userService";
 
 function requireDb() {
   if (!isFirebaseConfigured || !db) {
@@ -35,7 +36,8 @@ export function getConnectionDocId(uidA, uidB) {
 
 /**
  * Sends a pending connection request from fromUid to toUid.
- * Uses a transaction to atomically verify no relationship exists before creating.
+ * Uses a transaction to atomically verify no relationship exists before creating,
+ * and atomically creates an incoming notification for the recipient.
  *
  * @param {string} fromUid - Sender's UID
  * @param {string} toUid - Receiver's UID
@@ -48,6 +50,10 @@ export async function sendConnectionRequest(fromUid, toUid) {
   const firestore = requireDb();
   const docId = getConnectionDocId(fromUid, toUid);
   const connRef = doc(firestore, "connections", docId);
+  const notifRef = doc(firestore, "users", toUid, "notifications", `req_${docId}`);
+
+  // Fetch actor's verified profile for denormalized notification payload
+  const senderProfile = await fetchUserById(fromUid);
 
   await runTransaction(firestore, async (transaction) => {
     const connDoc = await transaction.get(connRef);
@@ -80,11 +86,26 @@ export async function sendConnectionRequest(fromUid, toUid) {
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
+
+    // Create recipient's connection_request notification atomically
+    transaction.set(notifRef, {
+      id: `req_${docId}`,
+      recipientId: toUid,
+      actorId: fromUid,
+      actorName: senderProfile?.displayName || "CampusConnect Student",
+      actorAvatar: senderProfile?.photoURL || null,
+      type: "connection_request",
+      referenceId: docId,
+      isRead: false,
+      createdAt: serverTimestamp(),
+    });
   });
 }
 
 /**
  * Cancels an outgoing pending request. Only the original sender may cancel.
+ * Deletes the connection document and conditionally deletes the recipient's notification
+ * if the recipient has not already deleted it.
  *
  * @param {string} fromUid - Sender's UID (must be the original senderId)
  * @param {string} toUid - Receiver's UID
@@ -97,9 +118,12 @@ export async function cancelConnectionRequest(fromUid, toUid) {
   const firestore = requireDb();
   const docId = getConnectionDocId(fromUid, toUid);
   const connRef = doc(firestore, "connections", docId);
+  const notifRef = doc(firestore, "users", toUid, "notifications", `req_${docId}`);
 
   await runTransaction(firestore, async (transaction) => {
+    // Reads first:
     const connDoc = await transaction.get(connRef);
+    const notifDoc = await transaction.get(notifRef);
 
     if (!connDoc.exists()) {
       throw new Error("Connection request no longer exists.");
@@ -114,12 +138,20 @@ export async function cancelConnectionRequest(fromUid, toUid) {
       throw new Error("Only the sender can cancel this request.");
     }
 
+    // Mandatory connection deletion:
     transaction.delete(connRef);
+
+    // Conditional notification deletion:
+    if (notifDoc.exists()) {
+      transaction.delete(notifRef);
+    }
   });
 }
 
 /**
  * Accepts an incoming pending request. Only the receiver may accept.
+ * Updates connection to accepted, cleans up the incoming notification if it exists,
+ * and atomically creates an acceptance notification for the sender.
  *
  * @param {string} currentUid - The accepting user's UID (must be receiverId)
  * @param {string} targetUid - The requesting user's UID (must be senderId)
@@ -132,9 +164,16 @@ export async function acceptConnectionRequest(currentUid, targetUid) {
   const firestore = requireDb();
   const docId = getConnectionDocId(currentUid, targetUid);
   const connRef = doc(firestore, "connections", docId);
+  const incomingNotifRef = doc(firestore, "users", currentUid, "notifications", `req_${docId}`);
+  const acceptedNotifRef = doc(firestore, "users", targetUid, "notifications", `acc_${docId}`);
+
+  // Fetch accepting user's profile for the acceptance notification
+  const acceptorProfile = await fetchUserById(currentUid);
 
   await runTransaction(firestore, async (transaction) => {
+    // Reads first:
     const connDoc = await transaction.get(connRef);
+    const incomingNotifDoc = await transaction.get(incomingNotifRef);
 
     if (!connDoc.exists()) {
       throw new Error("Connection request no longer exists.");
@@ -149,15 +188,35 @@ export async function acceptConnectionRequest(currentUid, targetUid) {
       throw new Error("Only the recipient of this request can accept it.");
     }
 
+    // Update connection status to accepted
     transaction.update(connRef, {
       status: "accepted",
       updatedAt: serverTimestamp(),
+    });
+
+    // Clean up incoming request notification if recipient has not deleted it
+    if (incomingNotifDoc.exists()) {
+      transaction.delete(incomingNotifRef);
+    }
+
+    // Create acceptance notification for the sender (targetUid)
+    transaction.set(acceptedNotifRef, {
+      id: `acc_${docId}`,
+      recipientId: targetUid,
+      actorId: currentUid,
+      actorName: acceptorProfile?.displayName || "CampusConnect Student",
+      actorAvatar: acceptorProfile?.photoURL || null,
+      type: "connection_accepted",
+      referenceId: docId,
+      isRead: false,
+      createdAt: serverTimestamp(),
     });
   });
 }
 
 /**
  * Declines an incoming pending request. Only the receiver may decline.
+ * Deletes the connection document and cleans up the incoming notification if it exists.
  *
  * @param {string} currentUid - The declining user's UID (must be receiverId)
  * @param {string} targetUid - The requesting user's UID (must be senderId)
@@ -170,9 +229,12 @@ export async function rejectConnectionRequest(currentUid, targetUid) {
   const firestore = requireDb();
   const docId = getConnectionDocId(currentUid, targetUid);
   const connRef = doc(firestore, "connections", docId);
+  const notifRef = doc(firestore, "users", currentUid, "notifications", `req_${docId}`);
 
   await runTransaction(firestore, async (transaction) => {
+    // Reads first:
     const connDoc = await transaction.get(connRef);
+    const notifDoc = await transaction.get(notifRef);
 
     if (!connDoc.exists()) {
       throw new Error("Connection request no longer exists.");
@@ -187,7 +249,13 @@ export async function rejectConnectionRequest(currentUid, targetUid) {
       throw new Error("Only the recipient of this request can decline it.");
     }
 
+    // Mandatory connection deletion:
     transaction.delete(connRef);
+
+    // Conditional notification deletion:
+    if (notifDoc.exists()) {
+      transaction.delete(notifRef);
+    }
   });
 }
 

@@ -3,6 +3,7 @@ import { useParams, Link } from "react-router-dom";
 import { fetchUserById } from "../services/userService";
 import { useAuth } from "../hooks/useAuth";
 import { useConnectionState } from "../hooks/useConnectionState";
+import { useNotifications } from "../hooks/useNotifications";
 import Section from "../components/layout/Section";
 import Avatar from "../components/ui/Avatar";
 import Card from "../components/ui/Card";
@@ -14,6 +15,7 @@ function getVisibleLinks(socialLinks = {}) {
 export default function PublicProfile() {
   const { uid } = useParams();
   const { user: authUser } = useAuth();
+  const { unreadCount } = useNotifications();
   const [profileState, setProfileState] = useState({
     loadedUid: null,
     profile: null,
@@ -138,6 +140,25 @@ export default function PublicProfile() {
               className="text-sm font-medium text-slate-600 hover:text-slate-900"
             >
               Dashboard
+            </Link>
+            <span className="text-slate-300">|</span>
+            <Link
+              to="/connections"
+              className="text-sm font-medium text-slate-600 hover:text-slate-900"
+            >
+              Connections
+            </Link>
+            <span className="text-slate-300">|</span>
+            <Link
+              to="/notifications"
+              className="relative text-sm font-medium text-slate-600 hover:text-slate-900"
+            >
+              Notifications
+              {unreadCount > 0 && (
+                <span className="ml-1.5 inline-flex items-center justify-center rounded-full bg-indigo-600 px-1.5 py-0.5 text-xs font-semibold text-white">
+                  {unreadCount}
+                </span>
+              )}
             </Link>
           </div>
 

@@ -153,22 +153,37 @@ Stores individual chat messages.
 
 ---
 
-### 9. `notifications`
-System notifications for users (e.g., someone liked your post).
+### 9. `users/{userId}/notifications/{notificationId}` *(Milestone 8)*
+System notifications for users, stored in a user-scoped subcollection for privacy and query performance.
+
+**Document ID Formats:**
+- Request Notification: `req_${connectionId}` (e.g. `req_minUid_maxUid`)
+- Acceptance Notification: `acc_${connectionId}` (e.g. `acc_minUid_maxUid`)
 
 **Fields:**
-- `id` (string): Auto-generated Document ID.
-- `recipientId` (string): The user receiving the notification.
-- `actorId` (string): The user who triggered the event.
-- `actorName` (string): Denormalized name of the actor.
-- `actorAvatar` (string | null): Denormalized avatar of the actor.
-- `type` (string): "like", "comment", "friendRequest_received", "friendRequest_accepted".
-- `referenceId` (string): ID of the related post or request.
-- `isRead` (boolean): Has the user viewed this.
-- `createdAt` (timestamp).
+- `id` (string): Equals the document ID (`req_${connectionId}` or `acc_${connectionId}`).
+- `recipientId` (string): The user receiving the notification (matches parent path `userId`).
+- `actorId` (string): The user who triggered the event (`request.auth.uid`).
+- `actorName` (string): Denormalized display name of the actor (verified against `/users/{actorId}`).
+- `actorAvatar` (string | null): Denormalized avatar URL of the actor (verified against `/users/{actorId}`).
+- `type` (string): `"connection_request"` | `"connection_accepted"`.
+- `referenceId` (string): The canonical `connectionId`.
+- `isRead` (boolean): Whether the recipient has viewed/marked this notification (`false` initially).
+- `createdAt` (timestamp): Server timestamp when notification was created.
+
+**Security & Atomicity Invariants (enforced in `firestore.rules`):**
+- Notification creation is atomic with the corresponding connection state change:
+  - `connection_request`: Verified via `existsAfter()` that the connection document exists, is `pending`, and sender equals the actor.
+  - `connection_accepted`: Verified via `existsAfter()` that the connection document exists, is `accepted`, and receiver equals the actor.
+- `actorName` and `actorAvatar` must match the actor's real `/users/{actorId}` record.
+- Reading notifications list is strictly recipient-only.
+- Single `get` allows recipient, or actor for atomic pre-check during request cancellation.
+- Only the recipient may update `isRead`.
+- Recipient can delete any notification; actor may only delete `connection_request` if the referenced connection is deleted in the same transaction.
 
 **Indexing & Scalability:**
-- Index on `recipientId` + `createdAt` (descending) to fetch recent notifications for a user.
+- Single-field descending index on `createdAt` within the subcollection is auto-managed by Firestore.
+- **Zero composite indexes required.** Query: `collection("users", userId, "notifications"), orderBy("createdAt", "desc"), limit(30)`.
 
 ---
 

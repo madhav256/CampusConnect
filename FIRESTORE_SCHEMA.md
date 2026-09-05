@@ -28,7 +28,10 @@ Stores user profile information.
 - `updatedAt` (timestamp).
 
 **Indexing & Scalability:**
-- Index by `displayName` for basic user searches.
+- Index on `updatedAt` (descending) for the student discovery and search query (`fetchAllUsers(100)`). Single-field ascending/descending indexes are provisioned automatically by Firestore.
+- Bounded fetch (up to 100 users) with client-side multi-field filtering across `displayName`, `department`, `year`, and `skills` is utilized as an intentional MVP scalability trade-off.
+- Future scalability: For platforms with thousands of users, an external search service (e.g., Algolia, Typesense) or search indexing can be introduced without changing the core user schema.
+- Security & Privacy: Document-level security rules in `firestore.rules` enforce that only authenticated users can read profiles, and users can only mutate their own document. The `email` field is strictly omitted from public UI components (`PublicProfile`, `StudentCard`).
 
 ---
 
@@ -69,18 +72,22 @@ Stores comments on posts. Located at `posts/{postId}/comments/{commentId}`.
 
 ---
 
-### 4. `likes`
-Tracks which users liked which posts.
+### 4. `likes` (Subcollection)
+Tracks which users liked a post. Located at `posts/{postId}/likes/{userId}`.
 
 **Fields:**
-- ID format: `${postId}_${userId}` (helps prevent duplicate likes).
-- `postId` (string): Reference to `posts.id`.
+- `id` (string): User ID (`users.uid`). Using the liking user's UID as the document ID natively enforces uniqueness and prevents duplicate likes at the database layer.
 - `userId` (string): Reference to `users.uid`.
-- `createdAt` (timestamp).
+- `createdAt` (timestamp): When the like was created.
 
-**Indexing & Scalability:**
-- Index on `postId` to get all users who liked a post.
-- Index on `userId` to get all posts liked by a user.
+**Indexing, Atomicity & Security:**
+- Subcollection structure prevents unbounded array growth on the parent post document and eliminates the 1MB document size bottleneck.
+- Maintained atomically alongside `posts.likesCount` via `runTransaction`.
+- Security rules in `firestore.rules` validate atomic transaction results using `getAfter()` and `existsAfter()`:
+  - Users can only create or delete their own like document (`request.auth.uid == userId`).
+  - Like documents are immutable (`allow update: if false`).
+  - Post `likesCount` can only increment or decrement by exactly 1 in sync with like document creation or deletion.
+  - Non-authors cannot alter `authorId`, `authorName`, `authorAvatar`, `content`, `createdAt`, or `commentsCount`.
 
 ---
 

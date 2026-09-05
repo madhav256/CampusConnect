@@ -1,0 +1,96 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Validates atomic like/unlike transactions on posts
+    function isValidPostLikeUpdate(postId) {
+      let likePath = /databases/$(database)/documents/posts/$(postId)/likes/$(request.auth.uid);
+      
+      // Liking: like document exists after transaction and likesCount incremented by exactly 1
+      let isLike = existsAfter(likePath) &&
+                   getAfter(likePath).data.userId == request.auth.uid &&
+                   request.resource.data.likesCount == resource.data.likesCount + 1;
+
+      // Unliking: like document no longer exists after transaction and likesCount decremented by exactly 1
+      let isUnlike = !existsAfter(likePath) &&
+                     request.resource.data.likesCount == resource.data.likesCount - 1 &&
+                     request.resource.data.likesCount >= 0;
+
+      // Ensure all other post fields are strictly immutable
+      let postFieldsProtected = 
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likesCount', 'updatedAt']) &&
+        request.resource.data.authorId == resource.data.authorId &&
+        request.resource.data.authorName == resource.data.authorName &&
+        request.resource.data.authorAvatar == resource.data.authorAvatar &&
+        request.resource.data.content == resource.data.content &&
+        request.resource.data.createdAt == resource.data.createdAt &&
+        request.resource.data.commentsCount == resource.data.commentsCount;
+
+      return (isLike || isUnlike) && postFieldsProtected;
+    }
+
+    // Validates comment count updates from commentService
+    function isValidPostCommentCountUpdate() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['commentsCount', 'updatedAt']) &&
+             request.resource.data.authorId == resource.data.authorId &&
+             request.resource.data.authorName == resource.data.authorName &&
+             request.resource.data.authorAvatar == resource.data.authorAvatar &&
+             request.resource.data.content == resource.data.content &&
+             request.resource.data.createdAt == resource.data.createdAt &&
+             request.resource.data.likesCount == resource.data.likesCount;
+    }
+
+    // 1. Users collection
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow create: if isOwner(userId);
+      allow update: if isOwner(userId);
+      allow delete: if isOwner(userId);
+    }
+
+    // 2. Posts collection
+    match /posts/{postId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && request.resource.data.authorId == request.auth.uid;
+      
+      // Update rules:
+      // Post author can update, maintaining author identity;
+      // Alternatively, authenticated students can update ONLY via validated comment count batches
+      // or validated atomic like/unlike transactions using getAfter()/existsAfter().
+      allow update: if isAuthenticated() && (
+        (resource.data.authorId == request.auth.uid && request.resource.data.authorId == resource.data.authorId) ||
+        isValidPostCommentCountUpdate() ||
+        isValidPostLikeUpdate(postId)
+      );
+      
+      // Only the author can delete their own post
+      allow delete: if isAuthenticated() && resource.data.authorId == request.auth.uid;
+
+      // 3. Comments subcollection
+      match /comments/{commentId} {
+        allow read: if isAuthenticated();
+        allow create: if isAuthenticated() && request.resource.data.authorId == request.auth.uid;
+        allow update: if isAuthenticated() && resource.data.authorId == request.auth.uid && request.resource.data.authorId == resource.data.authorId;
+        allow delete: if isAuthenticated() && resource.data.authorId == request.auth.uid;
+      }
+
+      // 4. Likes subcollection
+      match /likes/{userId} {
+        allow read: if isAuthenticated();
+        allow create: if isAuthenticated() && 
+          request.auth.uid == userId && 
+          request.resource.data.userId == request.auth.uid;
+        allow delete: if isAuthenticated() && request.auth.uid == userId;
+        allow update: if false;
+      }
+    }
+  }
+}

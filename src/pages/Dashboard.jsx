@@ -30,6 +30,12 @@ export default function Dashboard() {
           <h1 className="text-xl font-bold text-indigo-600">CampusConnect</h1>
           <div className="flex items-center gap-4">
             <Link
+              to="/discover"
+              className="text-sm font-medium text-slate-600 hover:text-indigo-600"
+            >
+              Discover
+            </Link>
+            <Link
               to="/profile"
               className="text-sm font-medium text-slate-600 hover:text-indigo-600"
             >

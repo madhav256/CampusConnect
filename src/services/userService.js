@@ -1,7 +1,12 @@
 import {
+  collection,
   doc,
   getDoc,
+  getDocs,
+  limit,
   onSnapshot,
+  orderBy,
+  query,
   serverTimestamp,
   setDoc,
   updateDoc,
@@ -36,7 +41,7 @@ function userDocRef(uid) {
   return doc(requireDb(), "users", uid);
 }
 
-function normalizeProfile(uid, data) {
+export function normalizeProfile(uid, data) {
   return {
     uid,
     displayName: data?.displayName || "CampusConnect Student",
@@ -104,3 +109,43 @@ export async function updateUserProfile(uid, updates) {
 
   await updateDoc(userDocRef(uid), profileUpdates);
 }
+
+let usersCache = null;
+let lastFetchTime = 0;
+const CACHE_TTL_MS = 2 * 60 * 1000; // 2 minutes
+
+export async function fetchAllUsers(limitCount = 100) {
+  const now = Date.now();
+  if (usersCache && now - lastFetchTime < CACHE_TTL_MS) {
+    return usersCache;
+  }
+
+  const firestore = requireDb();
+  const usersRef = collection(firestore, "users");
+  const q = query(usersRef, orderBy("updatedAt", "desc"), limit(limitCount));
+  const snapshot = await getDocs(q);
+
+  const users = snapshot.docs.map((docSnap) =>
+    normalizeProfile(docSnap.id, docSnap.data())
+  );
+
+  usersCache = users;
+  lastFetchTime = now;
+  return users;
+}
+
+export async function fetchUserById(uid) {
+  if (!uid) {
+    return null;
+  }
+
+  const profileRef = userDocRef(uid);
+  const snapshot = await getDoc(profileRef);
+
+  if (!snapshot.exists()) {
+    return null;
+  }
+
+  return normalizeProfile(uid, snapshot.data());
+}
+

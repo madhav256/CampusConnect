@@ -387,3 +387,16 @@ A task is complete only if:
 - error states exist
 - responsive behavior is verified
 - implementation matches the requested requirements
+
+---
+
+# Agent Efficiency & Tool Usage
+
+- Prefer terminal/CLI commands, scripts, APIs, and direct file edits over browser UI interaction whenever possible.
+- For Firebase operations, prefer Firebase CLI over the Firebase Console.
+- Never manually type/paste large code or configuration into a web editor when an equivalent CLI/API/file operation exists.
+- For deployment, use the narrowest possible command (firebase deploy --only firestore:rules, firebase deploy --only hosting, etc.) rather than full deployment.
+- Before using browser automation, check whether the task can be completed deterministically through the terminal or a local file.
+- If a CLI/API operation fails, report the error rather than spending extended time on browser automation.
+- Do not repeatedly retry rate-limited tools.
+- Optimize for minimal tool calls and preservation of AI quota.

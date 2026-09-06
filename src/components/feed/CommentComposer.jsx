@@ -65,11 +65,11 @@ export default function CommentComposer({ onComment }) {
             onKeyDown={handleKeyDown}
             disabled={isSubmitting}
             rows={1}
-            className="w-full resize-none overflow-hidden rounded-2xl border border-slate-300 bg-slate-50 px-4 py-2 text-sm text-slate-900 outline-none transition focus:border-indigo-500 focus:bg-white focus:ring-1 focus:ring-indigo-500 disabled:cursor-not-allowed disabled:bg-slate-100"
+            className="w-full resize-none overflow-hidden rounded-2xl border border-border-warm bg-stone-50/70 px-4 py-2 text-sm text-ink outline-none transition placeholder:text-stone-400 focus:border-terracotta-600 focus:bg-surface focus:ring-1 focus:ring-terracotta-500 disabled:cursor-not-allowed disabled:bg-stone-100"
           />
         </div>
         
-        {error && <p className="text-xs text-red-500">{error}</p>}
+        {error && <p className="text-xs text-rose-600">{error}</p>}
         
         {content.trim().length > 0 && (
           <div className="flex justify-end">

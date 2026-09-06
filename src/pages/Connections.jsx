@@ -82,7 +82,7 @@ function PersonCardInner({ doc, currentUid, otherUid, isBusy, err, act }) {
 
   if (loadErr) {
     return (
-      <div className="rounded-2xl border border-red-100 bg-red-50 p-4 text-sm text-red-600">
+      <div className="rounded-2xl border border-rose-100 bg-rose-50 p-4 text-sm text-rose-700">
         Failed to load student info.
       </div>
     );
@@ -91,12 +91,12 @@ function PersonCardInner({ doc, currentUid, otherUid, isBusy, err, act }) {
   if (isLoading) {
     // Skeleton
     return (
-      <div className="animate-pulse rounded-2xl border border-slate-200 bg-white p-4">
+      <div className="animate-pulse rounded-2xl border border-border-warm bg-surface p-4 shadow-xs">
         <div className="flex items-center gap-3">
-          <div className="h-10 w-10 rounded-full bg-slate-200" />
+          <div className="h-10 w-10 rounded-full bg-stone-200" />
           <div className="flex-1 space-y-2">
-            <div className="h-4 w-3/4 rounded bg-slate-200" />
-            <div className="h-3 w-1/2 rounded bg-slate-200" />
+            <div className="h-4 w-3/4 rounded bg-stone-200" />
+            <div className="h-3 w-1/2 rounded bg-stone-200" />
           </div>
         </div>
       </div>
@@ -115,12 +115,12 @@ function PersonCardInner({ doc, currentUid, otherUid, isBusy, err, act }) {
   };
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-indigo-200">
+    <div className="rounded-2xl border border-border-warm bg-surface p-4 shadow-xs transition hover:border-stone-300">
       <div className="flex items-start gap-3">
         <Avatar name={displayProfile.displayName} photoURL={displayProfile.photoURL} size="md" />
         <div className="min-w-0 flex-1">
-          <p className="truncate font-semibold text-slate-900">{displayProfile.displayName}</p>
-          <p className="truncate text-sm text-slate-500">
+          <p className="truncate font-semibold text-ink">{displayProfile.displayName}</p>
+          <p className="truncate text-sm text-ink-muted">
             {[displayProfile.department, displayProfile.year].filter(Boolean).join(" · ")}
           </p>
         </div>
@@ -129,7 +129,7 @@ function PersonCardInner({ doc, currentUid, otherUid, isBusy, err, act }) {
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <Link
           to={`/users/${otherUid}`}
-          className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-600 transition hover:border-indigo-300 hover:text-indigo-600"
+          className="inline-flex items-center justify-center rounded-xl border border-border-warm bg-surface px-3 py-1.5 text-sm font-medium text-ink transition hover:border-stone-300 hover:text-terracotta-700 hover:bg-stone-50"
         >
           View Profile
         </Link>
@@ -191,7 +191,7 @@ function PersonCardInner({ doc, currentUid, otherUid, isBusy, err, act }) {
       </div>
 
       {err && (
-        <p className="mt-2 text-xs text-red-600" role="alert">
+        <p className="mt-2 text-xs text-rose-600" role="alert">
           {err}
         </p>
       )}
@@ -209,15 +209,15 @@ function Tab({ id, label, count, active, onClick }) {
       onClick={onClick}
       className={`relative flex items-center gap-2 border-b-2 pb-3 text-sm font-medium transition ${
         active
-          ? "border-indigo-600 text-indigo-600"
-          : "border-transparent text-slate-500 hover:text-slate-800"
+          ? "border-terracotta-600 text-terracotta-700 font-semibold"
+          : "border-transparent text-ink-muted hover:text-ink"
       }`}
     >
       {label}
       {count > 0 && (
         <span
           className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
-            active ? "bg-indigo-100 text-indigo-700" : "bg-slate-100 text-slate-500"
+            active ? "bg-terracotta-100 text-terracotta-800" : "bg-stone-100 text-stone-600"
           }`}
         >
           {count}
@@ -254,14 +254,14 @@ export default function Connections() {
   ];
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen bg-paper text-ink">
       <Navbar />
 
       <PageContainer>
         {/* Page title */}
         <div className="mb-6">
-          <h1 className="text-3xl font-bold text-slate-950">Connections</h1>
-          <p className="mt-1 text-slate-500">
+          <h1 className="font-serif text-3xl font-bold tracking-tight text-ink">Connections</h1>
+          <p className="mt-1 text-ink-muted">
             Manage your campus network and pending requests.
           </p>
         </div>
@@ -269,12 +269,12 @@ export default function Connections() {
         {/* Error state */}
         {error && (
           <Card className="mb-6 text-center">
-            <p className="text-sm text-red-600">{error}</p>
+            <p className="text-sm text-rose-600">{error}</p>
           </Card>
         )}
 
         {/* Tab bar */}
-        <div className="mb-6 flex gap-6 border-b border-slate-200">
+        <div className="mb-6 flex gap-6 border-b border-border-warm">
           {tabs.map((t) => (
             <Tab
               key={t.key}
@@ -293,13 +293,13 @@ export default function Connections() {
             {[1, 2, 3].map((i) => (
               <div
                 key={i}
-                className="animate-pulse rounded-2xl border border-slate-200 bg-white p-4"
+                className="animate-pulse rounded-2xl border border-border-warm bg-surface p-4 shadow-xs"
               >
                 <div className="flex items-center gap-3">
-                  <div className="h-10 w-10 rounded-full bg-slate-200" />
+                  <div className="h-10 w-10 rounded-full bg-stone-200" />
                   <div className="flex-1 space-y-2">
-                    <div className="h-4 w-3/4 rounded bg-slate-200" />
-                    <div className="h-3 w-1/2 rounded bg-slate-200" />
+                    <div className="h-4 w-3/4 rounded bg-stone-200" />
+                    <div className="h-3 w-1/2 rounded bg-stone-200" />
                   </div>
                 </div>
               </div>
@@ -318,7 +318,7 @@ export default function Connections() {
                 action={
                   <Link
                     to="/discover"
-                    className="inline-flex items-center justify-center rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-indigo-700"
+                    className="inline-flex items-center justify-center rounded-xl bg-terracotta-600 px-4 py-2 text-sm font-medium text-white shadow-xs transition hover:bg-terracotta-700"
                   >
                     Discover Students
                   </Link>
@@ -339,7 +339,7 @@ export default function Connections() {
           <div className="space-y-8">
             {/* Incoming */}
             <div>
-              <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-slate-400">
+              <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-ink-muted">
                 Incoming ({incomingRequests.length})
               </h2>
               {incomingRequests.length === 0 ? (
@@ -360,7 +360,7 @@ export default function Connections() {
 
             {/* Outgoing */}
             <div>
-              <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-slate-400">
+              <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-ink-muted">
                 Sent ({outgoingRequests.length})
               </h2>
               {outgoingRequests.length === 0 ? (

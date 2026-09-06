@@ -9,21 +9,21 @@ export default function Dashboard() {
   const [error] = useState("");
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen bg-paper text-ink">
       <Navbar />
 
       <PageContainer>
         {error && (
-          <p className="mb-6 rounded border border-red-100 bg-red-50 p-3 text-sm text-red-700">
+          <p className="mb-6 rounded-2xl border border-rose-100 bg-rose-50 p-3 text-sm text-rose-700">
             {error}
           </p>
         )}
 
         <div className="mb-8">
-          <h2 className="text-2xl font-bold text-slate-900">
+          <h1 className="font-serif text-3xl font-bold tracking-tight text-ink">
             Welcome back, {user?.name?.split(" ")[0] || "Student"}!
-          </h2>
-          <p className="text-slate-500">Here&apos;s what&apos;s happening on campus today.</p>
+          </h1>
+          <p className="mt-1 text-ink-muted">Here&apos;s what&apos;s happening on campus today.</p>
         </div>
 
         <Feed />

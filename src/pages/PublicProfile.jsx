@@ -85,14 +85,14 @@ export default function PublicProfile() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-slate-50">
+      <div className="min-h-screen bg-paper text-ink">
         <Navbar />
         <PageContainer>
           <div className="space-y-6">
-            <div className="h-48 animate-pulse rounded-2xl bg-slate-200" />
+            <div className="h-48 animate-pulse rounded-2xl bg-stone-200" />
             <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
-              <div className="h-64 animate-pulse rounded-2xl bg-slate-200" />
-              <div className="h-64 animate-pulse rounded-2xl bg-slate-200" />
+              <div className="h-64 animate-pulse rounded-2xl bg-stone-200" />
+              <div className="h-64 animate-pulse rounded-2xl bg-stone-200" />
             </div>
           </div>
         </PageContainer>
@@ -102,24 +102,24 @@ export default function PublicProfile() {
 
   if (error || !profile) {
     return (
-      <div className="min-h-screen bg-slate-50">
+      <div className="min-h-screen bg-paper text-ink">
         <Navbar />
         <PageContainer>
           <Card className="mx-auto max-w-2xl text-center">
-            <h1 className="text-2xl font-semibold text-slate-950">Student not found</h1>
-            <p className="mt-2 text-slate-600">
+            <h1 className="font-serif text-2xl font-bold text-ink">Student not found</h1>
+            <p className="mt-2 text-ink-muted">
               {error || "The profile you are looking for does not exist."}
             </p>
             <div className="mt-6 flex justify-center gap-4">
               <Link
                 to="/discover"
-                className="inline-flex items-center justify-center rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+                className="inline-flex items-center justify-center rounded-xl bg-terracotta-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-terracotta-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-terracotta-500"
               >
                 Back to Discover
               </Link>
               <Link
                 to="/dashboard"
-                className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+                className="inline-flex items-center justify-center rounded-xl border border-border-warm bg-surface px-4 py-2 text-sm font-medium text-ink transition hover:bg-stone-50"
               >
                 Dashboard
               </Link>
@@ -131,7 +131,7 @@ export default function PublicProfile() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-950">
+    <div className="min-h-screen bg-paper text-ink">
       <Navbar />
       <PageContainer>
         <div className="space-y-6">
@@ -139,7 +139,7 @@ export default function PublicProfile() {
           <div className="flex items-center justify-between">
             <Link
               to="/discover"
-              className="inline-flex items-center gap-1.5 text-sm font-medium text-indigo-600 hover:text-indigo-700"
+              className="inline-flex items-center gap-1.5 text-sm font-medium text-terracotta-700 hover:text-terracotta-800"
             >
               &larr; Back to Discover
             </Link>
@@ -147,7 +147,7 @@ export default function PublicProfile() {
             {isOwnProfile && (
               <Link
                 to="/profile"
-                className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-3.5 py-1.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+                className="inline-flex items-center justify-center rounded-xl border border-border-warm bg-surface px-3.5 py-1.5 text-sm font-medium text-ink transition hover:bg-stone-50"
               >
                 Edit your profile
               </Link>
@@ -155,9 +155,9 @@ export default function PublicProfile() {
           </div>
 
         {isOwnProfile && (
-          <div className="rounded-xl border border-indigo-100 bg-indigo-50 p-3 text-sm text-indigo-800">
+          <div className="rounded-xl border border-terracotta-200/60 bg-terracotta-50/40 p-3 text-sm text-terracotta-900">
             This is how your profile appears to other students. To update your info,{" "}
-            <Link to="/profile" className="font-semibold underline hover:text-indigo-900">
+            <Link to="/profile" className="font-semibold underline text-terracotta-700 hover:text-terracotta-950">
               edit your profile
             </Link>
             .
@@ -166,25 +166,27 @@ export default function PublicProfile() {
 
         {/* Profile Header Banner & Avatar */}
         <Card className="overflow-hidden p-0">
-          <div className="h-28 bg-indigo-600" />
-          <div className="px-6 pb-6">
+          <div className="relative z-0 flex h-32 sm:h-36 items-center sm:items-end bg-gradient-to-r from-stone-200 via-[#fde8d7] to-[#fbd5be] border-b border-border-warm px-6 pb-1 sm:pb-2">
+            <div className="w-full text-center sm:w-auto sm:pl-28 sm:text-left">
+              <h1 className="font-serif text-2xl sm:text-3xl font-bold tracking-tight text-ink">
+                {profile.displayName}
+              </h1>
+            </div>
+          </div>
+          <div className="relative z-10 px-6 pb-6">
             <div className="-mt-12 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
+              <div className="relative z-20 shrink-0">
                 <Avatar name={profile.displayName} photoURL={profile.photoURL} size="xl" />
-                <div>
-                  <h1 className="text-3xl font-bold text-slate-950">{profile.displayName}</h1>
-                  {/* Note: email is purposefully NOT displayed for public profiles */}
-                </div>
               </div>
-              <div className="flex flex-col items-end gap-3">
+              <div className="flex flex-col items-start sm:items-end gap-3 pb-2">
                 <div className="flex flex-wrap gap-2">
                   {profile.department && (
-                    <span className="rounded-full bg-indigo-50 px-3 py-1 text-sm font-medium text-indigo-700">
+                    <span className="rounded-full bg-terracotta-50 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-terracotta-700 border border-terracotta-200/50">
                       {profile.department}
                     </span>
                   )}
                   {profile.year && (
-                    <span className="rounded-full bg-slate-100 px-3 py-1 text-sm font-medium text-slate-700">
+                    <span className="rounded-full bg-stone-100 px-3 py-1 text-xs font-medium text-stone-700 border border-stone-200">
                       {profile.year}
                     </span>
                   )}
@@ -199,7 +201,7 @@ export default function PublicProfile() {
                           id="btn-connect"
                           onClick={handleConnect}
                           disabled={isPending}
-                          className="inline-flex items-center justify-center rounded-xl bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white transition hover:bg-indigo-700 disabled:opacity-50"
+                          className="inline-flex items-center justify-center rounded-xl bg-terracotta-600 px-4 py-1.5 text-sm font-medium text-white transition hover:bg-terracotta-700 disabled:opacity-50"
                         >
                           {isPending ? "Sending…" : "Connect"}
                         </button>
@@ -207,14 +209,14 @@ export default function PublicProfile() {
 
                       {connectionState === "outgoing_pending" && (
                         <>
-                          <span className="rounded-full bg-amber-50 px-3 py-1 text-sm font-medium text-amber-700">
+                          <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-medium text-amber-800 border border-amber-200">
                             Request Sent
                           </span>
                           <button
                             id="btn-cancel-request"
                             onClick={handleCancel}
                             disabled={isPending}
-                            className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-600 transition hover:bg-slate-50 disabled:opacity-50"
+                            className="inline-flex items-center justify-center rounded-xl border border-border-warm bg-surface px-3 py-1.5 text-sm font-medium text-ink-muted transition hover:text-ink hover:bg-stone-50 disabled:opacity-50"
                           >
                             {isPending ? "Cancelling…" : "Cancel"}
                           </button>
@@ -227,7 +229,7 @@ export default function PublicProfile() {
                             id="btn-accept-request"
                             onClick={handleAccept}
                             disabled={isPending}
-                            className="inline-flex items-center justify-center rounded-xl bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white transition hover:bg-indigo-700 disabled:opacity-50"
+                            className="inline-flex items-center justify-center rounded-xl bg-terracotta-600 px-4 py-1.5 text-sm font-medium text-white transition hover:bg-terracotta-700 disabled:opacity-50"
                           >
                             {isPending ? "Accepting…" : "Accept"}
                           </button>
@@ -235,7 +237,7 @@ export default function PublicProfile() {
                             id="btn-decline-request"
                             onClick={handleDecline}
                             disabled={isPending}
-                            className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-600 transition hover:bg-slate-50 disabled:opacity-50"
+                            className="inline-flex items-center justify-center rounded-xl border border-border-warm bg-surface px-3 py-1.5 text-sm font-medium text-ink-muted transition hover:text-ink hover:bg-stone-50 disabled:opacity-50"
                           >
                             {isPending ? "Declining…" : "Decline"}
                           </button>
@@ -244,14 +246,14 @@ export default function PublicProfile() {
 
                       {connectionState === "connected" && (
                         <>
-                          <span className="rounded-full bg-emerald-50 px-3 py-1 text-sm font-medium text-emerald-700">
+                          <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-800 border border-emerald-200">
                             Connected
                           </span>
                           <button
                             id="btn-remove-connection"
                             onClick={handleRemove}
                             disabled={isPending}
-                            className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-500 transition hover:border-red-300 hover:text-red-600 disabled:opacity-50"
+                            className="inline-flex items-center justify-center rounded-xl border border-border-warm bg-surface px-3 py-1.5 text-sm font-medium text-ink-muted transition hover:border-rose-300 hover:text-rose-700 hover:bg-stone-50 disabled:opacity-50"
                           >
                             {isPending ? "Removing…" : "Remove"}
                           </button>
@@ -260,7 +262,7 @@ export default function PublicProfile() {
                     </div>
 
                     {connError && (
-                      <p className="text-xs text-red-600" role="alert">
+                      <p className="text-xs text-rose-600" role="alert">
                         {connError}
                       </p>
                     )}
@@ -276,7 +278,7 @@ export default function PublicProfile() {
           {/* About Section */}
           <Card>
             <Section title="About" subtitle="Academic profile and introduction.">
-              <p className="text-slate-700">
+              <p className="text-ink leading-relaxed whitespace-pre-line">
                 {profile.bio || "This student hasn't added a bio yet."}
               </p>
             </Section>
@@ -291,14 +293,14 @@ export default function PublicProfile() {
                     {profile.skills.map((skill) => (
                       <span
                         key={skill}
-                        className="rounded-full bg-indigo-50 px-3 py-1 text-sm font-medium text-indigo-700"
+                        className="rounded-full bg-stone-100 px-3 py-1 text-xs font-medium text-stone-700 border border-stone-200"
                       >
                         {skill}
                       </span>
                     ))}
                   </div>
                 ) : (
-                  <p className="text-sm text-slate-500">No skills added yet.</p>
+                  <p className="text-sm text-ink-muted">No skills added yet.</p>
                 )}
               </Section>
             </Card>
@@ -313,11 +315,11 @@ export default function PublicProfile() {
                         href={url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="flex items-center justify-between rounded-xl border border-slate-200 p-3 text-sm font-medium text-slate-700 transition hover:border-indigo-300 hover:text-indigo-600"
+                        className="flex items-center justify-between rounded-xl border border-border-warm bg-surface p-3 text-sm font-medium text-ink transition hover:border-stone-300 hover:text-terracotta-700"
                       >
                         <span className="capitalize">{platform}</span>
                         <svg
-                          className="h-4 w-4 text-slate-400"
+                          className="h-4 w-4 text-ink-muted"
                           fill="none"
                           viewBox="0 0 24 24"
                           stroke="currentColor"
@@ -333,7 +335,7 @@ export default function PublicProfile() {
                     ))}
                   </div>
                 ) : (
-                  <p className="text-sm text-slate-500">No social links added yet.</p>
+                  <p className="text-sm text-ink-muted">No social links added yet.</p>
                 )}
               </Section>
             </Card>

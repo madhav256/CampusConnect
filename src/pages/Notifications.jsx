@@ -33,7 +33,7 @@ export default function Notifications() {
       : notifications;
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-950">
+    <div className="min-h-screen bg-paper text-ink">
       <Navbar />
 
       {/* Main Content */}
@@ -41,8 +41,8 @@ export default function Notifications() {
         {/* Page Title & Actions */}
         <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h1 className="text-3xl font-bold text-slate-950">Notifications</h1>
-            <p className="mt-1 text-slate-500">
+            <h1 className="font-serif text-3xl font-bold tracking-tight text-ink">Notifications</h1>
+            <p className="mt-1 text-ink-muted">
               Stay updated with your campus connections.
             </p>
           </div>
@@ -70,23 +70,23 @@ export default function Notifications() {
 
         {/* Error Alert */}
         {error && (
-          <Card className="mb-6 border-red-200 bg-red-50 text-center text-red-600">
+          <Card className="mb-6 border-rose-200 bg-rose-50 text-center text-rose-700">
             {error}
           </Card>
         )}
 
         {/* Tab filters */}
-        <div className="mb-6 flex gap-6 border-b border-slate-200">
+        <div className="mb-6 flex gap-6 border-b border-border-warm">
           <button
             onClick={() => setFilterTab("all")}
             className={`border-b-2 pb-3 text-sm font-medium transition ${
               filterTab === "all"
-                ? "border-indigo-600 text-indigo-600"
-                : "border-transparent text-slate-500 hover:text-slate-800"
+                ? "border-terracotta-600 text-terracotta-700"
+                : "border-transparent text-ink-muted hover:text-ink"
             }`}
           >
             All{" "}
-            <span className="ml-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">
+            <span className="ml-1 rounded-full bg-stone-100 px-2 py-0.5 text-xs text-stone-700">
               {notifications.length}
             </span>
           </button>
@@ -94,13 +94,13 @@ export default function Notifications() {
             onClick={() => setFilterTab("unread")}
             className={`border-b-2 pb-3 text-sm font-medium transition ${
               filterTab === "unread"
-                ? "border-indigo-600 text-indigo-600"
-                : "border-transparent text-slate-500 hover:text-slate-800"
+                ? "border-terracotta-600 text-terracotta-700"
+                : "border-transparent text-ink-muted hover:text-ink"
             }`}
           >
             Unread{" "}
             {unreadCount > 0 && (
-              <span className="ml-1 rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-semibold text-indigo-700">
+              <span className="ml-1 rounded-full bg-terracotta-100 px-2 py-0.5 text-xs font-semibold text-terracotta-800">
                 {unreadCount}
               </span>
             )}
@@ -113,13 +113,13 @@ export default function Notifications() {
             {[1, 2, 3].map((i) => (
               <div
                 key={i}
-                className="animate-pulse rounded-2xl border border-slate-200 bg-white p-4"
+                className="animate-pulse rounded-2xl border border-border-warm bg-surface p-4"
               >
                 <div className="flex items-start gap-4">
-                  <div className="h-12 w-12 rounded-full bg-slate-200" />
+                  <div className="h-12 w-12 rounded-full bg-stone-200" />
                   <div className="flex-1 space-y-2 py-1">
-                    <div className="h-4 w-3/4 rounded bg-slate-200" />
-                    <div className="h-3 w-1/4 rounded bg-slate-200" />
+                    <div className="h-4 w-3/4 rounded bg-stone-200" />
+                    <div className="h-3 w-1/4 rounded bg-stone-200" />
                   </div>
                 </div>
               </div>

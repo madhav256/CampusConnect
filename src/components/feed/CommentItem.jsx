@@ -26,8 +26,8 @@ export default function CommentItem({ comment, currentUserId, onDelete }) {
       <div className="flex-1">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <h4 className="font-semibold text-slate-900 text-sm">{comment.authorName}</h4>
-            <span className="text-xs text-slate-500">
+            <h4 className="font-semibold text-ink text-sm">{comment.authorName}</h4>
+            <span className="text-xs text-ink-muted">
               {formatTimestamp(comment.createdAt)}
             </span>
           </div>
@@ -37,7 +37,7 @@ export default function CommentItem({ comment, currentUserId, onDelete }) {
               variant="ghost"
               size="sm"
               onClick={() => onDelete(comment.id)}
-              className="h-auto p-1 text-xs text-red-500 hover:bg-red-50 hover:text-red-600"
+              className="h-auto p-1 text-xs text-rose-600 hover:bg-rose-50 hover:text-rose-700"
               title="Delete comment"
             >
               Delete
@@ -45,7 +45,7 @@ export default function CommentItem({ comment, currentUserId, onDelete }) {
           )}
         </div>
         
-        <div className="mt-1 text-sm text-slate-800 whitespace-pre-wrap">
+        <div className="mt-1 text-sm text-ink leading-relaxed whitespace-pre-wrap">
           {comment.content}
         </div>
       </div>

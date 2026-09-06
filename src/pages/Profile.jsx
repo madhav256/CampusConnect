@@ -170,14 +170,14 @@ export default function Profile() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-50">
+      <div className="min-h-screen bg-paper text-ink">
         <Navbar />
         <PageContainer>
           <div className="space-y-6">
-            <div className="h-48 animate-pulse rounded-2xl bg-slate-200" />
+            <div className="h-48 animate-pulse rounded-2xl bg-stone-200" />
             <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
-              <div className="h-64 animate-pulse rounded-2xl bg-slate-200" />
-              <div className="h-64 animate-pulse rounded-2xl bg-slate-200" />
+              <div className="h-64 animate-pulse rounded-2xl bg-stone-200" />
+              <div className="h-64 animate-pulse rounded-2xl bg-stone-200" />
             </div>
           </div>
         </PageContainer>
@@ -187,17 +187,17 @@ export default function Profile() {
 
   if (error || !profile) {
     return (
-      <div className="min-h-screen bg-slate-50">
+      <div className="min-h-screen bg-paper text-ink">
         <Navbar />
         <PageContainer>
           <Card className="mx-auto max-w-2xl text-center">
-            <h1 className="text-2xl font-semibold text-slate-950">Profile unavailable</h1>
-            <p className="mt-2 text-slate-600">
+            <h1 className="font-serif text-2xl font-bold text-ink">Profile unavailable</h1>
+            <p className="mt-2 text-ink-muted">
               {error || "Your profile document could not be found."}
             </p>
             <Link
               to="/dashboard"
-              className="mt-6 inline-flex items-center justify-center rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2"
+              className="mt-6 inline-flex items-center justify-center rounded-xl bg-terracotta-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-terracotta-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-terracotta-500 focus-visible:ring-offset-2"
             >
               Back to dashboard
             </Link>
@@ -208,13 +208,13 @@ export default function Profile() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-950">
+    <div className="min-h-screen bg-paper text-ink">
       <Navbar />
       <PageContainer>
 
         <div className="space-y-6">
           <div className="flex items-center justify-between">
-            <h1 className="text-2xl font-bold text-slate-950">My Profile</h1>
+            <h1 className="font-serif text-3xl font-bold tracking-tight text-ink">My Profile</h1>
             <Button variant="outline" onClick={handleStartEditing}>
               Edit profile
             </Button>
@@ -224,8 +224,8 @@ export default function Profile() {
           <p
             className={`rounded-xl border p-3 text-sm ${
               feedbackType === "success"
-                ? "border-green-100 bg-green-50 text-green-700"
-                : "border-red-100 bg-red-50 text-red-700"
+                ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                : "border-rose-200 bg-rose-50 text-rose-800"
             }`}
           >
             {feedback}
@@ -233,21 +233,28 @@ export default function Profile() {
         )}
 
         <Card className="overflow-hidden p-0">
-          <div className="h-28 bg-indigo-600" />
-          <div className="px-6 pb-6">
+          <div className="relative z-0 flex h-32 sm:h-36 items-center sm:items-end bg-gradient-to-r from-stone-200 via-[#fde8d7] to-[#fbd5be] border-b border-border-warm px-6 pb-1 sm:pb-2">
+            <div className="w-full text-center sm:w-auto sm:pl-28 sm:text-left">
+              <h1 className="font-serif text-2xl sm:text-3xl font-bold tracking-tight text-ink">
+                {profile.displayName}
+              </h1>
+            </div>
+          </div>
+          <div className="relative z-10 px-6 pb-6">
             <div className="-mt-12 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
-                <Avatar name={profile.displayName} photoURL={profile.photoURL} size="xl" />
-                <div>
-                  <h1 className="text-3xl font-bold text-slate-950">{profile.displayName}</h1>
-                  <p className="mt-1 text-slate-500">{profile.email}</p>
+              <div className="flex flex-col items-center gap-2 sm:flex-row sm:items-end sm:gap-4">
+                <div className="relative z-20 shrink-0">
+                  <Avatar name={profile.displayName} photoURL={profile.photoURL} size="xl" />
+                </div>
+                <div className="pb-3 ml-0 text-center sm:text-left">
+                  <p className="text-sm font-medium text-ink-muted">{profile.email}</p>
                 </div>
               </div>
-              <div className="flex flex-wrap gap-2">
-                <span className="rounded-full bg-indigo-50 px-3 py-1 text-sm font-medium text-indigo-700">
+              <div className="flex flex-wrap gap-2 pb-1">
+                <span className="rounded-full bg-terracotta-50 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-terracotta-700 border border-terracotta-200/50">
                   {profile.department}
                 </span>
-                <span className="rounded-full bg-slate-100 px-3 py-1 text-sm font-medium text-slate-700">
+                <span className="rounded-full bg-stone-100 px-3 py-1 text-xs font-medium text-stone-700 border border-stone-200">
                   {profile.year}
                 </span>
               </div>
@@ -345,7 +352,7 @@ export default function Profile() {
                   </div>
                 </form>
               ) : (
-                <p className="text-slate-700">
+                <p className="text-ink leading-relaxed whitespace-pre-line">
                   {profile.bio || "Add a short bio to help classmates get to know you."}
                 </p>
               )}
@@ -360,14 +367,14 @@ export default function Profile() {
                     {profile.skills.map((skill) => (
                       <span
                         key={skill}
-                        className="rounded-full bg-slate-100 px-3 py-1 text-sm font-medium text-slate-700"
+                        className="rounded-full bg-stone-100 px-3 py-1 text-xs font-medium text-stone-700 border border-stone-200"
                       >
                         {skill}
                       </span>
                     ))}
                   </div>
                 ) : (
-                  <p className="text-sm text-slate-500">No skills added yet.</p>
+                  <p className="text-sm text-ink-muted">No skills added yet.</p>
                 )}
               </Section>
             </Card>
@@ -382,14 +389,14 @@ export default function Profile() {
                         href={value}
                         target="_blank"
                         rel="noreferrer"
-                        className="block rounded-xl border border-slate-200 px-4 py-3 text-sm font-medium text-indigo-600 hover:bg-slate-50"
+                        className="block rounded-xl border border-border-warm bg-surface px-4 py-3 text-sm font-medium text-ink transition hover:border-stone-300 hover:text-terracotta-700"
                       >
                         {label.charAt(0).toUpperCase() + label.slice(1)}
                       </a>
                     ))}
                   </div>
                 ) : (
-                  <p className="text-sm text-slate-500">No social links added yet.</p>
+                  <p className="text-sm text-ink-muted">No social links added yet.</p>
                 )}
               </Section>
             </Card>

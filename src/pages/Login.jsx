@@ -109,30 +109,30 @@ export default function Login() {
   };
 
   return (
-    <div className="flex min-h-screen flex-col justify-center bg-slate-50 py-12 sm:px-6 lg:px-8">
+    <div className="flex min-h-screen flex-col justify-center bg-paper text-ink py-12 sm:px-6 lg:px-8">
       <div className="sm:mx-auto sm:w-full sm:max-w-md">
         <div className="text-center">
-          <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-indigo-600 text-white shadow-md shadow-indigo-200">
+          <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-terracotta-600 text-white shadow-xs">
             <GraduationCap className="h-6 w-6" aria-hidden="true" />
           </div>
-          <h1 className="mt-4 text-2xl font-bold tracking-tight text-slate-900">
+          <h1 className="mt-4 font-serif text-2xl font-bold tracking-tight text-ink">
             Sign in to CampusConnect
           </h1>
-          <p className="mt-1 text-sm text-slate-500">
+          <p className="mt-1 text-sm text-ink-muted">
             The university student network
           </p>
         </div>
       </div>
 
       <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md px-4 sm:px-0">
-        <Card className="p-8 shadow-sm">
+        <Card className="p-8 shadow-xs">
           <form onSubmit={handleLogin} className="space-y-4">
             {feedback && (
               <div
                 className={`rounded-xl border p-3 text-sm ${
                   feedbackType === "success"
-                    ? "border-green-100 bg-green-50 text-green-700"
-                    : "border-red-100 bg-red-50 text-red-700"
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                    : "border-rose-200 bg-rose-50 text-rose-700"
                 }`}
               >
                 {feedback}
@@ -180,18 +180,18 @@ export default function Login() {
                 type="button"
                 onClick={handlePasswordReset}
                 disabled={isResetting}
-                className="text-xs font-medium text-indigo-600 transition hover:text-indigo-700 disabled:cursor-not-allowed disabled:text-slate-400 focus:outline-none focus-visible:underline"
+                className="text-xs font-medium text-terracotta-700 transition hover:text-terracotta-800 disabled:cursor-not-allowed disabled:text-stone-400 focus:outline-none focus-visible:underline"
               >
                 {isResetting ? "Sending reset link..." : "Forgot your password?"}
               </button>
             </div>
           </form>
 
-          <div className="mt-6 border-t border-slate-100 pt-5 text-center text-sm text-slate-500">
+          <div className="mt-6 border-t border-border-warm pt-5 text-center text-sm text-ink-muted">
             Don&apos;t have an account?{" "}
             <Link
               to="/register"
-              className="font-semibold text-indigo-600 transition hover:text-indigo-700"
+              className="font-semibold text-terracotta-700 transition hover:text-terracotta-800"
             >
               Create account
             </Link>

@@ -80,26 +80,26 @@ export default function Register() {
   };
 
   return (
-    <div className="flex min-h-screen flex-col justify-center bg-slate-50 py-12 sm:px-6 lg:px-8">
+    <div className="flex min-h-screen flex-col justify-center bg-paper text-ink py-12 sm:px-6 lg:px-8">
       <div className="sm:mx-auto sm:w-full sm:max-w-md">
         <div className="text-center">
-          <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-indigo-600 text-white shadow-md shadow-indigo-200">
+          <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-terracotta-600 text-white shadow-xs">
             <GraduationCap className="h-6 w-6" aria-hidden="true" />
           </div>
-          <h1 className="mt-4 text-2xl font-bold tracking-tight text-slate-900">
+          <h1 className="mt-4 font-serif text-2xl font-bold tracking-tight text-ink">
             Join CampusConnect
           </h1>
-          <p className="mt-1 text-sm text-slate-500">
+          <p className="mt-1 text-sm text-ink-muted">
             Create your account and discover classmates
           </p>
         </div>
       </div>
 
       <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md px-4 sm:px-0">
-        <Card className="p-8 shadow-sm">
+        <Card className="p-8 shadow-xs">
           <form onSubmit={handleRegister} className="space-y-4">
             {feedback && (
-              <div className="rounded-xl border border-red-100 bg-red-50 p-3 text-sm text-red-700">
+              <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
                 {feedback}
               </div>
             )}
@@ -153,11 +153,11 @@ export default function Register() {
             </div>
           </form>
 
-          <div className="mt-6 border-t border-slate-100 pt-5 text-center text-sm text-slate-500">
+          <div className="mt-6 border-t border-border-warm pt-5 text-center text-sm text-ink-muted">
             Already have an account?{" "}
             <Link
               to="/"
-              className="font-semibold text-indigo-600 transition hover:text-indigo-700"
+              className="font-semibold text-terracotta-700 transition hover:text-terracotta-800"
             >
               Sign in
             </Link>

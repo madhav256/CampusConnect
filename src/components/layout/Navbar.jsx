@@ -20,24 +20,24 @@ export default function Navbar() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const getLinkClasses = ({ isActive }) =>
-    `inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 ${
+    `inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-terracotta-500 ${
       isActive
-        ? "bg-indigo-50 text-indigo-700 font-semibold"
-        : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+        ? "bg-terracotta-50 text-terracotta-800 font-semibold border border-terracotta-200/50"
+        : "text-stone-600 hover:bg-stone-100/80 hover:text-ink"
     }`;
 
   const getMobileLinkClasses = ({ isActive }) =>
-    `flex items-center justify-between rounded-xl px-4 py-3 text-base font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 ${
+    `flex items-center justify-between rounded-xl px-4 py-3 text-base font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-terracotta-500 ${
       isActive
-        ? "bg-indigo-50 text-indigo-700 font-semibold"
-        : "text-slate-700 hover:bg-slate-100 hover:text-slate-900"
+        ? "bg-terracotta-50 text-terracotta-800 font-semibold border border-terracotta-200/50"
+        : "text-stone-700 hover:bg-stone-100/80 hover:text-ink"
     }`;
 
   return (
-    <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur-xs">
+    <header className="sticky top-0 z-30 border-b border-border-warm bg-paper/90 backdrop-blur-md">
       <a
         href="#main-content"
-        className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-4 focus:z-50 focus:rounded-xl focus:bg-indigo-600 focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-white focus:shadow-md focus:outline-none"
+        className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-4 focus:z-50 focus:rounded-xl focus:bg-terracotta-600 focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-white focus:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-terracotta-500"
       >
         Skip to main content
       </a>
@@ -46,9 +46,9 @@ export default function Navbar() {
         {/* Brand Logo */}
         <Link
           to="/dashboard"
-          className="flex items-center gap-2 rounded-lg text-xl font-bold tracking-tight text-indigo-600 transition hover:text-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+          className="flex items-center gap-2 rounded-lg font-serif text-2xl font-bold tracking-tight text-ink transition hover:text-stone-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-terracotta-500"
         >
-          <span>CampusConnect</span>
+          <span>Campus<span className="font-normal italic text-terracotta-600">Connect</span></span>
         </Link>
 
 
@@ -66,7 +66,7 @@ export default function Navbar() {
               <span>{item.label}</span>
               {item.hasBadge && unreadCount > 0 && (
                 <span
-                  className="inline-flex min-w-[1.25rem] items-center justify-center rounded-full bg-indigo-600 px-1.5 py-0.5 text-xs font-semibold text-white"
+                  className="inline-flex min-w-[1.25rem] items-center justify-center rounded-full bg-terracotta-600 px-1.5 py-0.5 text-xs font-semibold text-white"
                   aria-label={`${unreadCount} unread notifications`}
                 >
                   {unreadCount > 99 ? "99+" : unreadCount}
@@ -80,7 +80,7 @@ export default function Navbar() {
         <div className="hidden items-center gap-3 md:flex">
           <Link
             to="/profile"
-            className="flex items-center gap-2 rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+            className="flex items-center gap-2 rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-terracotta-500"
             title={`Signed in as ${user?.name || user?.email || "Student"}`}
           >
             <Avatar
@@ -96,13 +96,13 @@ export default function Navbar() {
           {unreadCount > 0 && (
             <Link
               to="/notifications"
-              className="relative p-2 text-slate-600 hover:text-indigo-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 rounded-lg"
+              className="relative p-2 text-stone-600 hover:text-terracotta-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-terracotta-500 rounded-lg"
               aria-label={`${unreadCount} unread notifications`}
             >
               <Bell className="h-5 w-5" />
               <span className="absolute top-1.5 right-1.5 flex h-2.5 w-2.5">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-indigo-400 opacity-75"></span>
-                <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-indigo-600"></span>
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-terracotta-400 opacity-75"></span>
+                <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-terracotta-600"></span>
               </span>
             </Link>
           )}
@@ -110,7 +110,7 @@ export default function Navbar() {
           <button
             type="button"
             onClick={() => setMobileMenuOpen((prev) => !prev)}
-            className="inline-flex items-center justify-center rounded-xl p-2 text-slate-600 hover:bg-slate-100 hover:text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+            className="inline-flex items-center justify-center rounded-xl p-2 text-stone-600 hover:bg-stone-100 hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-terracotta-500"
             aria-expanded={mobileMenuOpen}
             aria-label="Toggle navigation menu"
           >
@@ -125,18 +125,18 @@ export default function Navbar() {
 
       {/* Mobile Navigation Drawer / Dropdown */}
       {mobileMenuOpen && (
-        <div className="border-b border-slate-200 bg-white px-4 pt-2 pb-4 shadow-lg md:hidden">
-          <div className="mb-3 flex items-center gap-3 border-b border-slate-100 pb-3">
+        <div className="border-b border-border-warm bg-surface px-4 pt-2 pb-4 shadow-sm md:hidden animate-slide-down">
+          <div className="mb-3 flex items-center gap-3 border-b border-border-warm/60 pb-3">
             <Avatar
               name={user?.name || user?.displayName}
               photoURL={user?.photoURL}
               size="md"
             />
             <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-semibold text-slate-900">
+              <p className="truncate text-sm font-semibold text-ink">
                 {user?.name || user?.displayName || "Student"}
               </p>
-              <p className="truncate text-xs text-slate-500">{user?.email}</p>
+              <p className="truncate text-xs text-ink-muted">{user?.email}</p>
             </div>
           </div>
 
@@ -150,7 +150,7 @@ export default function Navbar() {
               >
                 <span>{item.label}</span>
                 {item.hasBadge && unreadCount > 0 && (
-                  <span className="inline-flex min-w-[1.25rem] items-center justify-center rounded-full bg-indigo-600 px-2 py-0.5 text-xs font-semibold text-white">
+                  <span className="inline-flex min-w-[1.25rem] items-center justify-center rounded-full bg-terracotta-600 px-2 py-0.5 text-xs font-semibold text-white">
                     {unreadCount > 99 ? "99+" : unreadCount}
                   </span>
                 )}

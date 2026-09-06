@@ -9,7 +9,7 @@ export default function NotFound() {
   const { user } = useAuth();
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-950">
+    <div className="min-h-screen bg-paper text-ink">
       {user && <Navbar />}
 
       <PageContainer className="flex min-h-[70vh] items-center justify-center">
@@ -20,7 +20,7 @@ export default function NotFound() {
           action={
             <Link
               to={user ? "/dashboard" : "/"}
-              className="inline-flex items-center justify-center rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2"
+              className="inline-flex items-center justify-center rounded-xl bg-terracotta-600 px-5 py-2.5 text-sm font-medium text-white shadow-xs transition hover:bg-terracotta-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-terracotta-500 focus-visible:ring-offset-2"
             >
               {user ? "Back to Dashboard" : "Go to Sign In"}
             </Link>

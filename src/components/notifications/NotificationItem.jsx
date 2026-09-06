@@ -70,14 +70,14 @@ export default function NotificationItem({
     <div
       className={`group relative flex items-start gap-4 rounded-2xl border p-4 transition ${
         notification.isRead
-          ? "border-slate-200 bg-white hover:border-slate-300"
-          : "border-indigo-100 bg-indigo-50/40 hover:border-indigo-200"
+          ? "border-border-warm bg-surface hover:border-stone-300"
+          : "border-terracotta-200/70 bg-terracotta-50/40 hover:border-terracotta-300"
       }`}
     >
       {/* Unread indicator dot */}
       {!notification.isRead && (
         <span
-          className="absolute top-4 right-4 h-2 w-2 rounded-full bg-indigo-600"
+          className="absolute top-4 right-4 h-2 w-2 rounded-full bg-terracotta-600"
           title="Unread notification"
           aria-label="Unread notification"
         />
@@ -94,10 +94,10 @@ export default function NotificationItem({
 
       {/* Body Content */}
       <div className="min-w-0 flex-1">
-        <div className="text-sm text-slate-800">
+        <div className="text-sm text-ink">
           <Link
             to={`/users/${notification.actorId}`}
-            className="font-semibold text-slate-950 hover:underline"
+            className="font-semibold text-ink hover:underline"
           >
             {notification.actorName}
           </Link>{" "}
@@ -106,7 +106,7 @@ export default function NotificationItem({
           {!isRequest && !isAccepted && <span>interacted with you.</span>}
         </div>
 
-        <div className="mt-1 flex items-center gap-2 text-xs text-slate-500">
+        <div className="mt-1 flex items-center gap-2 text-xs text-ink-muted">
           <time dateTime={notification.createdAt ? notification.createdAt.toISOString() : undefined}>
             {formatRelativeTime(notification.createdAt)}
           </time>
@@ -114,7 +114,7 @@ export default function NotificationItem({
 
         {/* Action Error if any */}
         {actionError && (
-          <p className="mt-2 text-xs text-red-600" role="alert">
+          <p className="mt-2 text-xs text-rose-600" role="alert">
             {actionError}
           </p>
         )}
@@ -127,7 +127,7 @@ export default function NotificationItem({
                 id={`notif-btn-accept-${notification.id}`}
                 onClick={handleAccept}
                 disabled={isBusy}
-                className="inline-flex items-center justify-center rounded-xl bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-indigo-700 disabled:opacity-50"
+                className="inline-flex items-center justify-center rounded-xl bg-terracotta-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-terracotta-700 disabled:opacity-50"
               >
                 {isBusy ? "Accepting…" : "Accept"}
               </button>
@@ -135,7 +135,7 @@ export default function NotificationItem({
                 id={`notif-btn-decline-${notification.id}`}
                 onClick={handleDecline}
                 disabled={isBusy}
-                className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:bg-slate-50 disabled:opacity-50"
+                className="inline-flex items-center justify-center rounded-xl border border-border-warm bg-surface px-3 py-1.5 text-xs font-medium text-ink-muted transition hover:text-ink hover:bg-stone-50 disabled:opacity-50"
               >
                 {isBusy ? "Declining…" : "Decline"}
               </button>
@@ -145,7 +145,7 @@ export default function NotificationItem({
           {isAccepted && (
             <Link
               to={`/users/${notification.actorId}`}
-              className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:border-indigo-300 hover:text-indigo-600"
+              className="inline-flex items-center justify-center rounded-xl border border-border-warm bg-surface px-3 py-1.5 text-xs font-medium text-ink transition hover:border-stone-300 hover:text-terracotta-700"
             >
               View Profile
             </Link>
@@ -155,7 +155,7 @@ export default function NotificationItem({
           {!notification.isRead && onMarkAsRead && (
             <button
               onClick={() => onMarkAsRead(notification.id)}
-              className="text-xs font-medium text-slate-500 hover:text-indigo-600"
+              className="text-xs font-medium text-ink-muted hover:text-terracotta-700"
               title="Mark as read"
             >
               Mark as read
@@ -166,7 +166,7 @@ export default function NotificationItem({
           {onDelete && (
             <button
               onClick={() => onDelete(notification.id)}
-              className="text-xs text-slate-400 opacity-0 transition group-hover:opacity-100 hover:text-red-600 focus:opacity-100"
+              className="text-xs text-stone-400 opacity-0 transition group-hover:opacity-100 hover:text-rose-600 focus:opacity-100"
               title="Dismiss notification"
               aria-label="Dismiss notification"
             >

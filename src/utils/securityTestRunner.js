@@ -20,6 +20,12 @@ import {
 import { db, firebaseConfig } from "../firebase/config";
 import { fetchAllUsers, fetchUserById } from "../services/userService";
 
+// Explicit DEV-only runtime safety guard: Never permit execution in production builds
+if (!import.meta.env.DEV) {
+  throw new Error("Security test runner cannot run in production builds.");
+}
+
+
 /**
  * Checks if an error thrown by Firebase corresponds to a security permission denial.
  *

@@ -3,13 +3,15 @@ import {
   addDoc,
   deleteDoc,
   doc,
+  increment,
+  limit,
   onSnapshot,
-  query,
   orderBy,
+  query,
   serverTimestamp,
   updateDoc,
-  increment,
 } from "firebase/firestore";
+
 import { db, isFirebaseConfigured } from "../firebase/config";
 
 function requireDb() {
@@ -41,8 +43,9 @@ export async function createPost(authorId, authorName, authorAvatar, content) {
 
 export function subscribeToPosts(callback, onError) {
   const postsRef = collection(requireDb(), "posts");
-  // Order posts by creation time descending (newest first)
-  const q = query(postsRef, orderBy("createdAt", "desc"));
+  // Order posts by creation time descending (newest first), limited to 50
+  const q = query(postsRef, orderBy("createdAt", "desc"), limit(50));
+
   
   return onSnapshot(
     q,

@@ -75,13 +75,18 @@ service cloud.firestore {
           (!('connectionAccepted' in request.resource.data.notificationPreferences) || request.resource.data.notificationPreferences.connectionAccepted is bool)
         ));
 
-      allow delete: if isOwner(userId);
+      allow delete: if false;
     }
 
     // 2. Posts collection
     match /posts/{postId} {
       allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && request.resource.data.authorId == request.auth.uid;
+      allow create: if isAuthenticated() &&
+        request.resource.data.authorId == request.auth.uid &&
+        request.resource.data.likesCount == 0 &&
+        request.resource.data.commentsCount == 0 &&
+        request.resource.data.createdAt == request.time;
+
       
       // Update rules:
       // Post author can update, maintaining author identity;

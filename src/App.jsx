@@ -8,7 +8,9 @@ import PublicProfile from "./pages/PublicProfile";
 import Connections from "./pages/Connections";
 import Notifications from "./pages/Notifications";
 import Settings from "./pages/Settings";
+import NotFound from "./pages/NotFound";
 import ProtectedRoute from "./components/ProtectedRoute";
+
 
 function App() {
   return (
@@ -73,9 +75,11 @@ function App() {
             </ProtectedRoute>
           }
         />
+        <Route path="*" element={<NotFound />} />
       </Routes>
     </BrowserRouter>
   );
 }
+
 
 export default App;

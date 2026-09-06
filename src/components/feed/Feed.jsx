@@ -1,8 +1,10 @@
+import { FileText } from "lucide-react";
 import { usePosts } from "../../hooks/usePosts";
 import { useAuth } from "../../hooks/useAuth";
 import PostComposer from "./PostComposer";
 import PostCard from "./PostCard";
 import Card from "../ui/Card";
+import EmptyState from "../ui/EmptyState";
 
 export default function Feed() {
   const { user } = useAuth();
@@ -40,12 +42,13 @@ export default function Feed() {
           ))}
         </div>
       ) : posts.length === 0 ? (
-        <Card className="flex flex-col items-center justify-center p-12 text-center text-slate-500">
-          <div className="mb-4 rounded-full bg-slate-100 p-4 text-4xl">📝</div>
-          <h3 className="text-lg font-medium text-slate-900">No posts yet</h3>
-          <p className="mt-1">Be the first to share something with the campus!</p>
-        </Card>
+        <EmptyState
+          icon={FileText}
+          title="No posts yet"
+          description="Be the first to share an update, question, or opportunity with the campus community!"
+        />
       ) : (
+
         <div className="flex flex-col gap-4">
           {posts.map((post) => (
             <PostCard

@@ -1,11 +1,14 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import Section from "../components/layout/Section";
+import Navbar from "../components/layout/Navbar";
+import PageContainer from "../components/layout/PageContainer";
 import Avatar from "../components/ui/Avatar";
 import Button from "../components/ui/Button";
 import Card from "../components/ui/Card";
 import Input from "../components/ui/Input";
 import Textarea from "../components/ui/Textarea";
+
 import { useAuth } from "../hooks/useAuth";
 import { useUserProfile } from "../hooks/useUserProfile";
 
@@ -167,54 +170,55 @@ export default function Profile() {
 
   if (loading) {
     return (
-      <main className="min-h-screen bg-slate-50 px-4 py-8">
-        <div className="mx-auto max-w-5xl space-y-6">
-          <div className="h-48 animate-pulse rounded-2xl bg-slate-200" />
-          <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
-            <div className="h-64 animate-pulse rounded-2xl bg-slate-200" />
-            <div className="h-64 animate-pulse rounded-2xl bg-slate-200" />
+      <div className="min-h-screen bg-slate-50">
+        <Navbar />
+        <PageContainer>
+          <div className="space-y-6">
+            <div className="h-48 animate-pulse rounded-2xl bg-slate-200" />
+            <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
+              <div className="h-64 animate-pulse rounded-2xl bg-slate-200" />
+              <div className="h-64 animate-pulse rounded-2xl bg-slate-200" />
+            </div>
           </div>
-        </div>
-      </main>
+        </PageContainer>
+      </div>
     );
   }
 
   if (error || !profile) {
     return (
-      <main className="min-h-screen bg-slate-50 px-4 py-8">
-        <Card className="mx-auto max-w-2xl text-center">
-          <h1 className="text-2xl font-semibold text-slate-950">Profile unavailable</h1>
-          <p className="mt-2 text-slate-600">
-            {error || "Your profile document could not be found."}
-          </p>
-          <Link
-            to="/dashboard"
-            className="mt-6 inline-flex items-center justify-center rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2"
-          >
-            Back to dashboard
-          </Link>
-        </Card>
-      </main>
+      <div className="min-h-screen bg-slate-50">
+        <Navbar />
+        <PageContainer>
+          <Card className="mx-auto max-w-2xl text-center">
+            <h1 className="text-2xl font-semibold text-slate-950">Profile unavailable</h1>
+            <p className="mt-2 text-slate-600">
+              {error || "Your profile document could not be found."}
+            </p>
+            <Link
+              to="/dashboard"
+              className="mt-6 inline-flex items-center justify-center rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2"
+            >
+              Back to dashboard
+            </Link>
+          </Card>
+        </PageContainer>
+      </div>
     );
   }
 
   return (
-    <main className="min-h-screen bg-slate-50 px-4 py-8 text-slate-950">
-      <div className="mx-auto max-w-5xl space-y-6">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Link to="/dashboard" className="text-sm font-medium text-indigo-600 hover:text-indigo-700">
-              &larr; Back to dashboard
-            </Link>
-            <span className="text-slate-300">|</span>
-            <Link to="/settings" className="text-sm font-medium text-slate-600 hover:text-slate-900">
-              Settings
-            </Link>
+    <div className="min-h-screen bg-slate-50 text-slate-950">
+      <Navbar />
+      <PageContainer>
+
+        <div className="space-y-6">
+          <div className="flex items-center justify-between">
+            <h1 className="text-2xl font-bold text-slate-950">My Profile</h1>
+            <Button variant="outline" onClick={handleStartEditing}>
+              Edit profile
+            </Button>
           </div>
-          <Button variant="outline" onClick={handleStartEditing}>
-            Edit profile
-          </Button>
-        </div>
 
         {feedback && (
           <p
@@ -392,6 +396,8 @@ export default function Profile() {
           </div>
         </div>
       </div>
-    </main>
-  );
+    </PageContainer>
+  </div>
+);
 }
+

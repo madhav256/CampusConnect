@@ -1,6 +1,10 @@
 import { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
+import { GraduationCap } from "lucide-react";
 import { useAuth } from "../hooks/useAuth";
+import Button from "../components/ui/Button";
+import Card from "../components/ui/Card";
+import Input from "../components/ui/Input";
 
 const initialForm = {
   email: "",
@@ -105,80 +109,96 @@ export default function Login() {
   };
 
   return (
-    <div className="flex items-center justify-center h-screen bg-gray-100">
-      <form onSubmit={handleLogin} className="bg-white p-8 rounded-xl shadow-md w-96">
-        <h2 className="text-2xl font-bold mb-6 text-center">
-          Login
-        </h2>
-
-        {feedback && (
-          <p
-            className={`mb-4 rounded border p-2 text-sm ${
-              feedbackType === "success"
-                ? "border-green-100 bg-green-50 text-green-700"
-                : "border-red-100 bg-red-50 text-red-700"
-            }`}
-          >
-            {feedback}
+    <div className="flex min-h-screen flex-col justify-center bg-slate-50 py-12 sm:px-6 lg:px-8">
+      <div className="sm:mx-auto sm:w-full sm:max-w-md">
+        <div className="text-center">
+          <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-indigo-600 text-white shadow-md shadow-indigo-200">
+            <GraduationCap className="h-6 w-6" aria-hidden="true" />
+          </div>
+          <h1 className="mt-4 text-2xl font-bold tracking-tight text-slate-900">
+            Sign in to CampusConnect
+          </h1>
+          <p className="mt-1 text-sm text-slate-500">
+            The university student network
           </p>
-        )}
+        </div>
+      </div>
 
-        <input
-          type="email"
-          name="email"
-          placeholder="Email"
-          className="w-full p-2 mb-2 border rounded"
-          value={form.email}
-          onChange={handleChange}
-          aria-invalid={Boolean(errors.email)}
-          aria-describedby={errors.email ? "login-email-error" : undefined}
-        />
-        {errors.email && (
-          <p id="login-email-error" className="mb-3 text-sm text-red-600">
-            {errors.email}
-          </p>
-        )}
+      <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md px-4 sm:px-0">
+        <Card className="p-8 shadow-sm">
+          <form onSubmit={handleLogin} className="space-y-4">
+            {feedback && (
+              <div
+                className={`rounded-xl border p-3 text-sm ${
+                  feedbackType === "success"
+                    ? "border-green-100 bg-green-50 text-green-700"
+                    : "border-red-100 bg-red-50 text-red-700"
+                }`}
+              >
+                {feedback}
+              </div>
+            )}
 
-        <input
-          type="password"
-          name="password"
-          placeholder="Password"
-          className="w-full p-2 mb-2 border rounded"
-          value={form.password}
-          onChange={handleChange}
-          aria-invalid={Boolean(errors.password)}
-          aria-describedby={errors.password ? "login-password-error" : undefined}
-        />
-        {errors.password && (
-          <p id="login-password-error" className="mb-3 text-sm text-red-600">
-            {errors.password}
-          </p>
-        )}
+            <Input
+              id="login-email"
+              type="email"
+              name="email"
+              label="Email"
+              placeholder="student@university.edu"
+              value={form.email}
+              onChange={handleChange}
+              error={errors.email}
+              required
+            />
 
-        <button
-          type="submit"
-          disabled={isSubmitting}
-          className="w-full bg-blue-500 text-white p-2 rounded disabled:cursor-not-allowed disabled:bg-blue-300"
-        >
-          {isSubmitting ? "Logging in..." : "Login"}
-        </button>
+            <Input
+              id="login-password"
+              type="password"
+              name="password"
+              label="Password"
+              placeholder="••••••••"
+              value={form.password}
+              onChange={handleChange}
+              error={errors.password}
+              required
+            />
 
-        <button
-          type="button"
-          onClick={handlePasswordReset}
-          disabled={isResetting}
-          className="mt-3 w-full text-sm text-blue-500 disabled:cursor-not-allowed disabled:text-blue-300"
-        >
-          {isResetting ? "Sending reset link..." : "Forgot password?"}
-        </button>
+            <div className="pt-2">
+              <Button
+                type="submit"
+                variant="primary"
+                loading={isSubmitting}
+                loadingText="Signing in..."
+                className="w-full py-2.5"
+              >
+                Sign In
+              </Button>
+            </div>
 
-        <p className="text-center mt-4">
-          Need an account?{" "}
-          <Link to="/register" className="text-blue-500">
-            Register
-          </Link>
-        </p>
-      </form>
+            <div className="pt-1 text-center">
+              <button
+                type="button"
+                onClick={handlePasswordReset}
+                disabled={isResetting}
+                className="text-xs font-medium text-indigo-600 transition hover:text-indigo-700 disabled:cursor-not-allowed disabled:text-slate-400 focus:outline-none focus-visible:underline"
+              >
+                {isResetting ? "Sending reset link..." : "Forgot your password?"}
+              </button>
+            </div>
+          </form>
+
+          <div className="mt-6 border-t border-slate-100 pt-5 text-center text-sm text-slate-500">
+            Don&apos;t have an account?{" "}
+            <Link
+              to="/register"
+              className="font-semibold text-indigo-600 transition hover:text-indigo-700"
+            >
+              Create account
+            </Link>
+          </div>
+        </Card>
+      </div>
     </div>
   );
 }
+

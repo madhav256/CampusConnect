@@ -1,78 +1,32 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Search, Users } from "lucide-react";
 import { useUserSearch } from "../hooks/useUserSearch";
-import { useNotifications } from "../hooks/useNotifications";
+import Navbar from "../components/layout/Navbar";
+import PageContainer from "../components/layout/PageContainer";
 import StudentCard from "../components/search/StudentCard";
 import Card from "../components/ui/Card";
+import EmptyState from "../components/ui/EmptyState";
+
 
 export default function Discover() {
   const [searchTerm, setSearchTerm] = useState("");
   const { results, isLoading, error, debouncedTerm } = useUserSearch(searchTerm);
-  const { unreadCount } = useNotifications();
 
   const trimmedTerm = debouncedTerm.trim();
   const isQueryTooShort = trimmedTerm.length < 2;
 
   return (
     <div className="min-h-screen bg-slate-50">
-      <header className="sticky top-0 z-10 border-b border-slate-200 bg-white">
-        <div className="mx-auto flex max-w-5xl items-center justify-between p-4">
-          <Link to="/dashboard" className="text-xl font-bold text-indigo-600">
-            CampusConnect
-          </Link>
-          <nav className="flex items-center gap-4">
-            <Link
-              to="/dashboard"
-              className="text-sm font-medium text-slate-600 hover:text-indigo-600"
-            >
-              Dashboard
-            </Link>
-            <Link
-              to="/discover"
-              className="text-sm font-semibold text-indigo-600"
-            >
-              Discover
-            </Link>
-            <Link
-              to="/connections"
-              className="text-sm font-medium text-slate-600 hover:text-indigo-600"
-            >
-              Connections
-            </Link>
-            <Link
-              to="/notifications"
-              className="relative text-sm font-medium text-slate-600 hover:text-indigo-600"
-            >
-              Notifications
-              {unreadCount > 0 && (
-                <span className="ml-1.5 inline-flex items-center justify-center rounded-full bg-indigo-600 px-1.5 py-0.5 text-xs font-semibold text-white">
-                  {unreadCount}
-                </span>
-              )}
-            </Link>
-            <Link
-              to="/settings"
-              className="text-sm font-medium text-slate-600 hover:text-indigo-600"
-            >
-              Settings
-            </Link>
-            <Link
-              to="/profile"
-              className="text-sm font-medium text-slate-600 hover:text-indigo-600"
-            >
-              Profile
-            </Link>
-          </nav>
-        </div>
-      </header>
+      <Navbar />
 
-      <main className="mx-auto max-w-5xl p-4 sm:p-6 md:p-8">
+      <PageContainer>
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-slate-950">Discover Students</h1>
           <p className="mt-1 text-slate-500">
             Find and connect with classmates across departments, academic years, and skills.
           </p>
         </div>
+
 
         {/* Search Input Box */}
         <div className="mb-8">
@@ -158,27 +112,11 @@ export default function Discover() {
 
         {/* State 2: Initial Empty State (< 2 characters) */}
         {!error && isQueryTooShort && !isLoading && (
-          <Card className="py-12 text-center">
-            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-indigo-50 text-indigo-600">
-              <svg
-                className="h-6 w-6"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth="2"
-                  d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"
-                />
-              </svg>
-            </div>
-            <h3 className="mt-4 text-lg font-semibold text-slate-950">Find Your Classmates</h3>
-            <p className="mx-auto mt-2 max-w-md text-sm text-slate-500">
-              Enter at least 2 characters above to search students by name, academic department, year, or skills.
-            </p>
-          </Card>
+          <EmptyState
+            icon={Users}
+            title="Find Your Classmates"
+            description="Enter at least 2 characters above to search students by name, academic department, year, or skills."
+          />
         )}
 
         {/* State 3: Loading Skeletons */}
@@ -208,27 +146,11 @@ export default function Discover() {
 
         {/* State 4: No Results Found */}
         {!error && !isLoading && !isQueryTooShort && results.length === 0 && (
-          <Card className="py-12 text-center">
-            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 text-slate-400">
-              <svg
-                className="h-6 w-6"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth="2"
-                  d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                />
-              </svg>
-            </div>
-            <h3 className="mt-4 text-lg font-semibold text-slate-950">No students found</h3>
-            <p className="mx-auto mt-2 max-w-md text-sm text-slate-500">
-              We couldn&apos;t find any students matching &ldquo;{trimmedTerm}&rdquo;. Try checking the spelling or searching by a different department, year, or skill.
-            </p>
-          </Card>
+          <EmptyState
+            icon={Search}
+            title="No students found"
+            description={`We couldn't find any students matching "${trimmedTerm}". Try checking the spelling or searching by a different department, year, or skill.`}
+          />
         )}
 
         {/* State 5: Results Grid */}
@@ -246,7 +168,8 @@ export default function Discover() {
             </div>
           </div>
         )}
-      </main>
+      </PageContainer>
     </div>
   );
 }
+

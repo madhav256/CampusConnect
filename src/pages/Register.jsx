@@ -1,6 +1,10 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { GraduationCap } from "lucide-react";
 import { useAuth } from "../hooks/useAuth";
+import Button from "../components/ui/Button";
+import Card from "../components/ui/Card";
+import Input from "../components/ui/Input";
 
 const initialForm = {
   name: "",
@@ -76,80 +80,91 @@ export default function Register() {
   };
 
   return (
-    <div className="flex items-center justify-center h-screen bg-gray-100">
-      <form onSubmit={handleRegister} className="bg-white p-8 rounded-xl shadow-md w-96">
-        <h2 className="text-2xl font-bold mb-6 text-center">
-          Register
-        </h2>
-
-        {feedback && (
-          <p className="mb-4 rounded border border-red-100 bg-red-50 p-2 text-sm text-red-700">
-            {feedback}
+    <div className="flex min-h-screen flex-col justify-center bg-slate-50 py-12 sm:px-6 lg:px-8">
+      <div className="sm:mx-auto sm:w-full sm:max-w-md">
+        <div className="text-center">
+          <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-indigo-600 text-white shadow-md shadow-indigo-200">
+            <GraduationCap className="h-6 w-6" aria-hidden="true" />
+          </div>
+          <h1 className="mt-4 text-2xl font-bold tracking-tight text-slate-900">
+            Join CampusConnect
+          </h1>
+          <p className="mt-1 text-sm text-slate-500">
+            Create your account and discover classmates
           </p>
-        )}
+        </div>
+      </div>
 
-        <input
-          type="text"
-          name="name"
-          placeholder="Full Name"
-          className="w-full p-2 mb-2 border rounded"
-          value={form.name}
-          onChange={handleChange}
-          aria-invalid={Boolean(errors.name)}
-          aria-describedby={errors.name ? "register-name-error" : undefined}
-        />
-        {errors.name && (
-          <p id="register-name-error" className="mb-3 text-sm text-red-600">
-            {errors.name}
-          </p>
-        )}
+      <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md px-4 sm:px-0">
+        <Card className="p-8 shadow-sm">
+          <form onSubmit={handleRegister} className="space-y-4">
+            {feedback && (
+              <div className="rounded-xl border border-red-100 bg-red-50 p-3 text-sm text-red-700">
+                {feedback}
+              </div>
+            )}
 
-        <input
-          type="email"
-          name="email"
-          placeholder="Email"
-          className="w-full p-2 mb-2 border rounded"
-          value={form.email}
-          onChange={handleChange}
-          aria-invalid={Boolean(errors.email)}
-          aria-describedby={errors.email ? "register-email-error" : undefined}
-        />
-        {errors.email && (
-          <p id="register-email-error" className="mb-3 text-sm text-red-600">
-            {errors.email}
-          </p>
-        )}
+            <Input
+              id="register-name"
+              type="text"
+              name="name"
+              label="Full Name"
+              placeholder="Jane Doe"
+              value={form.name}
+              onChange={handleChange}
+              error={errors.name}
+              required
+            />
 
-        <input
-          type="password"
-          name="password"
-          placeholder="Password"
-          className="w-full p-2 mb-2 border rounded"
-          value={form.password}
-          onChange={handleChange}
-          aria-invalid={Boolean(errors.password)}
-          aria-describedby={errors.password ? "register-password-error" : undefined}
-        />
-        {errors.password && (
-          <p id="register-password-error" className="mb-3 text-sm text-red-600">
-            {errors.password}
-          </p>
-        )}
+            <Input
+              id="register-email"
+              type="email"
+              name="email"
+              label="Email"
+              placeholder="student@university.edu"
+              value={form.email}
+              onChange={handleChange}
+              error={errors.email}
+              required
+            />
 
-        <button
-          type="submit"
-          disabled={isSubmitting}
-          className="w-full bg-green-500 text-white p-2 rounded hover:bg-green-600 disabled:cursor-not-allowed disabled:bg-green-300"
-        >
-          {isSubmitting ? "Creating account..." : "Register"}
-        </button>
-        <p className="text-center mt-4">
-          Already have an account?{" "}
-          <Link to="/" className="text-blue-500">
-            Login
-          </Link>
-        </p>
-      </form>
+            <Input
+              id="register-password"
+              type="password"
+              name="password"
+              label="Password"
+              placeholder="At least 6 characters"
+              value={form.password}
+              onChange={handleChange}
+              error={errors.password}
+              required
+            />
+
+            <div className="pt-2">
+              <Button
+                type="submit"
+                variant="primary"
+                loading={isSubmitting}
+                loadingText="Creating account..."
+                className="w-full py-2.5"
+              >
+                Create Account
+              </Button>
+            </div>
+          </form>
+
+          <div className="mt-6 border-t border-slate-100 pt-5 text-center text-sm text-slate-500">
+            Already have an account?{" "}
+            <Link
+              to="/"
+              className="font-semibold text-indigo-600 transition hover:text-indigo-700"
+            >
+              Sign in
+            </Link>
+          </div>
+        </Card>
+      </div>
     </div>
   );
 }
+

@@ -21,6 +21,8 @@ function formatTimestamp(timestamp) {
 
 export default function PostCard({ post, currentUserId, onDelete }) {
   const [showComments, setShowComments] = useState(false);
+  const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const { isLiked, isPending, toggleLike } = usePostLike(post.id, currentUserId);
   const isAuthor = currentUserId === post.authorId;
 
@@ -29,6 +31,17 @@ export default function PostCard({ post, currentUserId, onDelete }) {
       await toggleLike();
     } catch (err) {
       console.error("Failed to toggle like:", err);
+    }
+  };
+
+  const handleDelete = async () => {
+    setIsDeleting(true);
+    try {
+      await onDelete(post.id);
+    } catch (err) {
+      console.error("Failed to delete post:", err);
+      setIsDeleting(false);
+      setIsConfirmingDelete(false);
     }
   };
 
@@ -46,15 +59,37 @@ export default function PostCard({ post, currentUserId, onDelete }) {
         </div>
         
         {isAuthor && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => onDelete(post.id)}
-            className="text-red-500 hover:bg-red-50 hover:text-red-600"
-            title="Delete post"
-          >
-            Delete
-          </Button>
+          isConfirmingDelete ? (
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-slate-500 font-medium">Delete post?</span>
+              <button
+                type="button"
+                onClick={handleDelete}
+                disabled={isDeleting}
+                className="rounded-lg bg-red-600 px-2.5 py-1 text-xs font-semibold text-white transition hover:bg-red-700 disabled:opacity-50"
+              >
+                {isDeleting ? "Deleting..." : "Delete"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsConfirmingDelete(false)}
+                disabled={isDeleting}
+                className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-600 transition hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setIsConfirmingDelete(true)}
+              className="text-slate-400 hover:bg-red-50 hover:text-red-600"
+              title="Delete post"
+            >
+              Delete
+            </Button>
+          )
         )}
       </div>
       

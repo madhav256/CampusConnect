@@ -1,10 +1,15 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Bell } from "lucide-react";
 import { useAuth } from "../hooks/useAuth";
 import { useNotifications } from "../hooks/useNotifications";
+import Navbar from "../components/layout/Navbar";
+import PageContainer from "../components/layout/PageContainer";
 import NotificationItem from "../components/notifications/NotificationItem";
 import SecurityTestPanel from "../components/dev/SecurityTestPanel";
+import Button from "../components/ui/Button";
 import Card from "../components/ui/Card";
+import EmptyState from "../components/ui/EmptyState";
+
 
 export default function Notifications() {
   const { user: authUser } = useAuth();
@@ -29,60 +34,10 @@ export default function Notifications() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-950">
-      {/* Header */}
-      <header className="sticky top-0 z-10 border-b border-slate-200 bg-white">
-        <div className="mx-auto flex max-w-5xl items-center justify-between p-4">
-          <Link to="/dashboard" className="text-xl font-bold text-indigo-600">
-            CampusConnect
-          </Link>
-          <nav className="flex items-center gap-4">
-            <Link
-              to="/dashboard"
-              className="text-sm font-medium text-slate-600 hover:text-indigo-600"
-            >
-              Dashboard
-            </Link>
-            <Link
-              to="/discover"
-              className="text-sm font-medium text-slate-600 hover:text-indigo-600"
-            >
-              Discover
-            </Link>
-            <Link
-              to="/connections"
-              className="text-sm font-medium text-slate-600 hover:text-indigo-600"
-            >
-              Connections
-            </Link>
-            <Link
-              to="/notifications"
-              className="relative text-sm font-semibold text-indigo-600"
-            >
-              Notifications
-              {unreadCount > 0 && (
-                <span className="ml-1.5 inline-flex items-center justify-center rounded-full bg-indigo-600 px-1.5 py-0.5 text-xs font-semibold text-white">
-                  {unreadCount}
-                </span>
-              )}
-            </Link>
-            <Link
-              to="/settings"
-              className="text-sm font-medium text-slate-600 hover:text-indigo-600"
-            >
-              Settings
-            </Link>
-            <Link
-              to="/profile"
-              className="text-sm font-medium text-slate-600 hover:text-indigo-600"
-            >
-              Profile
-            </Link>
-          </nav>
-        </div>
-      </header>
+      <Navbar />
 
       {/* Main Content */}
-      <main className="mx-auto max-w-3xl p-4 sm:p-6 md:p-8">
+      <PageContainer maxWidth="max-w-3xl">
         {/* Page Title & Actions */}
         <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
@@ -93,15 +48,17 @@ export default function Notifications() {
           </div>
 
           {unreadCount > 0 && (
-            <button
+            <Button
               id="btn-mark-all-read"
+              variant="outline"
+              size="sm"
               onClick={markAllAsRead}
-              className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-3.5 py-1.5 text-xs font-medium text-slate-700 transition hover:border-indigo-300 hover:text-indigo-600"
             >
               Mark all as read
-            </button>
+            </Button>
           )}
         </div>
+
 
         {/* Development-only Security Audit Test Panel */}
         {import.meta.env.DEV && (
@@ -187,35 +144,22 @@ export default function Notifications() {
 
         {/* Empty States */}
         {!isLoading && displayedNotifications.length === 0 && (
-          <div className="flex flex-col items-center py-16 text-center">
-            <div className="flex h-14 w-14 items-center justify-center rounded-full bg-slate-100 text-slate-400">
-              <svg
-                className="h-7 w-7"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth="1.5"
-                  d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"
-                />
-              </svg>
-            </div>
-            <h2 className="mt-4 text-base font-semibold text-slate-900">
-              {filterTab === "unread"
+          <EmptyState
+            icon={Bell}
+            title={
+              filterTab === "unread"
                 ? "You're all caught up!"
-                : "No notifications yet"}
-            </h2>
-            <p className="mx-auto mt-2 max-w-xs text-sm text-slate-500">
-              {filterTab === "unread"
+                : "No notifications yet"
+            }
+            description={
+              filterTab === "unread"
                 ? "You don't have any unread notifications."
-                : "When students connect with you or accept your requests, you'll see them here."}
-            </p>
-          </div>
+                : "When students connect with you or accept your requests, you'll see them here."
+            }
+          />
         )}
-      </main>
+      </PageContainer>
     </div>
   );
 }
+

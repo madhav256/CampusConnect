@@ -3,10 +3,12 @@ import { useParams, Link } from "react-router-dom";
 import { fetchUserById } from "../services/userService";
 import { useAuth } from "../hooks/useAuth";
 import { useConnectionState } from "../hooks/useConnectionState";
-import { useNotifications } from "../hooks/useNotifications";
+import Navbar from "../components/layout/Navbar";
+import PageContainer from "../components/layout/PageContainer";
 import Section from "../components/layout/Section";
 import Avatar from "../components/ui/Avatar";
 import Card from "../components/ui/Card";
+
 
 function getVisibleLinks(socialLinks = {}) {
   return Object.entries(socialLinks).filter(([, value]) => Boolean(value));
@@ -15,7 +17,6 @@ function getVisibleLinks(socialLinks = {}) {
 export default function PublicProfile() {
   const { uid } = useParams();
   const { user: authUser } = useAuth();
-  const { unreadCount } = useNotifications();
   const [profileState, setProfileState] = useState({
     loadedUid: null,
     profile: null,
@@ -84,100 +85,74 @@ export default function PublicProfile() {
 
   if (isLoading) {
     return (
-      <main className="min-h-screen bg-slate-50 px-4 py-8">
-        <div className="mx-auto max-w-5xl space-y-6">
-          <div className="h-48 animate-pulse rounded-2xl bg-slate-200" />
-          <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
-            <div className="h-64 animate-pulse rounded-2xl bg-slate-200" />
-            <div className="h-64 animate-pulse rounded-2xl bg-slate-200" />
+      <div className="min-h-screen bg-slate-50">
+        <Navbar />
+        <PageContainer>
+          <div className="space-y-6">
+            <div className="h-48 animate-pulse rounded-2xl bg-slate-200" />
+            <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
+              <div className="h-64 animate-pulse rounded-2xl bg-slate-200" />
+              <div className="h-64 animate-pulse rounded-2xl bg-slate-200" />
+            </div>
           </div>
-        </div>
-      </main>
+        </PageContainer>
+      </div>
     );
   }
 
   if (error || !profile) {
     return (
-      <main className="min-h-screen bg-slate-50 px-4 py-8">
-        <Card className="mx-auto max-w-2xl text-center">
-          <h1 className="text-2xl font-semibold text-slate-950">Student not found</h1>
-          <p className="mt-2 text-slate-600">
-            {error || "The profile you are looking for does not exist."}
-          </p>
-          <div className="mt-6 flex justify-center gap-4">
-            <Link
-              to="/discover"
-              className="inline-flex items-center justify-center rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
-            >
-              Back to Discover
-            </Link>
-            <Link
-              to="/dashboard"
-              className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-            >
-              Dashboard
-            </Link>
-          </div>
-        </Card>
-      </main>
+      <div className="min-h-screen bg-slate-50">
+        <Navbar />
+        <PageContainer>
+          <Card className="mx-auto max-w-2xl text-center">
+            <h1 className="text-2xl font-semibold text-slate-950">Student not found</h1>
+            <p className="mt-2 text-slate-600">
+              {error || "The profile you are looking for does not exist."}
+            </p>
+            <div className="mt-6 flex justify-center gap-4">
+              <Link
+                to="/discover"
+                className="inline-flex items-center justify-center rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+              >
+                Back to Discover
+              </Link>
+              <Link
+                to="/dashboard"
+                className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+              >
+                Dashboard
+              </Link>
+            </div>
+          </Card>
+        </PageContainer>
+      </div>
     );
   }
 
   return (
-    <main className="min-h-screen bg-slate-50 px-4 py-8 text-slate-950">
-      <div className="mx-auto max-w-5xl space-y-6">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
+    <div className="min-h-screen bg-slate-50 text-slate-950">
+      <Navbar />
+      <PageContainer>
+        <div className="space-y-6">
+
+          <div className="flex items-center justify-between">
             <Link
               to="/discover"
-              className="text-sm font-medium text-indigo-600 hover:text-indigo-700"
+              className="inline-flex items-center gap-1.5 text-sm font-medium text-indigo-600 hover:text-indigo-700"
             >
               &larr; Back to Discover
             </Link>
-            <span className="text-slate-300">|</span>
-            <Link
-              to="/dashboard"
-              className="text-sm font-medium text-slate-600 hover:text-slate-900"
-            >
-              Dashboard
-            </Link>
-            <span className="text-slate-300">|</span>
-            <Link
-              to="/connections"
-              className="text-sm font-medium text-slate-600 hover:text-slate-900"
-            >
-              Connections
-            </Link>
-            <span className="text-slate-300">|</span>
-            <Link
-              to="/notifications"
-              className="relative text-sm font-medium text-slate-600 hover:text-slate-900"
-            >
-              Notifications
-              {unreadCount > 0 && (
-                <span className="ml-1.5 inline-flex items-center justify-center rounded-full bg-indigo-600 px-1.5 py-0.5 text-xs font-semibold text-white">
-                  {unreadCount}
-                </span>
-              )}
-            </Link>
-            <span className="text-slate-300">|</span>
-            <Link
-              to="/settings"
-              className="text-sm font-medium text-slate-600 hover:text-slate-900"
-            >
-              Settings
-            </Link>
-          </div>
 
-          {isOwnProfile && (
-            <Link
-              to="/profile"
-              className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-3.5 py-1.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-            >
-              Edit your profile
-            </Link>
-          )}
-        </div>
+            {isOwnProfile && (
+              <Link
+                to="/profile"
+                className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-3.5 py-1.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+              >
+                Edit your profile
+              </Link>
+            )}
+          </div>
 
         {isOwnProfile && (
           <div className="rounded-xl border border-indigo-100 bg-indigo-50 p-3 text-sm text-indigo-800">
@@ -365,6 +340,8 @@ export default function PublicProfile() {
           </div>
         </div>
       </div>
-    </main>
-  );
+    </PageContainer>
+  </div>
+);
+
 }

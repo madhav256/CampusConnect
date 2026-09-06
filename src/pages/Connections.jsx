@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { Users } from "lucide-react";
 import { useAuth } from "../hooks/useAuth";
 import { useUserRelationships } from "../hooks/useUserRelationships";
-import { useNotifications } from "../hooks/useNotifications";
+import Navbar from "../components/layout/Navbar";
+import PageContainer from "../components/layout/PageContainer";
 import {
   acceptConnectionRequest,
   rejectConnectionRequest,
@@ -11,29 +13,10 @@ import {
 } from "../services/connectionService";
 import { fetchUserById } from "../services/userService";
 import Avatar from "../components/ui/Avatar";
+import Button from "../components/ui/Button";
 import Card from "../components/ui/Card";
+import EmptyState from "../components/ui/EmptyState";
 
-// ── Inline connection action button ──────────────────────────────────────────
-
-function ActionButton({ id, onClick, disabled, variant = "primary", children }) {
-  const base =
-    "inline-flex items-center justify-center rounded-xl px-3 py-1.5 text-sm font-medium transition disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500";
-  const variants = {
-    primary: "bg-indigo-600 text-white hover:bg-indigo-700",
-    outline: "border border-slate-300 bg-white text-slate-600 hover:bg-slate-50",
-    danger: "border border-slate-300 bg-white text-slate-500 hover:border-red-300 hover:text-red-600",
-  };
-  return (
-    <button
-      id={id}
-      onClick={onClick}
-      disabled={disabled}
-      className={`${base} ${variants[variant]}`}
-    >
-      {children}
-    </button>
-  );
-}
 
 // ── Person card shared by all three tabs ─────────────────────────────────────
 
@@ -152,46 +135,58 @@ function PersonCardInner({ doc, currentUid, otherUid, isBusy, err, act }) {
         </Link>
 
         {isConnected && (
-          <ActionButton
+          <Button
             id={`btn-remove-${otherUid}`}
             variant="danger"
+            size="sm"
             disabled={isBusy}
+            loading={isBusy}
+            loadingText="Removing…"
             onClick={() => act(removeConnection)}
           >
-            {isBusy ? "Removing…" : "Remove"}
-          </ActionButton>
+            Remove
+          </Button>
         )}
 
         {isIncoming && (
           <>
-            <ActionButton
+            <Button
               id={`btn-accept-${otherUid}`}
               variant="primary"
+              size="sm"
               disabled={isBusy}
+              loading={isBusy}
+              loadingText="Accepting…"
               onClick={() => act(acceptConnectionRequest)}
             >
-              {isBusy ? "Accepting…" : "Accept"}
-            </ActionButton>
-            <ActionButton
+              Accept
+            </Button>
+            <Button
               id={`btn-decline-${otherUid}`}
               variant="outline"
+              size="sm"
               disabled={isBusy}
+              loading={isBusy}
+              loadingText="Declining…"
               onClick={() => act(rejectConnectionRequest)}
             >
-              {isBusy ? "Declining…" : "Decline"}
-            </ActionButton>
+              Decline
+            </Button>
           </>
         )}
 
         {isOutgoing && (
-          <ActionButton
+          <Button
             id={`btn-cancel-${otherUid}`}
             variant="outline"
+            size="sm"
             disabled={isBusy}
+            loading={isBusy}
+            loadingText="Cancelling…"
             onClick={() => act(cancelConnectionRequest)}
           >
-            {isBusy ? "Cancelling…" : "Cancel Request"}
-          </ActionButton>
+            Cancel Request
+          </Button>
         )}
       </div>
 
@@ -204,19 +199,6 @@ function PersonCardInner({ doc, currentUid, otherUid, isBusy, err, act }) {
   );
 }
 
-// ── Empty State ───────────────────────────────────────────────────────────────
-
-function EmptyState({ icon, title, body }) {
-  return (
-    <div className="flex flex-col items-center py-16 text-center">
-      <div className="flex h-14 w-14 items-center justify-center rounded-full bg-slate-100 text-slate-400">
-        {icon}
-      </div>
-      <h3 className="mt-4 text-base font-semibold text-slate-900">{title}</h3>
-      <p className="mx-auto mt-2 max-w-xs text-sm text-slate-500">{body}</p>
-    </div>
-  );
-}
 
 // ── Tab bar ───────────────────────────────────────────────────────────────────
 
@@ -259,8 +241,6 @@ export default function Connections() {
     error,
   } = useUserRelationships();
 
-  const { unreadCount } = useNotifications();
-
   const [activeTab, setActiveTab] = useState("connections");
 
   const tabs = [
@@ -275,59 +255,9 @@ export default function Connections() {
 
   return (
     <div className="min-h-screen bg-slate-50">
-      {/* Header */}
-      <header className="sticky top-0 z-10 border-b border-slate-200 bg-white">
-        <div className="mx-auto flex max-w-5xl items-center justify-between p-4">
-          <Link to="/dashboard" className="text-xl font-bold text-indigo-600">
-            CampusConnect
-          </Link>
-          <nav className="flex items-center gap-4">
-            <Link
-              to="/dashboard"
-              className="text-sm font-medium text-slate-600 hover:text-indigo-600"
-            >
-              Dashboard
-            </Link>
-            <Link
-              to="/discover"
-              className="text-sm font-medium text-slate-600 hover:text-indigo-600"
-            >
-              Discover
-            </Link>
-            <Link
-              to="/connections"
-              className="text-sm font-semibold text-indigo-600"
-            >
-              Connections
-            </Link>
-            <Link
-              to="/notifications"
-              className="relative text-sm font-medium text-slate-600 hover:text-indigo-600"
-            >
-              Notifications
-              {unreadCount > 0 && (
-                <span className="ml-1.5 inline-flex items-center justify-center rounded-full bg-indigo-600 px-1.5 py-0.5 text-xs font-semibold text-white">
-                  {unreadCount}
-                </span>
-              )}
-            </Link>
-            <Link
-              to="/settings"
-              className="text-sm font-medium text-slate-600 hover:text-indigo-600"
-            >
-              Settings
-            </Link>
-            <Link
-              to="/profile"
-              className="text-sm font-medium text-slate-600 hover:text-indigo-600"
-            >
-              Profile
-            </Link>
-          </nav>
-        </div>
-      </header>
+      <Navbar />
 
-      <main className="mx-auto max-w-5xl p-4 sm:p-6 md:p-8">
+      <PageContainer>
         {/* Page title */}
         <div className="mb-6">
           <h1 className="text-3xl font-bold text-slate-950">Connections</h1>
@@ -382,18 +312,17 @@ export default function Connections() {
           <>
             {connections.length === 0 ? (
               <EmptyState
-                icon={
-                  <svg className="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth="1.5"
-                      d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"
-                    />
-                  </svg>
-                }
+                icon={Users}
                 title="No connections yet"
-                body="Visit student profiles on Discover to send connection requests."
+                description="Visit student profiles on Discover to connect with your campus peers."
+                action={
+                  <Link
+                    to="/discover"
+                    className="inline-flex items-center justify-center rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-indigo-700"
+                  >
+                    Discover Students
+                  </Link>
+                }
               />
             ) : (
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -414,7 +343,12 @@ export default function Connections() {
                 Incoming ({incomingRequests.length})
               </h2>
               {incomingRequests.length === 0 ? (
-                <p className="text-sm text-slate-500">No incoming requests.</p>
+                <EmptyState
+                  icon={Users}
+                  title="No incoming requests"
+                  description="When students send you a connection request, you'll see them here."
+                  compact
+                />
               ) : (
                 <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                   {incomingRequests.map((doc) => (
@@ -430,7 +364,12 @@ export default function Connections() {
                 Sent ({outgoingRequests.length})
               </h2>
               {outgoingRequests.length === 0 ? (
-                <p className="text-sm text-slate-500">No sent requests.</p>
+                <EmptyState
+                  icon={Users}
+                  title="No sent requests"
+                  description="You have not sent any pending connection requests."
+                  compact
+                />
               ) : (
                 <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                   {outgoingRequests.map((doc) => (
@@ -441,7 +380,8 @@ export default function Connections() {
             </div>
           </div>
         )}
-      </main>
+      </PageContainer>
+
     </div>
   );
 }

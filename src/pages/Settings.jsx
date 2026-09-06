@@ -2,7 +2,8 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 import { useSettings } from "../hooks/useSettings";
-import { useNotifications } from "../hooks/useNotifications";
+import Navbar from "../components/layout/Navbar";
+import PageContainer from "../components/layout/PageContainer";
 import SecurityTestPanel from "../components/dev/SecurityTestPanel";
 import Card from "../components/ui/Card";
 
@@ -19,7 +20,6 @@ export default function Settings() {
     updatePrivacy,
     updateNotificationPreference,
   } = useSettings();
-  const { unreadCount } = useNotifications();
 
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [logoutError, setLogoutError] = useState("");
@@ -39,60 +39,11 @@ export default function Settings() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-950">
-      {/* Header Navigation */}
-      <header className="sticky top-0 z-10 border-b border-slate-200 bg-white">
-        <div className="mx-auto flex max-w-5xl items-center justify-between p-4">
-          <Link to="/dashboard" className="text-xl font-bold text-indigo-600">
-            CampusConnect
-          </Link>
-          <nav className="flex items-center gap-4">
-            <Link
-              to="/dashboard"
-              className="text-sm font-medium text-slate-600 hover:text-indigo-600"
-            >
-              Dashboard
-            </Link>
-            <Link
-              to="/discover"
-              className="text-sm font-medium text-slate-600 hover:text-indigo-600"
-            >
-              Discover
-            </Link>
-            <Link
-              to="/connections"
-              className="text-sm font-medium text-slate-600 hover:text-indigo-600"
-            >
-              Connections
-            </Link>
-            <Link
-              to="/notifications"
-              className="relative text-sm font-medium text-slate-600 hover:text-indigo-600"
-            >
-              Notifications
-              {unreadCount > 0 && (
-                <span className="ml-1.5 inline-flex items-center justify-center rounded-full bg-indigo-600 px-1.5 py-0.5 text-xs font-semibold text-white">
-                  {unreadCount}
-                </span>
-              )}
-            </Link>
-            <Link
-              to="/settings"
-              className="text-sm font-semibold text-indigo-600"
-            >
-              Settings
-            </Link>
-            <Link
-              to="/profile"
-              className="text-sm font-medium text-slate-600 hover:text-indigo-600"
-            >
-              Profile
-            </Link>
-          </nav>
-        </div>
-      </header>
+      <Navbar />
 
       {/* Main Container */}
-      <main className="mx-auto max-w-3xl p-4 sm:p-6 md:p-8">
+      <PageContainer maxWidth="max-w-3xl">
+
         {/* Page Title */}
         <div className="mb-6">
           <h1 className="text-3xl font-bold text-slate-950">Settings</h1>
@@ -371,7 +322,8 @@ export default function Settings() {
             </Card>
           </div>
         )}
-      </main>
+      </PageContainer>
     </div>
   );
 }
+

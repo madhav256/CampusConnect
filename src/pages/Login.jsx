@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { GraduationCap } from "lucide-react";
+import { GraduationCap, Sparkles } from "lucide-react";
 import { useAuth } from "../hooks/useAuth";
 import Button from "../components/ui/Button";
 import Card from "../components/ui/Card";
@@ -10,6 +10,10 @@ const initialForm = {
   email: "",
   password: "",
 };
+
+const demoUserEmail = import.meta.env.VITE_DEMO_USER_EMAIL || "";
+const demoUserPassword = import.meta.env.VITE_DEMO_USER_PASSWORD || "";
+const isDemoConfigured = Boolean(demoUserEmail && demoUserPassword);
 
 function isValidEmail(email) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
@@ -42,6 +46,7 @@ export default function Login() {
   const [feedbackType, setFeedbackType] = useState("error");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
+  const [isDemoSubmitting, setIsDemoSubmitting] = useState(false);
 
   const redirectTo = location.state?.from?.pathname || "/dashboard";
 
@@ -51,6 +56,32 @@ export default function Login() {
     setErrors((currentErrors) => ({ ...currentErrors, [name]: "" }));
     setFeedback("");
     setFeedbackType("error");
+  };
+
+  const handleDemoLogin = async () => {
+    if (!isDemoConfigured) {
+      setFeedbackType("error");
+      setFeedback(
+        "Demo credentials are not configured in your environment. Please set VITE_DEMO_USER_EMAIL and VITE_DEMO_USER_PASSWORD in your .env.local file."
+      );
+      return;
+    }
+
+    setIsDemoSubmitting(true);
+    setFeedback("");
+
+    try {
+      await login({
+        email: demoUserEmail.trim(),
+        password: demoUserPassword,
+      });
+      navigate(redirectTo, { replace: true });
+    } catch (error) {
+      setFeedbackType("error");
+      setFeedback(`Demo login failed: ${error.message}`);
+    } finally {
+      setIsDemoSubmitting(false);
+    }
   };
 
   const handleLogin = async (event) => {
@@ -186,6 +217,29 @@ export default function Login() {
               </button>
             </div>
           </form>
+
+          {/* Quick Demo Access for Recruiters & Evaluators */}
+          <div className="mt-6 border-t border-border-warm pt-5">
+            <div className="rounded-2xl border border-terracotta-200/90 bg-terracotta-50/60 p-4 text-center">
+              <div className="inline-flex items-center justify-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-terracotta-800">
+                <Sparkles className="h-3.5 w-3.5 text-terracotta-600" aria-hidden="true" />
+                <span>Recruiter & Evaluator Access</span>
+              </div>
+              <p className="mt-1.5 text-xs leading-relaxed text-ink-muted">
+                Explore CampusConnect as senior architecture student <strong className="font-semibold text-ink">Alex Rivera</strong> with pre-seeded campus activity, peers, and connections.
+              </p>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={handleDemoLogin}
+                loading={isDemoSubmitting}
+                loadingText="Entering demo..."
+                className="mt-3.5 w-full border-terracotta-300/80 bg-white/90 text-xs font-medium text-terracotta-800 shadow-2xs transition hover:bg-white hover:border-terracotta-400"
+              >
+                Explore as Demo Student (Alex Rivera)
+              </Button>
+            </div>
+          </div>
 
           <div className="mt-6 border-t border-border-warm pt-5 text-center text-sm text-ink-muted">
             Don&apos;t have an account?{" "}

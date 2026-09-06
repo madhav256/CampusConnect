@@ -28,3 +28,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Firebase service account keys and credentials
+scripts/credentials/
+*serviceAccount*.json
+*service-account*.json

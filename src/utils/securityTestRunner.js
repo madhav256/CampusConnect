@@ -20,11 +20,6 @@ import {
 import { db, firebaseConfig } from "../firebase/config";
 import { fetchAllUsers, fetchUserById } from "../services/userService";
 
-// Explicit DEV-only runtime safety guard: Never permit execution in production builds
-if (!import.meta.env.DEV) {
-  throw new Error("Security test runner cannot run in production builds.");
-}
-
 
 /**
  * Checks if an error thrown by Firebase corresponds to a security permission denial.
@@ -66,6 +61,10 @@ function isPermissionDenied(err) {
  * }>>}
  */
 export async function runMilestone8SecurityTests(currentUid, existingNotificationId = null) {
+  // DEV-only runtime guard: this function must never execute in production
+  if (!import.meta.env.DEV) {
+    throw new Error("Security test runner cannot run in production builds.");
+  }
   if (!currentUid) {
     throw new Error("Cannot run security tests without an authenticated user UID.");
   }
@@ -302,6 +301,10 @@ export async function runMilestone8SecurityTests(currentUid, existingNotificatio
  * }>>}
  */
 export async function runMilestone9SecurityTests(currentUid) {
+  // DEV-only runtime guard: this function must never execute in production
+  if (!import.meta.env.DEV) {
+    throw new Error("Security test runner cannot run in production builds.");
+  }
   if (!currentUid) {
     throw new Error("Cannot run security tests without an authenticated user UID.");
   }

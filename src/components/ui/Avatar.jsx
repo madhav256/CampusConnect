@@ -17,7 +17,7 @@ const sizes = {
 
 export default function Avatar({ name, photoURL, size = "lg", bordered = true, className = "" }) {
   const sizeClass = sizes[size] || sizes.lg;
-  const borderClass = bordered ? "ring-2 ring-white shadow-sm" : "";
+  const borderClass = bordered ? "ring-2 ring-surface shadow-xs" : "";
 
   if (photoURL) {
     return (
@@ -32,7 +32,7 @@ export default function Avatar({ name, photoURL, size = "lg", bordered = true, c
   return (
     <div
       aria-label={`${name || "User"} avatar`}
-      className={`${sizeClass} flex shrink-0 items-center justify-center rounded-full bg-indigo-100 font-semibold text-indigo-700 ${borderClass} ${className}`}
+      className={`${sizeClass} flex shrink-0 items-center justify-center rounded-full bg-stone-100 font-serif font-semibold text-stone-800 ring-1 ring-border-warm ${borderClass} ${className}`}
     >
       {getInitials(name)}
     </div>

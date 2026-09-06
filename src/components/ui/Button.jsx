@@ -1,11 +1,11 @@
 import { Loader2 } from "lucide-react";
 
 const variants = {
-  primary: "bg-indigo-600 text-white hover:bg-indigo-700 focus-visible:ring-indigo-500 disabled:bg-slate-300",
-  secondary: "bg-slate-100 text-slate-900 hover:bg-slate-200 focus-visible:ring-slate-400 disabled:text-slate-400",
-  outline: "border border-slate-300 bg-white text-slate-900 hover:bg-slate-50 focus-visible:ring-indigo-500 disabled:text-slate-400",
-  ghost: "bg-transparent text-slate-700 hover:bg-slate-100 focus-visible:ring-slate-400 disabled:text-slate-400",
-  danger: "bg-red-500 text-white hover:bg-red-600 focus-visible:ring-red-500 disabled:bg-red-300",
+  primary: "bg-terracotta-600 text-white hover:bg-terracotta-700 active:bg-terracotta-800 focus-visible:ring-terracotta-500 disabled:bg-stone-200 disabled:text-stone-400 shadow-xs",
+  secondary: "bg-stone-100 text-stone-900 hover:bg-stone-200/80 focus-visible:ring-stone-400 disabled:text-stone-400 disabled:bg-stone-100",
+  outline: "border border-border-warm bg-surface text-stone-800 hover:bg-stone-50 hover:border-stone-400 focus-visible:ring-terracotta-500 disabled:text-stone-400 disabled:border-stone-200",
+  ghost: "bg-transparent text-stone-700 hover:bg-stone-100/80 hover:text-stone-900 focus-visible:ring-stone-400 disabled:text-stone-400",
+  danger: "bg-rose-600 text-white hover:bg-rose-700 focus-visible:ring-rose-500 disabled:bg-rose-200 disabled:text-rose-400",
 };
 
 const sizes = {

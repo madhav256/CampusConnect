@@ -7,9 +7,9 @@ const paddings = {
 
 const shadows = {
   none: "shadow-none",
-  sm: "shadow-sm",
-  md: "shadow-md",
-  lg: "shadow-lg",
+  sm: "shadow-xs",
+  md: "shadow-sm",
+  lg: "shadow-md",
 };
 
 export default function Card({
@@ -23,12 +23,12 @@ export default function Card({
   const paddingClass = paddings[padding] || paddings.md;
   const shadowClass = shadows[shadow] || shadows.sm;
   const hoverClass = hoverable
-    ? "transition duration-150 hover:shadow-md hover:border-slate-300"
+    ? "transition duration-150 hover:border-stone-300 hover:shadow-sm"
     : "";
 
   return (
     <div
-      className={`rounded-2xl border border-slate-200 bg-white ${paddingClass} ${shadowClass} ${hoverClass} ${className}`}
+      className={`rounded-2xl border border-border-warm bg-surface ${paddingClass} ${shadowClass} ${hoverClass} ${className}`}
       {...props}
     >
       {children}

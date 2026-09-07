@@ -55,22 +55,6 @@ The pre-seeded demo environment includes:
 
 ---
 
-## Screenshots
-
-<!-- Screenshot placeholder: Live Feed & Post Composer (/dashboard) -->
-> *Screenshot Placeholder: Live Campus Feed with Post Composer, real-time comments, and Motion interactions.*
-
-<!-- Screenshot placeholder: Student Profile (/profile) -->
-> *Screenshot Placeholder: Editorial Profile view featuring The Campus Atelier gradient header and academic metadata.*
-
-<!-- Screenshot placeholder: Student Directory (/discover) -->
-> *Screenshot Placeholder: Student Directory showing multi-attribute search across skills, year, and department.*
-
-<!-- Screenshot placeholder: Connections Hub (/connections) -->
-> *Screenshot Placeholder: Connection Manager displaying active connections alongside pending requests.*
-
----
-
 ## Tech Stack
 
 | Layer | Technologies |

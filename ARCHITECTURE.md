@@ -221,8 +221,8 @@ The recruiter demo uses a normal Firebase Auth account configured through `VITE_
 
 ## Current limitations
 
-- No automated unit, integration, emulator, or end-to-end test suite is configured.
-- No CI pipeline is configured.
+- Pure helper tests and an isolated Firestore Emulator Rules suite are configured for the current domains.
+- Service integration tests, end-to-end tests, and a CI pipeline are not configured.
 - Email verification is not required after sign-up.
 - Public/private profile data share the `users/{uid}` document, and authenticated profile reads currently include the email field even though public UI components do not render it.
 - Search discoverability is filtered in the client; direct authenticated profile reads remain available by product policy.
@@ -235,7 +235,7 @@ The recruiter demo uses a normal Firebase Auth account configured through `VITE_
 
 The following are possible later milestones and should not be treated as active architecture:
 
-- emulator-based Rules regression tests and CI;
+- service integration, end-to-end, and CI verification beyond the current emulator Rules suite;
 - separate public profile and private account/settings documents;
 - cursor-based feed pagination and eventually indexed directory search;
 - trusted server-side event processing for notifications;

@@ -8,6 +8,10 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
+    "test:unit": "vitest run tests/unit",
+    "test:rules:run": "vitest run tests/rules",
+    "test:rules": "firebase emulators:exec --project demo-campusconnect-rules-test --only firestore \"npm run test:rules:run\"",
+    "test": "npm run test:unit && npm run test:rules",
     "seed:demo": "node scripts/seedDemoData.mjs"
   },
   "dependencies": {
@@ -20,6 +24,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@firebase/rules-unit-testing": "^5.0.2",
     "@tailwindcss/vite": "^4.2.4",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
@@ -29,9 +34,11 @@
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.2",
     "firebase-admin": "^14.3.0",
+    "firebase-tools": "^15.30.0",
     "globals": "^17.5.0",
     "postcss": "^8.5.14",
     "tailwindcss": "^4.2.4",
-    "vite": "^8.0.10"
+    "vite": "^8.0.10",
+    "vitest": "^5.0.0"
   }
 }

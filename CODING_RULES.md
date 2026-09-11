@@ -142,10 +142,12 @@ Do not install packages automatically. Before proposing a dependency:
 The current repository checks are:
 
 - `npm run lint`;
+- `npm run test:unit` for pure helper behavior;
+- `npm run test:rules` for Firestore Rules in the isolated `demo-campusconnect-rules-test` emulator project;
 - `npm run build`;
 - manual/development-only Security Rules audits through `SecurityTestPanel`.
 
-There is not yet a conventional automated test or Firebase Emulator Rules suite. New work should not claim that such tests exist unless they are actually added.
+The automated Rules suite must never read `.env.local`, use service-account credentials, invoke the demo seeder, or target the recruiter project. Rules tests use synthetic authenticated contexts and emulator-only fixtures. The browser `SecurityTestPanel` is separate and is not a substitute for the automated suite. Service integration, end-to-end tests, and CI are not yet configured.
 
 Before considering a code change complete:
 

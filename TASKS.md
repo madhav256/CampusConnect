@@ -39,10 +39,21 @@ Checked items describe work that exists in the current repository. Unchecked ite
 
 ### 1. Automated verification and Rules hardening
 
-- [ ] Add isolated Firestore Emulator tests for user, post, comment, like, connection, and notification invariants.
-- [ ] Add service/helper tests for normalization and relationship-state derivation.
+#### Milestone 13B Phase 1 — delivered
+
+- [x] Add Vitest and `@firebase/rules-unit-testing`.
+- [x] Add fixed Firestore Emulator configuration for `demo-campusconnect-rules-test`.
+- [x] Add emulator-only safety checks, deterministic fixtures, and Rules bootstrap.
+- [x] Add green regression coverage for users, posts, comments, likes, connections, and notifications.
+- [x] Add pure helper tests for profile/notification normalization and canonical connection IDs.
+- [x] Add safe local `test:unit`, `test:rules`, and aggregate `test` scripts.
+
+#### Remaining 13B/13C work
+
+- [ ] Add service integration tests against Auth and Firestore emulators.
 - [ ] Audit the broad post-author update path.
 - [ ] Strengthen comment-counter postconditions.
+- [ ] Resolve the documented user/profile, snapshot, and notification read gaps.
 - [ ] Add CI checks for lint, build, and automated tests.
 - [ ] Add an application error boundary if the product requires a visible runtime recovery path.
 

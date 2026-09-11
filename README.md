@@ -180,13 +180,30 @@ The seeder uses explicit demo ID whitelists, merge-only writes, and no bulk dele
 
 ## Verification commands
 
+Pure helper tests run without Firebase:
+
+```bash
+npm run test:unit
+```
+
+Firestore Rules tests run only inside the fixed synthetic emulator project `demo-campusconnect-rules-test`:
+
+```bash
+npm run test:rules
+```
+
+The Rules command starts and stops the Firestore Emulator automatically. It does not read `.env.local`, use service-account credentials, invoke the demo seeder, or connect to the recruiter project. The Rules suite contains green regression tests plus explicitly labeled tests documenting current 13C Rules gaps.
+
+The broader local checks are:
+
 ```bash
 npm run lint
+npm run test
 npm run build
 npm run preview
 ```
 
-The repository does not currently define an `npm test` script.
+The current automated coverage does not include service integration, end-to-end tests, or CI. The development `SecurityTestPanel` remains a separate manual audit tool and is not used by these tests.
 
 ## Documentation map
 

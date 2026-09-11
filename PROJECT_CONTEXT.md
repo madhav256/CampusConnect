@@ -88,4 +88,4 @@ The application is deployed as a Firebase Hosting SPA. The login page can option
 
 ## Current verification
 
-The repository has ESLint and Vite build scripts. It also has a development-only in-app security audit for selected Rules scenarios. A conventional automated test suite, emulator Rules suite, and CI pipeline are not yet configured.
+The repository has ESLint and Vite build scripts, Vitest pure-helper tests, and an isolated Firestore Emulator Rules suite. Rules tests use the synthetic `demo-campusconnect-rules-test` project with deterministic fixtures and do not use production configuration. The development-only in-app security audit remains separate. Service integration, end-to-end tests, and a CI pipeline are not yet configured.

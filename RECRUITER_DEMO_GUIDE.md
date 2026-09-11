@@ -129,7 +129,7 @@ The current limits are deliberate MVP boundaries. A larger deployment could add 
 
 Current limitations include:
 
-- no automated unit, integration, emulator, end-to-end, or CI test suite;
+- pure helper tests and an isolated Firestore Emulator Rules suite exist, but there are no service integration, end-to-end, or CI tests;
 - feed, directory, and notifications are bounded rather than cursor-paginated;
 - directory filtering is client-side rather than full-text indexed;
 - the current `users/{uid}` document mixes public profile, email, discoverability, and notification settings;
@@ -149,7 +149,7 @@ These are known MVP boundaries, not hidden routes or missing components.
 
 The following are proposed, not implemented commitments:
 
-1. **Automated verification and Rules hardening:** add emulator-backed Rules tests, application checks, and CI; review counter and denormalized snapshot invariants.
+1. **Rules hardening and broader verification:** resolve the documented current Rule gaps, then add service integration checks and CI around the existing emulator Rules suite.
 2. **Public/private data boundary:** separate sensitive account/settings data from public profile reads and revisit discoverability enforcement at the data boundary.
 3. **Scalable read paths:** add cursor-based feed pagination and, if needed, an indexed discovery search.
 4. **Trusted event processing:** evaluate background processing for notification generation and retries.

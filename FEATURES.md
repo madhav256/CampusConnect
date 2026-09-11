@@ -131,14 +131,14 @@ The current discoverability setting hides a student from search results but does
 - `prefers-reduced-motion` handling in the global stylesheet.
 - Motion for the like and expandable-comment interactions.
 
-### Development security audits
+### Development security audits and automated Rules tests
 
 Settings and Notifications render a development-only `SecurityTestPanel`. The available suites exercise selected Firestore Rule rejection scenarios for:
 
 - notification profile forgery, cross-user reads, immutable-field updates, and orphan writes;
 - cross-user settings writes, email/UID tampering, field injection, and invalid setting types.
 
-These audits use Firebase directly and are not a conventional automated test suite.
+The repository also includes Vitest pure-helper tests and an isolated Firestore Emulator Rules suite covering users, posts, comments, likes, connections, and notifications. Rules tests use the fixed synthetic project `demo-campusconnect-rules-test`, deterministic fixtures, and synthetic authenticated contexts. Tests explicitly labeled as known gaps document current Rule behavior for Milestone 13C rather than changing the Rules. Service integration, end-to-end tests, and CI remain deferred.
 
 ### Recruiter demo and seeding
 
@@ -168,6 +168,6 @@ The following ideas are intentionally outside the current MVP:
 - Cursor pagination and infinite scrolling.
 - External full-text search.
 - Background Cloud Functions for notification processing.
-- Automated emulator/rules tests and CI.
+- Service integration tests, end-to-end tests, and CI.
 
 These are future possibilities, not current routes, collections, or components.

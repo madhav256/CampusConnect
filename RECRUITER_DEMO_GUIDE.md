@@ -1,241 +1,180 @@
 # CampusConnect — Recruiter Demo Guide
 
-This guide is an internal reference for conducting technical walkthroughs and answering interview questions about CampusConnect. It aligns with the current implementation and emphasizes architecture, security invariants, data modeling, and trade-offs.
+This guide is an internal reference for demonstrating the current CampusConnect MVP and explaining its engineering trade-offs. It describes implemented behavior only; future work is labeled separately.
 
 ---
 
-## 1. 2-Minute Demo Script
+## 1. Two-minute demo script
 
-This sequence demonstrates the core workflow in approximately two minutes without mutating seeded demo state.
+This sequence demonstrates the seeded workflow without intentionally changing its relationship state.
 
+```text
+/ (landing and demo login)
+  └─▶ /dashboard (campus feed and interactions)
+        └─▶ /discover (bounded student search)
+              └─▶ /users/:uid (profile and connection CTA)
+                    └─▶ /connections (relationship states)
+                          └─▶ /notifications or /settings (wrap-up)
 ```
-/ (Landing & Demo Login)
-  └─▶ /dashboard (Campus Feed & Atomic Interactions)
-        └─▶ /discover (Student Search & Multi-Field Filtering)
-              └─▶ /users/:uid (Public Profile & Connection CTA)
-                    └─▶ /connections (Connection States Hub)
-                          └─▶ Wrap-Up
-```
 
-### 0:00–0:15 — Landing & 1-Click Demo Login
-* **Route**: `/`
-* **What to Show**: Point out the **Recruiter & Evaluator Access** card at the bottom of the sign-in form. Click **"Explore as Demo Student (Alex Rivera)"**.
-* **Talking Points**:
-  * *"To make evaluation immediate without manual sign-ups or mock accounts, the login page features an unprivileged demo student persona."*
-  * *"Clicking the button calls standard Firebase Auth (`signInWithEmailAndPassword`) behind the scenes using environment variables, authenticating into a pre-seeded account."*
-* **Technical Feature**: Firebase Authentication integration with session persistence in `AuthContext` and route protection via `ProtectedRoute`.
+### 0:00–0:15 — Landing and demo login
 
-### 0:15–0:45 — Campus Feed & Atomic Interactions
-* **Route**: `/dashboard`
-* **What to Show**: Alex Rivera's feed. Point out the post composer at the top. Click the **Like button** on a post (e.g., Liam O'Connor's post) to demonstrate the Motion spring animation and counter increment. Expand comments on Sofia Alvarez's shader post.
-* **Talking Points**:
-  * *"The feed is backed by a Firestore real-time listener bounded to the 50 most recent posts."*
-  * *"Post likes don't just toggle client state; they run as an atomic Firestore transaction that creates the like document in a subcollection and updates `likesCount` simultaneously."*
-  * *"The database rules verify this exact relationship using `getAfter()` and `existsAfter()`."*
-* **Technical Feature**: `onSnapshot` real-time listeners, atomic `runTransaction` updates in `likeService.js`, and Motion for React micro-interactions.
-* **Demo Precaution**: Click the like button once deliberately; avoid rapid double-clicking during a demo so the network transaction resolves cleanly.
+- **Route:** `/`
+- **Show:** The **Recruiter & Evaluator Access** card and **Explore as Demo Student (Alex Rivera)**.
+- **Explain:** This is an ordinary unprivileged Firebase Auth account. The login page uses `VITE_DEMO_USER_EMAIL` and `VITE_DEMO_USER_PASSWORD` when those deployment variables are configured; it does not bypass authentication.
+- **Technical points:** `AuthContext` owns session state and browser-local persistence. `ProtectedRoute` redirects unauthenticated visitors to `/`.
 
-### 0:45–1:05 — Student Directory & Discovery
-* **Route**: `/discover`
-* **What to Show**: The student directory. Type `"design"` or `"robotics"` into the search bar to demonstrate instant filtering across name, department, year, and skills.
-* **Talking Points**:
-  * *"The directory fetches an initial bounded set of 100 active student profiles ordered by `updatedAt`."*
-  * *"Search runs client-side across multiple fields simultaneously, and respects each student's `isDiscoverable` privacy toggle."*
-* **Technical Feature**: Bounded Firestore queries, client-side filtering, and privacy state enforcement.
+### 0:15–0:45 — Feed and atomic interactions
 
-### 1:05–1:30 — Public Profile
-* **Route**: `/users/:uid` (Click Marcus Chen or Devon Park from Discover)
-* **What to Show**: The public profile layout—gradient banner, layered avatar stacking, academic department, class year, and skills tags. Point out the connection status button (**"Connected"** for Marcus Chen; **"Review Request"** for Devon Park).
-* **Talking Points**:
-  * *"Profiles share a common presentation with the student's own editable profile, with sensitive fields like email excluded from public views."*
-  * *"The connection action button resolves dynamically by querying the single canonical connection document between the viewing user and this student."*
-* **Technical Feature**: Point reads (`doc("users", uid)`), normalized profile schemas, and relationship status resolution via `connectionService.js`.
+- **Route:** `/dashboard`
+- **Show:** The text composer, a like, and an expanded comment list.
+- **Explain:** The feed uses a real-time Firestore listener limited to the newest 50 posts. A like transaction creates/deletes the current user's like document and adjusts the denormalized `likesCount` together.
+- **Technical points:** `onSnapshot`, `runTransaction`, Motion feedback, and author-only post/comment deletion.
+- **Precaution:** Click a like once and allow the request to finish before demonstrating another action.
 
-### 1:30–1:50 — Connection Management Hub
-* **Route**: `/connections`
-* **What to Show**: The tabs showing seeded relationship states:
-  * **Active Connections**: Maya Lin and Marcus Chen.
-  * **Incoming Requests**: Devon Park.
-  * **Pending Requests**: Elena Rossi.
-* **Talking Points**:
-  * *"Connections use a deterministic canonical ID format—lexicographically sorting participant UIDs so both students always reference the exact same document."*
-  * *"Transactions and strict Firestore rules enforce state transitions, ensuring only the recipient can accept a request."*
-* **Technical Feature**: Canonical sorted-pair primary keys (`min(A, B) + "_" + max(A, B)`) and relational state machine transitions in `firestore.rules`.
-* **IMPORTANT DEMO PRECAUTION**: Do **not** click "Accept" or "Decline" during a standard demo. Accepting or declining mutates the live Firestore document, permanently altering the seeded state for subsequent walkthroughs. Showcase the existing seeded tabs instead.
+### 0:45–1:05 — Student discovery
 
-### 1:50–2:00 — Technical Wrap-Up
-* **Route**: `/settings` or `/notifications`
-* **What to Show**: Briefly navigate to `/settings` or show the notification badge. Mention that all security invariants are backed by 290 lines of Firestore security rules, testable in-browser via the developer test harness.
+- **Route:** `/discover`
+- **Show:** Search for `design` or `robotics`.
+- **Explain:** The client fetches up to 100 users ordered by `updatedAt`, waits 300 ms after input changes, and filters name, department, year, and skills locally. Non-discoverable profiles are filtered from directory results except for the current user.
+- **Technical points:** bounded reads, a two-minute directory cache, client-side filtering, and explicit empty/error states.
+
+### 1:05–1:30 — Public profile
+
+- **Route:** `/users/:uid`
+- **Show:** A seeded peer profile such as Marcus Vance or Devon Park.
+- **Explain:** The page point-reads the selected `users/{uid}` document and renders public-facing profile fields. The UI omits email, but the current Firestore document combines public and private fields, so this is not field-level privacy isolation.
+- **Technical points:** `fetchUserById`, profile normalization, and a connection CTA derived from the canonical relationship document.
+
+### 1:30–1:50 — Connection management
+
+- **Route:** `/connections`
+- **Show:**
+  - **Active Connections:** Maya Lin and Marcus Vance;
+  - **Incoming Requests:** Devon Park;
+  - **Pending Requests:** Elena Rostova.
+- **Explain:** Each pair uses one canonical document ID formed by lexicographically sorting the two UIDs. The supported lifecycle is send, cancel, accept, decline, and remove.
+- **Technical points:** transactions coordinate connection state and deterministic connection notifications; Rules restrict participant actions and receiver-only acceptance.
+- **Precaution:** Do not accept, decline, or remove a relationship during a standard demo. Those actions mutate the live seeded state. The Admin seeder is merge-only and does not provide a reset-by-deletion routine.
+
+### 1:50–2:00 — Notifications and settings
+
+- **Routes:** `/notifications` or `/settings`
+- **Show:** The unread notification badge, notification filters, or discoverability/connection-notification settings.
+- **Explain:** Notifications are recipient-scoped and currently cover connection requests and accepted connections. The development-only SecurityTestPanel exercises selected Rule rejection scenarios; it is not a production test suite.
 
 ---
 
-## 2. Top 5 Technical Talking Points
+## 2. Technical talking points
 
-### 1. Atomic Firestore Transactions & Secure Denormalized `likesCount`
-* **What Was Implemented**: Liking/unliking a post executes an atomic Firestore transaction (`runTransaction`). It writes or deletes a document in `posts/{postId}/likes/{userId}` while simultaneously updating `posts.likesCount`.
-* **Why Chosen**: Storing likes as individual subcollection documents avoids the 1MB document size limit and array contention of storing user ID arrays directly on the post document. Denormalizing `likesCount` onto the post avoids querying the subcollection size on every feed render.
-* **Security Enforcement**: `firestore.rules` uses `getAfter()` and `existsAfter()` to verify that `likesCount` changes by exactly `±1` in lockstep with the creation or deletion of the caller's specific like document, while keeping all post content and author fields immutable.
-* **Source Files**: `src/services/likeService.js`, `firestore.rules`.
+### Atomic likes and denormalized counters
 
-### 2. Canonical Connection Document & State Management
-* **What Was Implemented**: Each connection relationship between two users is stored under a single deterministic document ID: `connections/${min(uidA, uidB)}_${max(uidA, uidB)}`.
-* **Why Chosen**: In bidirectional relationships, sorting the two UIDs lexicographically guarantees that both participants always reference the exact same document. Checking or updating a relationship is a direct point read rather than requiring complex composite queries.
-* **Accurate Invariant**: Canonical IDs ensure there is only one document per student pair. Concurrent state changes (e.g., simultaneous request and accept) are guarded by Firestore transactions and strict rule assertions on the `status` field (`pending` → `accepted`).
-* **Source Files**: `src/services/connectionService.js`, `firestore.rules`.
+Likes live at `posts/{postId}/likes/{uid}` rather than in an unbounded array. `likeService.js` uses a Firestore transaction to write the individual like and update `posts.likesCount` together. Rules validate the resulting relationship and protect other post fields. The counter is a deliberate read-efficiency trade-off; higher-volume deployments could consider counter sharding.
 
-### 3. Service-Layer Architecture
-* **What Was Implemented**: UI components contain zero direct Firestore queries or SDK calls. All data mutations, subscriptions, transactions, and normalizations are encapsulated in dedicated modules inside `src/services/`.
-* **Why Chosen**: Keeps presentation components focused solely on rendering and local UI state. It makes the codebase easier to maintain, isolates schema changes to service modules, and allows mocking or swapping out backend services without refactoring views.
-* **Interview Explanation**: *"Components never call Firestore directly. A component like `PostCard` calls `togglePostLike(postId, userId)`, which manages the transaction, error handling, and data normalization under the hood."*
-* **Source Files**: `src/services/` (`authService.js`, `userService.js`, `postService.js`, `likeService.js`, `commentService.js`, `connectionService.js`, `notificationService.js`).
+**Sources:** `src/services/likeService.js`, `firestore.rules`, `src/components/feed/PostCard.jsx`.
 
-### 4. Real-Time Firestore Listeners
-* **What Was Implemented**: Real-time synchronization (`onSnapshot`) is used selectively for the global post feed, active comments, post like states, and user notifications.
-* **Why Chosen**: Provides an interface that updates automatically when peers post, like, or comment, without requiring manual polling or full-page reloads.
-* **Lifecycle Management**: Every listener is registered inside a `useEffect` hook and returns its unsubscribe function, ensuring connections are closed when components unmount and preventing memory leaks.
-* **Source Files**: `src/services/postService.js`, `src/services/commentService.js`, `src/services/notificationService.js`, `src/hooks/usePostLike.js`.
+### Canonical connections
 
-### 5. Client-Untrusted Security Model (`firestore.rules`)
-* **What Was Implemented**: 290 lines of relational Firestore security rules that enforce authentication, ownership, relational integrity, and schema shapes directly on the database.
-* **Why Chosen**: In Firebase applications, client-side validation can be bypassed using developer tools or direct API calls. The database must act as the primary security boundary.
-* **Key Invariants Enforced**:
-  * Profile `uid`, `email`, and `createdAt` are immutable after creation.
-  * Only the connection recipient (`receiverId`) may update a connection status from `pending` to `accepted`.
-  * Notifications can only be read or marked as read by their intended `recipientId`.
-  * New posts must set initial `likesCount: 0` and `commentsCount: 0`, and `authorId` must match the caller's Auth UID.
-* **Source Files**: `firestore.rules`, `src/components/dev/SecurityTestPanel.jsx`, `src/utils/securityTestRunner.js`.
+A relationship is stored at `connections/{minUid_maxUid}`. Sorting both participant UIDs gives every caller the same document key and avoids duplicate pair records. The document stores `users`, `senderId`, `receiverId`, `status`, `createdAt`, and `updatedAt`. Client transactions and Rules enforce the supported pending-to-accepted transition and participant permissions.
+
+**Sources:** `src/services/connectionService.js`, `src/hooks/useConnectionState.js`, `firestore.rules`.
+
+### Service-layer architecture
+
+Firebase SDK calls are kept in `src/services/`; reusable UI components do not query Firestore directly. Hooks such as `usePosts`, `useComments`, `useUserRelationships`, and `useNotifications` own subscription lifecycles and local loading/error state. `AuthContext` is reserved for authentication session state rather than acting as a general domain store.
+
+**Sources:** `src/services/`, `src/hooks/`, `src/contexts/AuthContext.jsx`.
+
+### Selective real-time listeners
+
+`onSnapshot` is used for the bounded post feed, expanded comments, selected post-like state, user profile/settings views, relationships, and recipient notifications. Effects return unsubscribe callbacks. Directory search is intentionally a bounded fetch plus a two-minute module-level cache rather than a live listener.
+
+### Client-untrusted authorization
+
+UI checks improve usability but are not the security boundary. `firestore.rules` authenticates reads/writes, checks ownership and participant identity, validates canonical connection IDs and selected schemas, scopes notification reads to their recipient, and ties connection notification writes to transaction state. The development security panel covers selected rejection scenarios only; it is not a replacement for an emulator Rules suite.
+
+**Sources:** `firestore.rules`, `src/components/dev/SecurityTestPanel.jsx`, `src/utils/securityTestRunner.js`.
 
 ---
 
-## 3. Top 5 Interview Questions
+## 3. Useful interview questions
 
-### Q1: Why React and how is the application structured?
-* **What the Interviewer Is Testing**: Understanding of component architecture, state boundaries, separation of concerns, and modern React patterns.
-* **Key Points to Cover**:
-  * Component composition: generic building blocks (`src/components/ui/`), domain-specific feature modules (`feed/`, `search/`, `notifications/`), and route pages (`src/pages/`).
-  * Global vs. local state: Global state is reserved strictly for authentication session data in `AuthContext`; domain state is managed via service calls and custom hooks.
-  * Pure service layer: Firestore operations are isolated in `src/services/`, keeping JSX clean and business logic centralized.
-* **Evidence**: `src/App.jsx`, `src/components/`, `src/services/`, `src/contexts/AuthContext.jsx`.
+### Why React and this structure?
 
-### Q2: Why Firebase/Firestore instead of a traditional backend and relational database?
-* **What the Interviewer Is Testing**: Architectural trade-off analysis, awareness of serverless constraints, and NoSQL data modeling principles.
-* **Key Points to Cover**:
-  * Speed of development: Built-in managed auth, managed WebSocket listeners (`onSnapshot`), and serverless hosting allow focus on client-side craft and database rules.
-  * Trade-offs acknowledged: NoSQL requires deliberate denormalization (e.g., storing `authorName` on posts to avoid N+1 queries) and server-side rules rather than backend middleware.
-  * Relational enforcement: While Firestore is document-based, relational integrity is maintained using canonical document keys and transaction validations.
-* **Evidence**: `src/firebase/config.js`, `FIRESTORE_SCHEMA.md`, `firestore.rules`.
+Pages compose generic UI primitives and domain components. Service modules isolate Firebase operations, hooks manage subscriptions and domain state, and only authentication session state is shared through `AuthContext`. This keeps view code readable without introducing a global state library.
 
-### Q3: How do you prevent users from modifying data they don't own?
-* **What the Interviewer Is Testing**: Security posture, understanding of serverless authorization, and whether the developer relies solely on client-side checks.
-* **Key Points to Cover**:
-  * The client is untrusted: UI-level disabled buttons or hidden fields are purely for user experience; actual authorization is enforced in `firestore.rules`.
-  * Ownership verification: Rules compare `request.auth.uid` against document fields (`resource.data.authorId`, `resource.data.receiverId`).
-  * Mutation restrictions: Update rules strictly limit which keys can be altered (e.g., a post update can only touch `likesCount` or `commentsCount` via validated paths, never `content` or `authorId`).
-* **Evidence**: `firestore.rules` (lines 52–100 for users/posts, lines 150–220 for connections/notifications).
+**Evidence:** `src/App.jsx`, `src/components/`, `src/hooks/`, `src/services/`, `src/contexts/AuthContext.jsx`.
 
-### Q4: How do likes, comments, and connections work technically?
-* **What the Interviewer Is Testing**: Concrete database design, subcollections vs. arrays, transaction handling, and consistency.
-* **Key Points to Cover**:
-  * Likes: Subcollection `posts/{id}/likes/{uid}` written atomically with post `likesCount` via `runTransaction`.
-  * Comments: Subcollection `posts/{id}/comments/{id}` ordered by `createdAt asc`, with post `commentsCount` updated via `writeBatch`.
-  * Connections: Single canonical document at `connections/${minUid}_${maxUid}` storing `users: [minUid, maxUid]`, `senderId`, `receiverId`, and `status`.
-* **Evidence**: `likeService.js`, `commentService.js`, `connectionService.js`.
+### Why Firebase and Firestore?
 
-### Q5: What would you change if CampusConnect had 100,000 active students?
-* **What the Interviewer Is Testing**: System design maturity, awareness of current architectural bottlenecks, and practical scaling strategies.
-* **Key Points to Cover**:
-  * Search: Transition from client-side filtering over 100 profiles to an external indexing service (Algolia or Typesense) via Firebase Extensions.
-  * Feed: Move from a fixed 50-post listener to cursor-based pagination (`startAfter`) with infinite scrolling and list virtualization.
-  * High-traffic contention: For posts receiving rapid concurrent likes, implement distributed counter shards to prevent single-document write contention.
-  * Notifications: Decouple notification generation from client transactions using background Cloud Firestore triggers.
-* **Evidence**: `src/services/postService.js` (current `limit(50)`), `src/services/userService.js` (current `fetchAllUsers(100)`).
+Firebase provides managed email/password authentication, Firestore real-time listeners, and static hosting with a small operational footprint. The trade-offs are explicit: denormalized snapshots and counters, Rules-based authorization instead of server middleware, bounded client reads, and no custom server-side event processor in the current MVP.
+
+**Evidence:** `src/firebase/config.js`, `FIRESTORE_SCHEMA.md`, `firestore.rules`.
+
+### How is ownership enforced?
+
+The browser is treated as untrusted. Rules compare the authenticated UID with owner or participant fields, restrict notification access to `recipientId`, protect immutable identity fields, and validate relationship transitions. Hidden or disabled UI controls are not relied on for authorization.
+
+### How do likes, comments, and connections work?
+
+Likes use a subcollection and transaction. Comments use a subcollection and a batch that writes the comment and parent counter together. Connections use one canonical pair document with a small state machine. Notifications are nested under each recipient's user document and use deterministic IDs for request/acceptance events.
+
+### What would change at much larger scale?
+
+The current limits are deliberate MVP boundaries. A larger deployment could add cursor-based feed pagination, an indexed search service, stronger public/private user data separation, trusted background notification processing, and counter-sharding where contention is measured. Each would require a reviewed data model and Rules design rather than simply adding infrastructure preemptively.
 
 ---
 
-## 4. Debugging Stories
+## 4. Honest limitations
 
-### Story 1 — Like Counter Integrity & Transactional Rules
-* **Problem**: Rapidly toggling post likes allowed `likesCount` to drift out of sync with actual like documents, and risked allowing users to tamper with counter values.
-* **Root Cause**: Non-transactional client writes allowed race conditions. Furthermore, basic security rules that allowed `likesCount` updates without verifying the presence of a like document could allow arbitrary counter increments.
-* **Fix**:
-  1. Updated `likeService.js` to wrap the like document creation/deletion and the post `likesCount` adjustment in a single atomic Firestore `runTransaction`.
-  2. Implemented fine-grained rules in `firestore.rules` using `existsAfter()` and `getAfter()`. The rule inspects the state of the database *after* the transaction, verifying that `likesCount` changed by exactly `±1` in lockstep with the like document while protecting all other post fields.
-* **Lesson**: Denormalized counters in NoSQL databases must be guarded both on the client via transactions and on the server via relational post-condition rule checks.
+Current limitations include:
 
-### Story 2 — Production Module-Evaluation Crash
-* **Problem**: Navigating to `/settings` or `/notifications` caused an immediate white-screen crash in production builds deployed to Firebase Hosting, despite passing local development testing.
-* **Root Cause** (Commit `d3ad1ae`): In `src/utils/securityTestRunner.js`, a development safety guard was placed at the top level of the module:
-  ```js
-  if (!import.meta.env.DEV) {
-    throw new Error("Security test runner cannot run in production builds.");
-  }
-  ```
-  When Vite bundled the application for production, this guard executed immediately upon chunk evaluation at import time, crashing the entire view before components could render.
-* **Fix**: Moved the check inside the exported test-execution functions (`runMilestone8SecurityTests`), ensuring the guard only executes if a test run is explicitly invoked, without breaking import evaluation.
-* **Lesson**: Never place side-effecting runtime assertion throws at the module top level in code that is bundled into production chunks.
+- no automated unit, integration, emulator, end-to-end, or CI test suite;
+- feed, directory, and notifications are bounded rather than cursor-paginated;
+- directory filtering is client-side rather than full-text indexed;
+- the current `users/{uid}` document mixes public profile, email, discoverability, and notification settings;
+- no Firebase Storage integration, media uploads, or image posts;
+- no post editing, sharing, search, or bookmarks;
+- no private messaging, presence, or read receipts;
+- no email-verification enforcement, password-change UI, or account-deletion cascade;
+- only connection request and acceptance notifications;
+- notification creation currently occurs in client connection transactions rather than a trusted background processor;
+- selected Rules hardening candidates remain documented for future review, including stronger coupling of some counter updates to the exact mutation that caused them.
 
-### Story 3 — Profile Header Stacking Context
-* **Problem**: During the visual redesign to The Campus Atelier, the gradient banner was rendering over the top half of the profile avatar, partially obscuring it.
-* **Root Cause** (Commits `c6c801b` & `defe30e`): Absolute positioning and flex alignment created ambiguous CSS stacking contexts between the banner container and the overlapping avatar circle.
-* **Fix**: Restructured the header hierarchy: aligned the display name to the lower portion of the banner (`items-end`, `pb-5`), wrapped the avatar in a relative container with an explicit `z-10` stacking context overlapping the border, and positioned metadata in the surface section below.
-* **Lesson**: When building overlapping UI elements across visual boundaries, establish explicit stacking contexts (`relative`, `z-index`) rather than relying on default document flow.
+These are known MVP boundaries, not hidden routes or missing components.
 
 ---
 
-## 5. Honest Project Limitations
+## 5. Deferred next steps
 
-Acknowledge these boundaries straightforwardly in interviews:
+The following are proposed, not implemented commitments:
 
-### Current Portfolio / MVP Limitations
-* **Client-Side Search**: Student discovery queries a bounded set of up to 100 profiles ordered by `updatedAt` and filters locally in memory.
-* **Bounded Feed**: The feed subscribes to the 50 most recent posts via `limit(50)`; older posts are not loaded.
-* **No Media File Storage**: Avatars use deterministic initials fallbacks; posts are text-only. Firebase Storage is not configured in the active client.
-* **No Direct Messaging**: Real-time communication is focused on public feed discussions, comments, and connection networks; private 1-on-1 chat channels are not implemented.
+1. **Automated verification and Rules hardening:** add emulator-backed Rules tests, application checks, and CI; review counter and denormalized snapshot invariants.
+2. **Public/private data boundary:** separate sensitive account/settings data from public profile reads and revisit discoverability enforcement at the data boundary.
+3. **Scalable read paths:** add cursor-based feed pagination and, if needed, an indexed discovery search.
+4. **Trusted event processing:** evaluate background processing for notification generation and retries.
+5. **Minimal connection-gated messaging:** only after privacy, abuse controls, and message data ownership are designed.
 
-### What Would Change at Scale
-* **Search**: External search index (Algolia/Typesense) to support full-text fuzzy querying across millions of student records.
-* **Feed Architecture**: Cursor-based pagination (`startAfter(lastDoc)`) with virtualized lists to handle deep feed browsing efficiently.
-* **Contention Mitigation**: Distributed counter shards for posts with heavy concurrent like activity.
-* **Notification Processing**: Offloading notification writes to asynchronous Cloud Functions rather than bundling them into client-side connection transactions.
-
-### Intentionally Deferred Features
-* Direct messaging / chat channels (`conversations`/`messages` collections)
-* Bookmarked / saved posts
-* Image and file attachments
-* Campus clubs, events, and student marketplace boards
+Do not describe these as current capabilities during a demo.
 
 ---
 
-## 6. Future Improvements
-
-A concise, technically credible list of architectural next steps:
-
-1. **Cursor-Based Feed Pagination**: Implement `startAfter(lastVisibleDoc)` in `postService.js` to enable infinite scrolling beyond the initial 50 posts without loading large result sets upfront.
-2. **Server-Side Full-Text Search**: Integrate a Firebase Extension with Algolia or Typesense to provide indexed, typo-tolerant search across large student directories.
-3. **Distributed Counter Shards**: Introduce counter sharding for high-traffic posts where concurrent writes would otherwise face single-document lock contention.
-4. **Cloud Functions for Notification Processing**: Decouple notification creation from client transactions by using Firestore background triggers (`functions.firestore.document('connections/{id}').onWrite(...)`).
-
----
-
-## 7. Demo Troubleshooting
-
-Quick checklist if demonstrating locally or live:
+## 6. Demo troubleshooting
 
 | Issue | Cause | Resolution |
-| :--- | :--- | :--- |
-| **Demo login fails on local machine** | Missing environment variables in local configuration. | Verify `.env.local` contains `VITE_DEMO_USER_EMAIL` and `VITE_DEMO_USER_PASSWORD` matching the seeded account. |
-| **Feed or student directory appears empty** | Running against a fresh local Firebase project that has not been seeded. | Run `npm run seed:demo` with a local service account key present at `scripts/credentials/serviceAccountKey.json`. |
-| **Accidental connection state change during demo** | Clicked "Accept" or "Decline" on Devon Park's incoming request. | Re-run `npm run seed:demo` locally, or explain the state transition to the interviewer as live proof of the connection lifecycle. |
-| **Hosted demo network lag** | Initial Firebase WebSocket handshake on slow network connections. | Allow 1–2 seconds for the initial Firebase connection to establish before interacting with the page. |
+| --- | --- | --- |
+| Demo login fails locally | Demo environment variables are absent or do not match the seeded Auth account. | Check `.env.local` for `VITE_DEMO_USER_EMAIL` and `VITE_DEMO_USER_PASSWORD`. |
+| Feed or directory is empty | The local Firebase project has not been seeded or the client points at a different project. | Verify Firebase configuration and run `npm run seed:demo` with authorized Admin credentials. |
+| Relationship state changed during the demo | An accept, decline, cancel, or remove action was activated. | Explain the lifecycle, or reseed the separate demo project; do not claim the live client auto-resets state. |
+| Development audit is not visible | The build is a production build. | The panel is intentionally development-only; inspect the regular settings/notification UI instead. |
+| Hosted demo is slow initially | Firebase connection setup or network latency. | Allow the initial listener to connect before interacting. |
+
+The seeder uses explicit demo ID whitelists and merge-only writes. It may write Admin-only metadata such as `isDemo`; normal browser clients remain governed by Firestore Rules.
 
 ---
 
-## 8. Final 30-Second Project Summary
+## 7. Thirty-second project summary
 
-When asked *"Tell me about CampusConnect,"* use this concise response:
-
-> **"CampusConnect is a university student networking platform built with React, Tailwind CSS, and Firebase. It features a real-time campus feed with post comments, client-side student discovery, a deterministic connection management system, and scoped notifications.**
-> 
-> **Architecturally, I focused on database integrity and security: post likes run as atomic Firestore transactions backed by relational security rules using `existsAfter()`, connection requests use canonical sorted-pair document IDs to guarantee a single relationship record per pair, and UI components are cleanly decoupled from the database through a dedicated service layer.**
-> 
-> **The interface is styled using an editorial design system called The Campus Atelier with purposeful micro-interactions, and includes an unprivileged 1-click demo persona so evaluators can explore the application instantly."**
+> CampusConnect is a university student networking platform built with React, Tailwind CSS, and Firebase. It offers a real-time text feed with comments and likes, bounded student discovery, canonical connection management, and recipient-scoped connection notifications.
+>
+> The engineering focus is data integrity and clear boundaries: likes use atomic Firestore transactions, connections use deterministic sorted-pair IDs, hooks own listener lifecycles, and a dedicated service layer keeps Firebase operations out of UI components. The interface uses the Campus Atelier design system, and an ordinary seeded demo account lets evaluators explore the product quickly while the documentation stays explicit about MVP limits and deferred scale work.

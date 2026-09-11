@@ -1,402 +1,166 @@
-# CODING_RULES.md
-
 # CampusConnect Coding Rules
 
-These rules apply to every task performed in this repository.
+**Status:** Active engineering guidance (Milestone 13A)
 
-The objective is to produce production-quality, maintainable, scalable, and readable software.
+These rules apply to work in this repository. They describe the current architecture and the standard for extending it without unnecessary complexity.
 
----
-
-# General Principles
+## General principles
 
 - Prioritize correctness over speed.
-- Prioritize maintainability over cleverness.
-- Always write code as if another developer will maintain it.
-- Keep solutions simple.
-- Avoid unnecessary complexity.
-- Never introduce technical debt unless explicitly requested.
+- Prefer maintainability and clarity over cleverness.
+- Keep solutions simple and scoped to the requested change.
+- Preserve existing behavior unless the task requires a change.
+- Do not introduce speculative architecture or technical debt.
+- Treat the browser as untrusted when designing authorization or data integrity.
 
----
+## Before making changes
 
-# Before Making Changes
+1. Read the relevant source, service, hook, and documentation files.
+2. Understand the current data flow and existing reusable patterns.
+3. Explain the implementation plan and affected files.
+4. Confirm whether the change affects routes, Firestore data, or Rules.
+5. Preserve unrelated functionality.
 
-Before editing any files:
+## Scope and source layout
 
-1. Read all relevant files.
-2. Understand the current implementation.
-3. Explain the implementation plan.
-4. Identify the files that will be modified.
-5. Preserve existing functionality unless the task requires changes.
+The active source layout is:
 
-Never begin making random edits without understanding the codebase.
+```text
+src/
+├── components/
+├── contexts/
+├── data/
+├── firebase/
+├── hooks/
+├── pages/
+├── services/
+└── utils/
+```
 
----
+Do not create `layouts`, `routes`, `assets`, or feature folders solely because an older document mentions them. Add a folder only when the current feature has a clear responsibility that cannot fit an existing boundary.
 
-# Scope
+## React and component design
 
-Only modify files directly related to the requested feature or bug.
-
-Never refactor unrelated code during feature development.
-
-Never change project architecture unless explicitly requested.
-
----
-
-# React Guidelines
-
-Always:
-
-- Use functional components.
-- Use React hooks.
+- Use functional components and hooks.
 - Keep components focused on one responsibility.
 - Prefer composition over inheritance.
-- Avoid deeply nested JSX.
-- Keep render functions simple.
+- Keep render logic readable and avoid deeply nested JSX where extraction helps.
+- Keep state local unless it is genuinely shared.
+- Use `AuthContext` only for authentication session state; do not turn it into a general domain store.
+- Reuse `Button`, `Card`, `Avatar`, `Input`, `Textarea`, `EmptyState`, `PageContainer`, and `Section` before introducing another primitive.
+- Keep page-specific components page-local when they are not reused.
+- Avoid one-off abstractions that hide simple behavior.
+
+## Firebase and service boundaries
+
+- Keep Firebase Auth and Firestore SDK calls in `src/services/` or the established security-test utility.
+- Do not place Firestore queries directly in reusable UI components.
+- Use hooks for subscription lifecycle and local loading/error state.
+- Return unsubscribe functions from `onSnapshot` effects.
+- Validate input for user experience, but assume clients can bypass validation.
+- Enforce ownership, field immutability, schema shape, and relationship invariants in Firestore Rules.
+- Review read cost and listener lifetime before adding a query or subscription.
+- Use transactions for relationship state and counters that must change together.
+- Use batches when a bounded set of writes must commit together.
+- Do not expose service credentials or commit local service-account files.
+
+Active service modules are:
+
+- `authService.js`
+- `userService.js`
+- `postService.js`
+- `commentService.js`
+- `likeService.js`
+- `connectionService.js`
+- `notificationService.js`
+
+## Routing
+
+- Keep routes centralized in `src/App.jsx`.
+- Protect authenticated routes with `ProtectedRoute`.
+- Avoid duplicate route definitions.
+- Add a route only with its page, loading/error behavior, navigation entry if needed, data model, and Rules review.
+- Do not add navigation links for deferred messaging, events, clubs, marketplace, or saved posts.
+
+## Styling and UI
+
+- Use Tailwind utility classes and the existing Campus Atelier tokens.
+- Prefer `paper`, `surface`, `ink`, `ink-muted`, `border-warm`, and terracotta tokens over ad hoc color systems.
+- Reuse existing spacing and typography patterns.
+- Avoid arbitrary values unless the design genuinely requires them.
+- Keep layouts usable on mobile, tablet, and desktop.
+- Do not introduce a second design language or replace the current visual system for a small feature.
+
+## Accessibility and interaction
+
+- Use semantic HTML.
+- Provide labels for form controls.
+- Preserve visible keyboard focus states.
+- Use appropriate button/link elements.
+- Include useful accessible names for icon-only controls.
+- Do not rely on color alone for state.
+- Preserve multiline user content with appropriate whitespace handling.
+- Respect `prefers-reduced-motion`.
+- Provide loading, error, success, and empty states for asynchronous views where applicable.
+
+## Error handling and forms
+
+- Handle loading, success, and failure for asynchronous operations.
+- Display useful user-facing errors without exposing secrets.
+- Prevent duplicate submissions while an operation is pending.
+- Normalize service errors when the existing service pattern supports it.
+- Validate form input before a write, while keeping Rules as the enforcement boundary.
+- Do not silently swallow errors except where the existing lifecycle deliberately treats the operation as best effort; document non-obvious cases.
+
+## Performance
+
+- Avoid unnecessary re-renders and duplicate listeners.
+- Keep Firestore queries bounded.
+- Reuse the existing two-minute user-directory cache where appropriate.
+- Do not add external search, pagination infrastructure, distributed counters, or background processing without a measured product need and a reviewed design.
+- Treat a new real-time listener as an ongoing read-cost decision.
+
+## Comments and documentation
+
+- Prefer self-explanatory code.
+- Comment non-obvious business invariants, especially canonical connection IDs and atomic counter/notification behavior.
+- Do not leave commented-out code or speculative TODOs.
+- Update the active documentation when routes, services, collections, or security invariants change.
+- Mark deferred designs as deferred; do not document them as current behavior.
+
+## Dependencies
+
+Do not install packages automatically. Before proposing a dependency:
+
+- explain why it is needed;
+- identify existing project capabilities that were considered;
+- explain alternatives and operational cost;
+- request approval before adding it.
+
+## Verification
+
+The current repository checks are:
+
+- `npm run lint`;
+- `npm run build`;
+- manual/development-only Security Rules audits through `SecurityTestPanel`.
+
+There is not yet a conventional automated test or Firebase Emulator Rules suite. New work should not claim that such tests exist unless they are actually added.
 
-Avoid:
+Before considering a code change complete:
 
-- Large monolithic components.
-- Duplicate JSX.
-- Inline business logic.
-- Anonymous functions inside large JSX trees when avoidable.
+1. verify imports and route references;
+2. verify loading, error, empty, and disabled states;
+3. verify the service and Rules implications;
+4. run lint;
+5. run the production build;
+6. exercise the relevant UI path when an environment is available;
+7. update documentation if the active architecture changed.
 
----
+## Git safety
 
-# Component Design
-
-Each component should have a single responsibility.
-
-Prefer reusable components over duplicated UI.
-
-Extract repeated UI into reusable components.
-
-Avoid components larger than approximately 250 lines unless clearly justified.
-
----
-
-# State Management
-
-Keep state as local as possible.
-
-Do not create global state unnecessarily.
-
-Lift state only when required.
-
-Avoid prop drilling when Context is more appropriate.
-
----
-
-# Folder Structure
-
-Respect the existing architecture.
-
-Prefer:
-
-components/
-pages/
-layouts/
-contexts/
-hooks/
-services/
-utils/
-firebase/
-assets/
-
-Do not create unnecessary folders.
-
----
-
-# Firebase
-
-Separate Firebase logic from UI whenever practical.
-
-Prefer:
-
-services/authService.js
-
-services/postService.js
-
-services/userService.js
-
-Avoid placing Firestore queries directly inside UI components unless trivial.
-
-Always handle:
-
-- loading
-- success
-- failure
-
-Never expose secrets.
-
----
-
-# Routing
-
-Maintain clean routing.
-
-Protect authenticated routes.
-
-Avoid duplicate route definitions.
-
-Keep routing configuration organized.
-
----
-
-# Tailwind CSS
-
-Use Tailwind utility classes.
-
-Maintain consistent spacing.
-
-Maintain consistent typography.
-
-Avoid inline styles.
-
-Avoid arbitrary values unless necessary.
-
-Reuse utility patterns whenever possible.
-
----
-
-# UI Standards
-
-The UI should be:
-
-- clean
-- modern
-- minimal
-- responsive
-- accessible
-
-Every page should support:
-
-- desktop
-- tablet
-- mobile
-
-Avoid horizontal scrolling.
-
----
-
-# Accessibility
-
-Whenever applicable:
-
-- use semantic HTML
-- use proper labels
-- maintain keyboard accessibility
-- maintain focus visibility
-- include alt text for images
-
----
-
-# Error Handling
-
-Every asynchronous operation should handle:
-
-- loading
-- success
-- failure
-
-Display meaningful error messages.
-
-Never leave unhandled Promise rejections.
-
----
-
-# Forms
-
-Validate all user input.
-
-Provide clear validation messages.
-
-Prevent duplicate submissions.
-
-Disable submit buttons during loading.
-
----
-
-# Performance
-
-Prefer efficient rendering.
-
-Avoid unnecessary state.
-
-Avoid unnecessary re-renders.
-
-Lazy load pages when appropriate.
-
-Optimize Firestore reads.
-
-Avoid duplicate network requests.
-
----
-
-# Code Style
-
-Use descriptive names.
-
-Prefer clarity over abbreviations.
-
-Keep functions focused.
-
-Avoid deeply nested conditionals.
-
-Extract reusable logic into hooks or utilities.
-
----
-
-# Comments
-
-Write self-explanatory code.
-
-Only add comments when explaining non-obvious business logic.
-
-Never leave commented-out code.
-
-Never leave TODO comments unless explicitly requested.
-
----
-
-# Dependencies
-
-Do not install new packages automatically.
-
-Before adding a dependency:
-
-- explain why it is needed
-- explain available alternatives
-- request approval
-
-Prefer existing project dependencies whenever possible.
-
----
-
-# Refactoring
-
-Refactor only when it improves:
-
-- readability
-- maintainability
-- performance
-- reusability
-
-Avoid unnecessary rewrites.
-
-Preserve existing behavior.
-
----
-
-# Git Safety
-
-Avoid destructive changes.
-
-Never delete files unless explicitly instructed.
-
-Never overwrite user code without explanation.
-
-When unsure:
-
-ask instead of guessing.
-
----
-
-# Feature Development Workflow
-
-For every feature:
-
-1. Explain the implementation.
-2. List files to change.
-3. Implement incrementally.
-4. Verify imports.
-5. Check for build errors.
-6. Check for lint errors if applicable.
-7. Explain what changed.
-
----
-
-# Bug Fix Workflow
-
-Identify:
-
-- root cause
-- affected files
-- safest fix
-
-Do not patch symptoms.
-
-Fix the underlying issue whenever possible.
-
----
-
-# Testing
-
-Before considering a task complete:
-
-- verify imports
-- verify routing
-- verify component rendering
-- verify Firebase integration
-- verify responsive layout
-
----
-
-# Output Quality
-
-All generated code should be production-ready.
-
-Do not generate:
-
-- placeholder implementations
-- fake APIs
-- unfinished features
-- mock data unless requested
-
-Deliver complete, working implementations whenever possible.
-
----
-
-# Communication
-
-When responding:
-
-- be concise
-- explain important decisions
-- mention tradeoffs
-- identify potential risks
-
-If uncertain:
-
-state the uncertainty instead of making assumptions.
-
----
-
-# Definition of Done
-
-A task is complete only if:
-
-- the feature works
-- existing functionality is preserved
-- code is clean
-- code is reusable
-- no obvious bugs remain
-- imports are correct
-- routing works
-- loading states exist
-- error states exist
-- responsive behavior is verified
-- implementation matches the requested requirements
-
----
-
-# Agent Efficiency & Tool Usage
-
-- Prefer terminal/CLI commands, scripts, APIs, and direct file edits over browser UI interaction whenever possible.
-- For Firebase operations, prefer Firebase CLI over the Firebase Console.
-- Never manually type/paste large code or configuration into a web editor when an equivalent CLI/API/file operation exists.
-- For deployment, use the narrowest possible command (firebase deploy --only firestore:rules, firebase deploy --only hosting, etc.) rather than full deployment.
-- Before using browser automation, check whether the task can be completed deterministically through the terminal or a local file.
-- If a CLI/API operation fails, report the error rather than spending extended time on browser automation.
-- Do not repeatedly retry rate-limited tools.
-- Optimize for minimal tool calls and preservation of AI quota.
+- Avoid destructive changes.
+- Never delete files unless explicitly requested.
+- Do not commit unless asked.
+- Do not modify unrelated source while implementing a feature.
+- Report discovered application or Rules problems separately when the requested scope is documentation-only.

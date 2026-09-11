@@ -1,180 +1,245 @@
 # CampusConnect Architecture
 
+**Status:** Current implementation reference (Milestone 13A)
+
+This document describes the architecture that exists in the repository today. It does not describe proposed messaging, media storage, search infrastructure, or other deferred work.
+
 ## Overview
 
-CampusConnect is a modern social networking platform exclusively for college students.
+CampusConnect is a React/Vite single-page application for university student networking. The browser is the application runtime, Firebase Authentication provides identity, and Cloud Firestore provides the live domain data store. Firestore Security Rules are the authorization boundary for client-originated reads and writes.
 
-The application is built using React, Vite, Tailwind CSS and Firebase.
+The active request path is:
 
-The architecture should prioritize:
+```text
+src/main.jsx
+  └─ StrictMode
+     └─ AuthProvider
+        └─ App / React Router
+           └─ protected page
+              └─ feature component and/or custom hook
+                 └─ service module
+                    ├─ Firebase Authentication
+                    └─ Cloud Firestore
+```
 
-- scalability
-- maintainability
-- reusable components
-- responsive design
-- clean separation of concerns
+The UI does not use a custom HTTP API or server-rendered backend. Firebase Admin SDK is used only by the local/demo seeding script, not by the browser application.
 
----
+## Active technology stack
 
-# Tech Stack
+| Layer | Implementation |
+| --- | --- |
+| Frontend | React 19 with Vite 8 |
+| Language | JavaScript with JSX |
+| Routing | React Router DOM 7 |
+| Styling | Tailwind CSS 4 with custom `@theme` tokens |
+| Interaction | Motion for React and Lucide React |
+| Identity | Firebase Authentication, email/password |
+| Database | Cloud Firestore |
+| Hosting | Firebase Hosting serving the Vite `dist` output |
+| Admin tooling | Firebase Admin SDK seeding script |
+| Quality checks | ESLint; production Vite build; development-only Firestore security audit panel |
 
-Frontend
+Firebase Storage is not part of the active client architecture. The Firebase configuration contains a storage-bucket value because it is part of the standard web configuration shape, but the application does not initialize the Storage SDK or upload files.
 
-- React
-- Vite
-- React Router DOM
-- Tailwind CSS
+## Application entry and routing
 
-Backend
+`src/main.jsx` mounts the application with `StrictMode` and `AuthProvider`.
 
-- Firebase Authentication
-- Cloud Firestore
-- Firebase Storage
+`src/App.jsx` owns the route table:
 
----
+| Route | Access | Page |
+| --- | --- | --- |
+| `/` | Public | Login and optional demo login |
+| `/register` | Public | Account registration |
+| `/dashboard` | Authenticated | Real-time campus feed |
+| `/profile` | Authenticated | Current user's editable profile |
+| `/discover` | Authenticated | Bounded student search |
+| `/users/:uid` | Authenticated | Public profile and connection CTA |
+| `/connections` | Authenticated | Accepted connections and pending requests |
+| `/notifications` | Authenticated | Scoped notification inbox |
+| `/settings` | Authenticated | Privacy, notification preferences, and sign out |
+| `*` | Public/auth-aware | Not-found page |
 
-# Folder Structure
+`ProtectedRoute` waits for authentication initialization and redirects unauthenticated users to `/`, preserving the attempted location for the login flow.
 
+There is no separate route configuration folder, layout router, sidebar system, messaging route, events route, marketplace route, or admin route in the active application.
+
+## Source tree
+
+```text
 src/
+├── App.jsx
+├── main.jsx
+├── index.css
+├── components/
+│   ├── dev/              # Development-only security audit panel
+│   ├── feed/             # Feed, posts, comments, composers
+│   ├── layout/           # Navbar, PageContainer, Section
+│   ├── notifications/    # NotificationItem
+│   ├── search/           # StudentCard
+│   └── ui/               # Button, Card, Avatar, Input, Textarea, EmptyState
+├── contexts/             # AuthContext and its context value
+├── data/                 # Deterministic demo data and ID whitelists
+├── firebase/             # Firebase client initialization
+├── hooks/                # Auth and domain hooks
+├── pages/                # Route-level screens
+├── services/             # Firebase Auth/Firestore operations
+└── utils/                # Development security test runner
+```
 
-components/
-pages/
-layouts/
-contexts/
-hooks/
-services/
-utils/
-assets/
-firebase/
-routes/
+## Layer responsibilities
 
----
+### Entry and authentication context
 
-# Responsibilities
+`AuthContext` owns the current authenticated user, authentication loading state, authentication errors, and the login, signup, logout, and password-reset commands. It configures browser-local Firebase Auth persistence and subscribes to `onAuthStateChanged`.
 
-## Components
+When an authenticated user is observed, the context ensures a corresponding Firestore profile exists. Authentication identity and Firestore profile data are related but are not currently represented by separate public/private Firestore documents.
 
-Reusable UI.
+### Pages
 
-Examples:
+Pages compose the authenticated experience and own page-level state such as form values, active tabs, and feedback messages. They do not implement the Firestore data model themselves.
 
-- Navbar
-- Sidebar
-- Button
-- Modal
-- Avatar
-- PostCard
-- Comment
-- Input
-- Loader
+The main page responsibilities are:
 
----
+- `Login` and `Register`: form validation and Auth commands.
+- `Dashboard`: authenticated shell around `Feed`.
+- `Profile`: profile display/edit form.
+- `PublicProfile`: point-read profile display and relationship CTA.
+- `Discover`: debounced student search and result grid.
+- `Connections`: relationship tabs and page-local person cards.
+- `Notifications`: all/unread filters and notification actions.
+- `Settings`: discoverability, notification preferences, sign out, and development audit panel.
+- `NotFound`: route fallback.
 
-## Pages
+### Components
 
-Entire screens.
+Feature components render domain UI and receive service-backed state through hooks or page props. Reusable UI components provide the current visual and accessibility patterns without introducing a global component framework.
 
-Examples:
+Components do not call Firebase directly. Firestore and Auth calls are isolated in `src/services/`.
 
-- Login
-- Register
-- Feed
-- Profile
-- Search
-- Messages
-- Notifications
-- Settings
+### Hooks
 
----
+Hooks bind the service layer to React lifecycle and local state. Subscription hooks register `onSnapshot` listeners inside `useEffect` and return unsubscribe functions when components unmount.
 
-## Services
+Active hooks include:
 
-Business logic.
+- `useAuth`
+- `usePosts`
+- `useComments`
+- `usePostLike`
+- `useUserProfile`
+- `useSettings`
+- `useUserSearch`
+- `useConnectionState`
+- `useUserRelationships`
+- `useNotifications`
 
-Examples:
+### Services
 
-- authService
-- firestoreService
-- storageService
+The service modules are the Firebase boundary:
 
-Components should never contain Firebase queries directly unless unavoidable.
+- `authService.js`: Firebase Auth persistence, subscriptions, login, signup, logout, reset, and Auth error normalization.
+- `userService.js`: profile creation, profile subscriptions, profile/settings updates, point reads, normalization, and bounded user-directory caching.
+- `postService.js`: post creation, newest-post subscription, deletion, and comment-counter updates.
+- `commentService.js`: comment subscriptions plus batched comment create/delete and parent counter updates.
+- `likeService.js`: atomic like/unlike transactions and the current user's like subscription.
+- `connectionService.js`: canonical relationship IDs, relationship transactions, notifications associated with connection transitions, and relationship subscriptions.
+- `notificationService.js`: recipient-scoped notification subscription, normalization, read updates, batch mark-as-read, and dismissal.
 
----
+## State and data-flow patterns
 
-## Contexts
+### Real-time listeners
 
-Global application state.
+The application selectively uses Firestore `onSnapshot` for:
 
-Examples
+- the newest feed posts;
+- expanded post comments;
+- the current user's like document for a post;
+- the current user's connection relationships;
+- a single relationship between two users;
+- the current user's profile/settings;
+- the current user's notifications.
 
-- AuthContext
-- ThemeContext
+Each subscription is owned by a hook or service caller and is cleaned up on unmount.
 
----
+### Bounded reads and caching
 
-## Hooks
+The current read limits are deliberate MVP safeguards:
 
-Reusable custom hooks.
+- feed: newest 50 posts;
+- directory: newest 100 users ordered by `updatedAt`;
+- notifications: newest 30 notifications ordered by `createdAt`;
+- search: 300 ms input debounce, followed by client-side filtering across display name, department, year, and skills;
+- directory result cache: two-minute module-level cache in `userService.js`.
 
-Examples
+The feed and directory do not currently implement cursor pagination or external full-text search.
 
-- useAuth
-- useFirestore
-- usePosts
+### Atomic writes
 
----
+- Likes use `runTransaction` to create/delete `posts/{postId}/likes/{uid}` and update `posts.likesCount` together.
+- Comments use `writeBatch` to create/delete a comment and update `posts.commentsCount` together.
+- Connection requests, acceptance, rejection, cancellation, and removal use transactions.
+- Connection transactions may create or delete deterministic notification documents in the same transaction.
 
-## Utilities
+The client uses these atomic paths, while Firestore Rules remain the final authorization boundary.
 
-Helper functions.
+## Active Firestore domains
 
-Examples
+The active collections are:
 
-- date formatting
-- validation
-- constants
+- `users/{uid}` profiles, settings, and account metadata;
+- `posts/{postId}` text feed posts;
+- `posts/{postId}/comments/{commentId}` comments;
+- `posts/{postId}/likes/{uid}` individual likes;
+- `connections/{canonicalConnectionId}` one relationship document per pair;
+- `users/{uid}/notifications/{notificationId}` recipient-scoped connection notifications.
 
----
+The full field-level schema and current rule behavior are documented in [FIRESTORE_SCHEMA.md](FIRESTORE_SCHEMA.md).
 
-# Coding Principles
+## Security model
 
-- Small components
-- Reusable code
-- Avoid duplication
-- Single responsibility
-- Clean naming
-- Consistent formatting
+The browser is treated as untrusted. Firestore Rules enforce the active authorization model, including:
 
----
+- authenticated access to application data where permitted;
+- owner-only user updates and immutable identity fields;
+- author-restricted post deletion;
+- user-owned like creation/deletion;
+- canonical connection IDs and participant arrays;
+- recipient-only notification list queries;
+- recipient-only notification read-state updates;
+- connection state transitions and notification transaction relationships.
 
-# Performance
+The development-only `SecurityTestPanel` exercises selected notification and user/settings rejection scenarios. It is not a production test runner and is not a replacement for automated emulator tests.
 
-- Lazy load pages
-- Memoize expensive computations
-- Optimize Firestore reads
-- Avoid unnecessary re-renders
+The current rules also have known areas for future hardening. For example, the author update branch for posts is broader than the current UI, and comment-counter validation does not fully prove a matching comment mutation. These are documentation/audit findings, not changes made by this milestone.
 
----
+## Demo and deployment
 
-# Error Handling
+Firebase Hosting serves the Vite build from `dist` and rewrites application routes to `index.html`.
 
-Always handle
+The recruiter demo uses a normal Firebase Auth account configured through `VITE_DEMO_USER_EMAIL` and `VITE_DEMO_USER_PASSWORD`. The Admin SDK script in `scripts/seedDemoData.mjs` resolves or creates that account and writes deterministic demo profiles, posts, comments, likes, connections, and notifications. It uses an explicit whitelist and merge-only writes; Admin SDK writes bypass client Firestore Rules by design.
 
-- loading
-- success
-- failure
-- empty state
+## Current limitations
 
-No uncaught async errors.
+- No automated unit, integration, emulator, or end-to-end test suite is configured.
+- No CI pipeline is configured.
+- Email verification is not required after sign-up.
+- Public/private profile data share the `users/{uid}` document, and authenticated profile reads currently include the email field even though public UI components do not render it.
+- Search discoverability is filtered in the client; direct authenticated profile reads remain available by product policy.
+- The feed, directory, and notification reads are bounded rather than paginated.
+- No media upload or Firebase Storage integration exists.
+- No post editing, post sharing, post search, bookmarks, private messaging, clubs, events, marketplace, or direct account deletion exists.
+- Notification generation currently originates in client connection transactions rather than a trusted background event processor.
 
----
+## Deferred architecture, not current implementation
 
-# Security
+The following are possible later milestones and should not be treated as active architecture:
 
-Use Firebase Security Rules.
+- emulator-based Rules regression tests and CI;
+- separate public profile and private account/settings documents;
+- cursor-based feed pagination and eventually indexed directory search;
+- trusted server-side event processing for notifications;
+- a minimal connection-gated one-to-one messaging model;
+- media storage with separate Storage Rules and lifecycle cleanup.
 
-Never expose secrets.
-
-Validate user input.
-
-Never trust client-side validation alone.
+Any future milestone must first be designed against the active service, hook, and Rules patterns rather than copied from older planning documents.

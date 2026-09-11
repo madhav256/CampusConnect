@@ -1,181 +1,199 @@
 # CampusConnect
 
-A university student networking platform built with React, Tailwind CSS, and Firebase, with real-time social features and Firebase-backed authentication and data.
+CampusConnect is a university student networking platform built with React, Tailwind CSS, and Firebase. It provides a real-time text feed, student discovery, academic profiles, canonical connection management, and scoped connection notifications.
 
-* **Live Demo**: [https://campusconnect-cf191.web.app](https://campusconnect-cf191.web.app)
-* **Zero-Setup Demo Access**: Navigate to `/` and click **"Explore as Demo Student (Alex Rivera)"** for instant access with pre-seeded campus activity—no manual sign-up or credentials required.
+- **Live Demo:** [https://campusconnect-cf191.web.app](https://campusconnect-cf191.web.app)
+- **Demo access:** Open `/` and choose **Explore as Demo Student (Alex Rivera)** when the deployment has demo credentials configured.
 
----
+The interface follows **The Campus Atelier** design system: warm paper and ink tones, terracotta actions, Newsreader editorial headings, Inter body text, and restrained Motion interactions.
 
-## Overview
+## Recruiter and evaluator quick start
 
-CampusConnect allows university students to share studio and academic updates, discover peers across departments, establish academic connections, and track real-time notifications. The interface is styled using **The Campus Atelier** design system—featuring warm paper/ink tones, Newsreader editorial serif headings, Inter typography, and purposeful micro-interactions powered by Motion for React.
+1. Visit the live deployment.
+2. On the login page, locate **Recruiter & Evaluator Access**.
+3. Choose **Explore as Demo Student (Alex Rivera)**.
+4. Explore the authenticated experience as Alex Rivera, an architecture senior.
 
----
+The seeded demo contains:
 
-## Recruiter & Evaluator Quick Start
+- ten text feed posts with comments and likes;
+- Alex's profile plus seven peer profiles;
+- accepted connections with Maya Lin and Marcus Vance;
+- an incoming request from Devon Park;
+- an outgoing request to Elena Rostova;
+- one unread and one read connection notification.
 
-You can explore the live application immediately without setting up local credentials or Firebase configurations:
+The demo login is a normal unprivileged Firebase Auth account. The seeding script uses Firebase Admin SDK only during setup.
 
-1. Visit the live deployment: **[https://campusconnect-cf191.web.app](https://campusconnect-cf191.web.app)**
-2. On the login page (`/`), locate the **Recruiter & Evaluator Access** card.
-3. Click **"Explore as Demo Student (Alex Rivera)"**.
-4. You will be automatically authenticated and redirected to `/dashboard` as **Alex Rivera** (Senior, Architecture & Spatial Design).
+## Implemented features
 
-The pre-seeded demo environment includes:
-* **Feed Activity**: 10 realistic campus posts with likes and active comment threads.
-* **Student Network**: 7 peer profiles across design, engineering, and humanities departments.
-* **Connection States**: Active peer connections with Maya Lin and Marcus Chen, an incoming request from Devon Park, and a pending request to Elena Rossi.
-* **Notifications**: Read and unread notifications scoped to the demo persona.
+### Authentication and profiles
 
----
+- Email/password registration, login, logout, and password-reset email.
+- Browser-local Auth persistence and protected routes.
+- Editable profile fields: display name, bio, department, academic year, skills, and social links.
+- Public profile view at `/users/:uid` with dynamic connection actions.
+- Initials avatar fallback when no image URL is available.
 
-## Implemented Features
+### Feed and interactions
 
-* **Authentication & Session Management**: Email/password sign-up, login, password reset emails, persistent sessions, and route guards (`ProtectedRoute`).
-* **Real-Time Campus Feed**: Global feed ordered chronologically with real-time Firestore listeners, post creation, author-restricted post deletion, and real-time post comments.
-* **Atomic Interactions**: Like/unlike operations executed via Firestore transactions, synchronizing counters and ensuring race-free state transitions with micro-animations.
-* **Student Directory & Discovery**: Bounded directory query with real-time multi-field search (filtering across name, department, year, and skills tags) and respect for student discoverability settings.
-* **Deterministic Student Connections**: Complete connection lifecycle (send request, cancel outgoing, accept incoming, decline incoming, remove connection) managed through a single canonical document pair.
-* **Scoped Notifications**: User-isolated notifications for connection requests and acceptances with live unread counts, mark-as-read, mark-all-read, and dismissal.
-* **Student Profiles**: Public profile view (`/users/:uid`) with dynamic connection action CTA, and an editable personal profile (`/profile`) managing bio, department, academic year, skills tags, and portfolio/social links.
-* **Settings & Privacy**: Student discoverability toggles, notification preference toggles, password updates, and an in-app **Security Rules Test Panel** verifying rule enforcement.
+- Real-time text feed at `/dashboard`.
+- Feed subscription limited to the newest 50 posts.
+- Post creation and author-only deletion.
+- Real-time comments with author-only deletion.
+- Atomic like/unlike transactions with a denormalized `likesCount`.
+- Motion feedback for likes and expandable comments.
 
----
+### Discovery and connections
 
-## Technical Highlights
+- `/discover` searches a bounded set of up to 100 users across name, department, year, and skills.
+- Search is debounced and filters non-discoverable profiles on the client.
+- `/connections` shows accepted connections and incoming/outgoing pending requests.
+- Connection IDs use a lexicographically sorted pair of UIDs, ensuring one relationship document per student pair.
+- Supported lifecycle: send, cancel, accept, decline, and remove.
 
-* **Atomic Transactions (`runTransaction`)**: Post liking/unliking uses Firestore transactions to atomically toggle the user's like document in `posts/{postId}/likes/{userId}` while incrementing or decrementing `likesCount`.
-* **Comprehensive Firestore Security Rules (`firestore.rules`)**: 290 lines of relational security rules enforcing field-level immutability (`authorId`, `createdAt`), strict schema shape validation, and transaction validation via `existsAfter()` and `getAfter()`.
-* **Deterministic Canonical Connection Schema**: Connection documents use a lexicographical sorted-pair ID (`min(A, B) + "_" + max(A, B)`). This invariant enforces exactly one relationship document per pair, eliminating duplicate requests and race conditions.
-* **Scoped Reads & Data Isolation**: Notifications reside in user-scoped subcollections (`users/{userId}/notifications/{id}`). Reads and updates are restricted to the authenticated recipient directly by Firestore Security Rules.
-* **Bounded Queries & Real-Time Listeners**: The global feed is bounded to 50 posts and student discovery is bounded to 100 profiles with client-side multi-field filtering, avoiding unbounded scan costs while maintaining real-time updates.
-* **Service-Layer Separation**: UI components contain zero direct Firestore queries. All database operations, transactions, and snapshot listeners are encapsulated in dedicated modules under `src/services/`.
-* **In-App Security Test Runner**: Embedded test suite (`src/components/dev/SecurityTestPanel.jsx`) that runs automated client-side tests in the browser to verify that unauthorized mutations (cross-user writes, email tampering, privilege escalations) are rejected by security rules.
+### Notifications and settings
 
----
+- `/notifications` subscribes to the newest 30 recipient-scoped notifications.
+- Active notification types are connection requests and accepted connections.
+- Mark one/all as read, dismiss, filter all/unread, and act on incoming requests.
+- `/settings` manages search discoverability, connection notification preferences, and sign out.
+- Account deletion is displayed as deferred because backend cascade cleanup is not implemented.
 
-## Tech Stack
+### Development security audit
 
-| Layer | Technologies |
-| :--- | :--- |
-| **Frontend Framework** | React 19 (`^19.2.5`), React DOM 19, Vite 8 (`^8.0.10`) |
-| **Routing** | React Router DOM v7 (`^7.14.2`) |
-| **Styling & Design System** | Tailwind CSS v4 (`^4.2.4`, `@tailwindcss/vite`), `@theme` CSS custom properties |
-| **Micro-Interactions** | Motion for React (`^13.2.0`), Lucide React icons (`^1.41.0`) |
-| **Backend & Database** | Firebase Web SDK v12 (`^12.15.0`) — Firebase Authentication & Cloud Firestore |
-| **Admin & Seeding** | Firebase Admin SDK v14 (`^14.3.0`, devDependency) |
-| **Code Quality** | ESLint 10 (`^10.2.1`), PostCSS 8 |
+In development builds, Settings and Notifications expose a security audit panel that exercises selected Firestore Rule rejection scenarios for notifications and user/settings documents. It is not a production test suite.
 
----
+## Architecture
 
-## Local Development Setup
+```text
+src/main.jsx
+  └── AuthProvider
+      └── React Router / App
+          └── Pages
+              └── Components and hooks
+                  └── Service modules
+                      ├── Firebase Auth
+                      └── Cloud Firestore
+```
+
+The active source structure is:
+
+```text
+src/
+├── components/
+│   ├── dev/
+│   ├── feed/
+│   ├── layout/
+│   ├── notifications/
+│   ├── search/
+│   └── ui/
+├── contexts/
+├── data/
+├── firebase/
+├── hooks/
+├── pages/
+├── services/
+└── utils/
+```
+
+UI components do not call Firestore directly. Service modules own Firebase operations, hooks own subscription lifecycles, and Firestore Security Rules enforce the client authorization boundary.
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the runtime flow and [FIRESTORE_SCHEMA.md](FIRESTORE_SCHEMA.md) for the active data model.
+
+## Security and data model highlights
+
+- `posts/{postId}/likes/{uid}` stores individual likes instead of an unbounded user-ID array.
+- Like and post-counter updates run in a Firestore transaction.
+- Comment create/delete operations update the parent counter in a write batch.
+- `connections/{minUid_maxUid}` stores one canonical relationship document for each pair.
+- Connection Rules restrict pending creation, receiver-only acceptance, and participant deletion.
+- Notifications live under `users/{recipientUid}/notifications` and list reads are recipient-scoped.
+- Notification creation is tied by Rules to the corresponding connection transaction.
+- User identity fields and selected settings types are validated by Rules.
+
+The current `users/{uid}` document contains both profile and account/settings fields. Public UI components do not render email, but authenticated profile reads currently return the full document; a stronger public/private data split is future work.
+
+## Current limitations
+
+- No automated unit, integration, emulator, end-to-end, or CI test suite.
+- Feed, directory, and notification reads are bounded rather than cursor-paginated.
+- Discovery uses client-side filtering rather than full-text/fuzzy indexing.
+- No Firebase Storage integration or media uploads.
+- No post editing, sharing, search, or bookmarks.
+- No private messaging, presence, read receipts, clubs, events, marketplace, or internship board.
+- No email-verification enforcement, password-change UI, or account-deletion cascade.
+- Notification generation currently occurs in client connection transactions rather than a background event processor.
+
+These are explicit MVP boundaries, not undocumented missing routes.
+
+## Local development
 
 ### Prerequisites
-* **Node.js**: v20.0.0 or higher (v22 tested)
-* **npm**: v10.0.0 or higher
 
-### Installation
+- Node.js 20 or newer.
+- npm 10 or newer.
+- A Firebase project for Auth and Firestore, or a compatible local environment.
 
-1. **Clone the repository**:
-   ```bash
-   git clone <your-repository-url>
-   cd campus-connect
-   ```
+### Install
 
-2. **Install dependencies**:
-   ```bash
-   npm install
-   ```
+```bash
+npm install
+```
 
-3. **Configure environment variables**:
-   Copy the example environment file:
-   ```bash
-   cp .env.example .env.local
-   ```
-   Populate `.env.local` with your Firebase web configuration:
-   ```env
-   VITE_FIREBASE_API_KEY=your_api_key
-   VITE_FIREBASE_AUTH_DOMAIN=your_project_id.firebaseapp.com
-   VITE_FIREBASE_PROJECT_ID=your_project_id
-   VITE_FIREBASE_STORAGE_BUCKET=your_project_id.firebasestorage.app
-   VITE_FIREBASE_MESSAGING_SENDER_ID=your_messaging_sender_id
-   VITE_FIREBASE_APP_ID=your_web_app_id
+### Configure environment
 
-   # Optional: local demo student 1-click access
-   VITE_DEMO_USER_EMAIL=demo.student@campusconnect.edu
-   VITE_DEMO_USER_PASSWORD=your_local_demo_password
-   ```
+Copy `.env.example` to `.env.local` and provide the Firebase web configuration:
 
-4. **Start the development server**:
-   ```bash
-   npm run dev
-   ```
-   Open [http://localhost:5173](http://localhost:5173) in your browser.
+```env
+VITE_FIREBASE_API_KEY=your_api_key
+VITE_FIREBASE_AUTH_DOMAIN=your_project_id.firebaseapp.com
+VITE_FIREBASE_PROJECT_ID=your_project_id
+VITE_FIREBASE_STORAGE_BUCKET=your_project_id.firebasestorage.app
+VITE_FIREBASE_MESSAGING_SENDER_ID=your_messaging_sender_id
+VITE_FIREBASE_APP_ID=your_web_app_id
 
----
+# Optional one-click local demo access
+VITE_DEMO_USER_EMAIL=demo.student@campusconnect.edu
+VITE_DEMO_USER_PASSWORD=your_local_demo_password
+```
 
-## Local Demo Data Seeding
+The `VITE_FIREBASE_STORAGE_BUCKET` value is part of the standard Firebase web configuration shape; the active client does not initialize or use Firebase Storage.
 
-> **Note**: The hosted live demo ([campusconnect-cf191.web.app](https://campusconnect-cf191.web.app)) is already seeded. You only need to run this script if you are setting up your own separate Firebase project locally.
+### Run locally
 
-The repository includes a deterministic, whitelist-guarded seeding script (`scripts/seedDemoData.mjs`):
+```bash
+npm run dev
+```
+
+Open [http://localhost:5173](http://localhost:5173).
+
+### Seed a separate demo project
+
+The hosted demo is already seeded. For another Firebase project, provide Admin credentials through the git-ignored `scripts/credentials/serviceAccountKey.json`, `GOOGLE_APPLICATION_CREDENTIALS`, Application Default Credentials, or a local emulator, then run:
 
 ```bash
 npm run seed:demo
 ```
 
-### Safety & Whitelist Boundaries
-* **Strict Whitelist**: The seeder can only write to predetermined IDs (`demo_peer_*`, `demo_post_01`–`demo_post_10`, and the dynamically resolved UID for `demo.student@campusconnect.edu`).
-* **Zero Deletion**: All writes use idempotent `.set(..., { merge: true })`. There are no delete queries or bulk clearance routines.
-* **Credential Security**: The script looks for a Service Account Key at `scripts/credentials/serviceAccountKey.json` (strictly git-ignored) or Google Application Default Credentials. **Never commit service-account credentials to the repository.**
+The seeder uses explicit demo ID whitelists, merge-only writes, and no bulk deletion routines. Never commit service-account credentials.
 
----
-
-## Project Structure
-
-```
-campus-connect/
-├── public/                 # Static assets
-├── scripts/
-│   └── seedDemoData.mjs    # Deterministic demo seeding script
-├── src/
-│   ├── components/
-│   │   ├── dev/            # SecurityTestPanel in-app test harness
-│   │   ├── feed/           # Feed, PostCard, PostComposer, CommentList, CommentComposer
-│   │   ├── layout/         # Navbar, PageContainer, Section
-│   │   ├── notifications/  # NotificationItem
-│   │   ├── search/         # StudentCard
-│   │   └── ui/             # Avatar, Button, Card, Input, Textarea, EmptyState
-│   ├── contexts/           # AuthContext (session state and observer)
-│   ├── data/               # demoData.js (personas, posts, whitelists)
-│   ├── firebase/           # config.js (client SDK initialization)
-│   ├── hooks/              # useAuth custom hook
-│   ├── pages/              # Login, Register, Dashboard, Profile, PublicProfile,
-│   │                       # Discover, Connections, Notifications, Settings, NotFound
-│   ├── services/           # authService, userService, postService, likeService,
-│   │                       # commentService, connectionService, notificationService
-│   ├── utils/              # securityTestRunner.js
-│   ├── App.jsx             # React Router configuration
-│   ├── index.css           # Tailwind v4 @theme design tokens
-│   └── main.jsx            # React root mount
-├── firestore.rules         # Production Firestore security rules (290 lines)
-├── firebase.json           # Firebase Hosting & Firestore deployment configuration
-├── .env.example            # Documented environment variable template
-└── package.json            # Scripts, dependencies, and project metadata
-```
-
----
-
-## Verification & Build
+## Verification commands
 
 ```bash
-# Run ESLint verification
 npm run lint
-
-# Compile production bundle
 npm run build
-
-# Preview production build locally
 npm run preview
 ```
+
+The repository does not currently define an `npm test` script.
+
+## Documentation map
+
+- [ARCHITECTURE.md](ARCHITECTURE.md) — active runtime architecture and limitations.
+- [FEATURES.md](FEATURES.md) — implemented/deferred feature inventory.
+- [FIRESTORE_SCHEMA.md](FIRESTORE_SCHEMA.md) — active collections and Rules behavior.
+- [COMPONENT_LIBRARY.md](COMPONENT_LIBRARY.md) — current reusable components.
+- [DESIGN_SYSTEM.md](DESIGN_SYSTEM.md) — Campus Atelier visual system.
+- [RECRUITER_DEMO_GUIDE.md](RECRUITER_DEMO_GUIDE.md) — technical walkthrough and demo precautions.
+- [TASKS.md](TASKS.md) — status-aware roadmap.

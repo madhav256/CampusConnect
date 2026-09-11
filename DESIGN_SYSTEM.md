@@ -1,803 +1,136 @@
-# DESIGN_SYSTEM.md
-
 # CampusConnect Design System
 
-## Design Philosophy
+**Status:** Active Campus Atelier visual reference (Milestone 13A)
 
-CampusConnect should feel like a modern SaaS application rather than a typical college project.
+This document describes the visual system implemented in `src/index.css` and the active components. Older indigo/slate guidance is obsolete.
 
-The UI should communicate:
+## Design direction
 
-- simplicity
-- professionalism
-- trust
-- speed
-- consistency
+CampusConnect uses **The Campus Atelier** visual language: an editorial, warm, restrained interface for academic collaboration.
 
-The application should feel polished enough that it could realistically be used by students at a university.
+Priorities:
 
----
+- clarity over decoration;
+- generous but efficient whitespace;
+- warm paper and surface layers;
+- strong ink contrast;
+- terracotta actions and focus cues;
+- Newsreader headings paired with Inter body text;
+- purposeful, restrained motion;
+- responsive and keyboard-accessible interaction.
 
-# Design Inspiration
+The system should feel like a considered campus publication and studio workspace rather than a generic social-media dashboard.
 
-Primary inspiration:
+## Implemented color tokens
 
-- Linear
-- GitHub
-- Notion
-- Discord
-- Threads
-- Vercel Dashboard
+The active Tailwind theme in `src/index.css` defines:
 
-Avoid copying these products.
+| Token | Purpose |
+| --- | --- |
+| `paper` | Main warm page background (`#fbf9f5`) |
+| `paper-warm` | Secondary warm background (`#f5f2eb`) |
+| `surface` | White content surface (`#ffffff`) |
+| `ink` | Primary text (`#181614`) |
+| `ink-muted` | Secondary text (`#6e6962`) |
+| `border-warm` | Warm border (`#e8e4dc`) |
+| `terracotta-50` through `terracotta-800` | Accent, action, focus, and status tones |
 
-Instead, follow the same design principles:
+Use the existing token classes instead of reintroducing indigo, slate, blue, or an unrelated color scale.
 
-- clean layouts
-- generous whitespace
-- subtle shadows
-- rounded corners
-- consistent spacing
-- modern typography
+Rose, amber, emerald, and stone utility tones are used selectively for error, warning, success, and neutral states.
 
----
+## Typography
 
-# Visual Style
+- Display and section headings use `font-serif`, backed by Newsreader with Georgia fallback.
+- Body, labels, controls, and metadata use `font-sans`, backed by Inter and system sans fallbacks.
+- Use clear hierarchy rather than excessive font weights.
+- Preserve intentional line breaks in bios, posts, and comments with appropriate whitespace classes.
+- Keep headings editorial but concise; body text should remain readable at mobile widths.
 
-The application should feel:
+## Surfaces and shape
 
-- modern
-- minimal
-- lightweight
-- responsive
-- accessible
-- friendly
+- Cards use warm borders, white surfaces, rounded corners, and restrained shadows.
+- Inputs and controls use rounded corners, clear labels, and visible focus rings.
+- Avatars are circular and use an initials fallback when no image URL exists.
+- Prefer spacing and hierarchy over heavy dividers.
+- Avoid excessive nested cards and dramatic shadows.
 
-Avoid visual clutter.
+## Layout and navigation
 
-Every page should have a clear visual hierarchy.
+- Authenticated pages use the sticky `Navbar` and `PageContainer`.
+- `PageContainer` defaults to a centered `max-w-5xl` content region with responsive padding.
+- The feed itself is narrower (`max-w-2xl`) to preserve readable line length.
+- Profile, settings, and public-profile content use responsive grids that collapse on smaller screens.
+- The Navbar contains Dashboard, Discover, Connections, Notifications, Settings, and Profile.
+- Mobile navigation is a menu, not a desktop sidebar.
+- Do not add messages, events, clubs, marketplace, or saved-post navigation until those features exist.
 
----
+## Component usage
 
-# Color Palette
+Use the active primitives:
 
-## Primary
+- `Button` for shared action variants, sizes, loading, and disabled states;
+- `Card` for bordered content surfaces;
+- `Avatar` for image/initial identity;
+- `Input` and `Textarea` for labeled form controls and validation messaging;
+- `EmptyState` for no-data states with optional actions;
+- `PageContainer` for page-level main content;
+- `Section` for titled card sections.
 
-Indigo
+Feature components should keep domain behavior in hooks/services and should not create competing visual primitives.
 
-HEX
+## Interaction and motion
 
-#4F46E5
+Motion is used for meaningful feedback, including:
 
-Hover
+- like-button feedback;
+- expandable comment content;
+- short page entrance and mobile-menu transitions.
 
-#4338CA
+Keep transitions subtle and short. Do not add motion merely for decoration. The global stylesheet includes a `prefers-reduced-motion: reduce` rule that disables or minimizes transitions and animations.
 
-Pressed
+## State presentation
 
-#3730A3
+Every asynchronous page or feature should account for:
 
----
+- loading placeholders or skeleton-style blocks;
+- an actionable error state where possible;
+- empty state when no data exists;
+- disabled controls during writes;
+- success feedback for settings/profile saves when appropriate.
 
-## Secondary
+Do not expose raw Firestore or Auth errors when a concise user-facing message is available.
 
-Slate Gray
+## Accessibility
 
-#64748B
+- Use semantic headings and sections.
+- Label inputs and connect helper/error messages with ARIA attributes.
+- Use buttons for actions and links for navigation.
+- Preserve visible focus states.
+- Include accessible names for icon-only controls.
+- Provide a skip-to-main-content link in authenticated navigation.
+- Do not communicate an important state with color alone.
+- Keep tap targets and text readable on mobile.
 
----
+## Responsive behavior
 
-## Success
+The interface must work at mobile, tablet, and desktop widths:
 
-#22C55E
+- navigation collapses into the mobile menu;
+- cards and profile grids reflow;
+- controls wrap rather than force horizontal scrolling;
+- content remains readable within the page container;
+- loading and empty states avoid large layout shifts.
 
----
+## Deferred visual work
 
-## Warning
+The following are not active design-system capabilities:
 
-#F59E0B
+- dark mode or theme switching;
+- profile image or cover uploads;
+- image posts and rich media;
+- messaging-specific UI;
+- advanced motion effects;
+- custom user themes.
 
----
-
-## Error
-
-#EF4444
-
----
-
-## Information
-
-#3B82F6
-
----
-
-# Neutral Colors
-
-Background
-
-#F8FAFC
-
-Surface
-
-#FFFFFF
-
-Surface Hover
-
-#F1F5F9
-
-Border
-
-#E2E8F0
-
-Divider
-
-#CBD5E1
-
-Primary Text
-
-#0F172A
-
-Secondary Text
-
-#64748B
-
-Muted Text
-
-#94A3B8
-
-Disabled
-
-#CBD5E1
-
----
-
-# Typography
-
-Font Family
-
-Inter
-
-Hierarchy
-
-Display
-
-48px
-
-Heading 1
-
-36px
-
-Heading 2
-
-30px
-
-Heading 3
-
-24px
-
-Heading 4
-
-20px
-
-Body Large
-
-18px
-
-Body
-
-16px
-
-Small
-
-14px
-
-Caption
-
-12px
-
-Use font-weight consistently:
-
-Regular
-
-Medium
-
-Semibold
-
-Bold
-
-Avoid excessive font weights.
-
----
-
-# Border Radius
-
-Buttons
-
-12px
-
-Cards
-
-16px
-
-Inputs
-
-12px
-
-Modals
-
-20px
-
-Avatars
-
-Full Circle
-
----
-
-# Shadows
-
-Use soft shadows.
-
-Small
-
-Cards
-
-Medium
-
-Dropdowns
-
-Large
-
-Modals
-
-Avoid dramatic shadows.
-
----
-
-# Spacing System
-
-Use an 8px spacing system.
-
-Available spacing:
-
-4
-
-8
-
-12
-
-16
-
-20
-
-24
-
-32
-
-40
-
-48
-
-64
-
-96
-
-Never use inconsistent spacing.
-
----
-
-# Layout
-
-Desktop
-
-Left Sidebar
-
-Main Feed
-
-Right Sidebar (optional)
-
-Maximum content width:
-
-1280px
-
-Use generous padding.
-
-Maintain consistent margins throughout.
-
----
-
-# Navigation
-
-Top Navigation
-
-Contains:
-
-- Logo
-- Search
-- Notifications
-- Messages
-- User Menu
-
-Sidebar
-
-Contains:
-
-- Home
-- Explore
-- Friends
-- Messages
-- Notifications
-- Events
-- Clubs
-- Marketplace
-- Saved
-- Profile
-- Settings
-
-Primary action:
-
-Create Post
-
----
-
-# Buttons
-
-Primary
-
-Filled
-
-Indigo
-
-White text
-
-Secondary
-
-Outlined
-
-Ghost
-
-Transparent
-
-Danger
-
-Red
-
-Loading state required.
-
-Disabled state required.
-
-Hover animation should be subtle.
-
----
-
-# Cards
-
-Cards should have:
-
-- white background
-- rounded corners
-- soft shadow
-- generous padding
-
-Cards should never appear cramped.
-
----
-
-# Inputs
-
-Rounded
-
-Clear labels
-
-Focus ring
-
-Accessible contrast
-
-Validation messages below input.
-
-Required fields clearly indicated.
-
----
-
-# Forms
-
-Every form should include:
-
-- loading state
-- validation
-- helpful error messages
-- disabled submit button during loading
-
-Never allow duplicate submissions.
-
----
-
-# Icons
-
-Use Lucide React icons.
-
-Use one consistent icon library throughout the application.
-
----
-
-# Images
-
-Rounded corners.
-
-Lazy load where appropriate.
-
-Show placeholders while loading.
-
----
-
-# Avatars
-
-Circular.
-
-Support:
-
-- image
-- initials fallback
-
-Consistent sizing across the application.
-
----
-
-# Badges
-
-Use badges for:
-
-- year
-- department
-- role
-- status
-
-Avoid excessive badge usage.
-
----
-
-# Empty States
-
-Every feature should have a proper empty state.
-
-Example:
-
-No posts yet.
-
-Be the first to share something.
-
-Provide an action button.
-
----
-
-# Loading States
-
-Prefer skeleton loaders.
-
-Avoid large spinners whenever possible.
-
-Use spinners only for short loading operations.
-
----
-
-# Modals
-
-Centered.
-
-Rounded.
-
-Soft shadow.
-
-Close button.
-
-ESC key support.
-
-Background overlay.
-
----
-
-# Animations
-
-Animations should be subtle.
-
-Examples:
-
-Hover elevation
-
-Button press
-
-Fade in
-
-Slide up
-
-Duration:
-
-150–250ms
-
-Avoid:
-
-- bouncing
-- excessive scaling
-- flashy transitions
-
----
-
-# Accessibility
-
-Support:
-
-- keyboard navigation
-- visible focus states
-- semantic HTML
-- screen readers
-- sufficient contrast
-
-Never rely on color alone to communicate information.
-
----
-
-# Responsiveness
-
-The application must work on:
-
-Desktop
-
-Tablet
-
-Mobile
-
-Sidebar should collapse on smaller screens.
-
-Navigation should remain accessible.
-
-Avoid horizontal scrolling.
-
----
-
-# Component Principles
-
-Every component should be:
-
-Reusable
-
-Composable
-
-Predictable
-
-Well documented
-
-Accessible
-
-Avoid duplicate implementations.
-
----
-
-# User Experience
-
-Users should always know:
-
-- where they are
-- what they can do next
-- whether an action succeeded
-- whether an action failed
-
-Feedback should be immediate.
-
----
-
-# Overall Feel
-
-CampusConnect should feel like a modern startup product.
-
-When designing any new page or component, prioritize:
-
-- clarity
-- consistency
-- simplicity
-- usability
-- responsiveness
-- accessibility
-
-If a design decision is uncertain, choose the simpler option.
-
-Consistency is more important than visual novelty.
-
----
-
-# Visual Refinements (v2)
-
-The following design decisions supersede earlier generic guidelines and should be treated as the preferred implementation across the application.
-
-## Overall Feel
-
-CampusConnect should resemble a polished SaaS application rather than a traditional college project.
-
-Design inspiration remains:
-
-- Linear
-- GitHub
-- Notion
-- Threads
-- Discord
-- Vercel Dashboard
-
-Prioritize:
-
-- generous whitespace
-- subtle elevation
-- consistent spacing
-- clean typography
-- calm color palette
-- minimal visual noise
-
-Avoid adding visual effects simply because they look impressive.
-
----
-
-# Profile Layout
-
-The profile page is the visual identity of every user.
-
-Requirements:
-
-- Cover banner at the top.
-- Circular avatar overlapping the lower portion of the banner.
-- User information must never overlap the banner.
-- Maintain generous spacing between:
-  - banner
-  - avatar
-  - user information
-
-- Profile cards should feel spacious rather than compressed.
-
-Future profile enhancements should integrate naturally into this layout.
-
----
-
-# Typography
-
-User-generated content should always preserve formatting.
-
-Examples:
-
-- Bio
-- About
-- Posts
-- Comments
-- Messages
-
-Render multiline text correctly.
-
-Never collapse intentional line breaks into a single paragraph.
-
----
-
-# Card Design
-
-Cards are the primary content container throughout CampusConnect.
-
-Requirements:
-
-- white background
-- subtle border
-- soft shadow
-- rounded corners
-- generous padding
-- consistent spacing
-
-Cards should support:
-
-- optional header
-- optional footer
-- optional actions
-
-Avoid visually heavy cards.
-
----
-
-# Feed Design
-
-The feed is the primary focus after authentication.
-
-Posts should feel lightweight.
-
-Each post should have clear visual separation using spacing rather than heavy borders.
-
-Content hierarchy:
-
-Avatar
-
-↓
-
-Author
-
-↓
-
-Timestamp
-
-↓
-
-Post Content
-
-↓
-
-Actions
-
----
-
-# Buttons
-
-Interactive elements should provide subtle feedback.
-
-Preferred interactions:
-
-- hover elevation
-- slight color transition
-- loading spinner
-- disabled opacity
-
-Avoid exaggerated animations.
-
----
-
-# Icons
-
-Icons should enhance readability.
-
-Preferred usage:
-
-- section titles
-- navigation
-- actions
-- metadata
-
-Avoid decorative icons without purpose.
-
-Use Lucide React consistently.
-
----
-
-# Empty States
-
-Every feature must include a thoughtful empty state.
-
-Examples:
-
-No posts yet.
-
-No comments yet.
-
-No notifications yet.
-
-No friends yet.
-
-Include:
-
-- meaningful icon
-- concise explanation
-- primary action
-
----
-
-# Loading States
-
-Prefer skeleton loaders.
-
-Use spinners only for short operations.
-
-Loading should never cause large layout shifts.
-
----
-
-# Future Visual Enhancements
-
-These are intentionally deferred until later milestones:
-
-- Dark mode
-- Theme switching
-- Profile cover customization
-- Profile picture upload
-- Image posts
-- Rich media
-- Motion enhancements
-
-The application should remain clean and consistent before introducing advanced visual effects.
+They should be designed as extensions of Campus Atelier rather than reasons to replace the current system.

@@ -1,878 +1,242 @@
-# COMPONENT_LIBRARY.md
-
 # CampusConnect Component Library
 
-This document defines every reusable component in CampusConnect.
+**Status:** Current component inventory and reuse guidance (Milestone 13A)
 
-Before creating a new component:
+This document describes components that exist in `src/components/`. It is not a catalog of future components. Page-local components remain inside their page until reuse is justified.
 
-1. Check whether an existing component already solves the problem.
-2. Extend an existing component before creating a new one.
-3. Keep components generic and reusable.
-4. Avoid duplicate implementations.
+## Active component tree
 
----
-
-# Folder Structure
-
+```text
+src/components/
+├── dev/
+│   └── SecurityTestPanel.jsx
+├── feed/
+│   ├── CommentComposer.jsx
+│   ├── CommentItem.jsx
+│   ├── CommentList.jsx
+│   ├── Feed.jsx
+│   ├── PostCard.jsx
+│   └── PostComposer.jsx
+├── layout/
+│   ├── Navbar.jsx
+│   ├── PageContainer.jsx
+│   └── Section.jsx
+├── notifications/
+│   └── NotificationItem.jsx
+├── search/
+│   └── StudentCard.jsx
+└── ui/
+    ├── Avatar.jsx
+    ├── Button.jsx
+    ├── Card.jsx
+    ├── EmptyState.jsx
+    ├── Input.jsx
+    └── Textarea.jsx
 ```
-src/
-└── components/
-    ├── ui/
-    ├── layout/
-    ├── auth/
-    ├── profile/
-    ├── feed/
-    ├── search/
-    ├── messaging/
-    ├── notifications/
-    └── common/
-```
 
----
+There are no active `auth`, `profile`, `messaging`, `common`, `sidebar`, or `modal` component folders.
 
-# UI Components
+## Component boundaries
 
-These are generic building blocks.
+- Pages compose screens, forms, tabs, and page-specific state.
+- Feature components render domain interactions and use hooks or callback props.
+- UI components remain generic and do not call Firebase.
+- Firestore/Auth calls belong in `src/services/`, normally reached through hooks or page-level service handlers.
+- A component should not be extracted merely because it contains JSX; extract when it has a reusable responsibility or a clear independent state boundary.
 
----
+## UI primitives
 
-## Button
+### `Button`
 
-Purpose
+File: `src/components/ui/Button.jsx`
 
-Primary interaction component.
+A shared button with:
 
-Variants
+- `primary`, `secondary`, `outline`, `ghost`, and `danger` variants;
+- `sm`, `md`, and `lg` sizes;
+- `loading` and optional `loadingText`;
+- disabled behavior that also disables while loading;
+- keyboard focus styling and a consistent press transition;
+- arbitrary native button props through rest props.
 
-- primary
-- secondary
-- outline
-- ghost
-- danger
+Use it for ordinary actions and forms. Use a native button only when a page needs a specialized interaction that does not fit the shared API.
 
-Sizes
+### `Card`
 
-- sm
-- md
-- lg
+File: `src/components/ui/Card.jsx`
 
-States
+A bordered surface container with:
 
-- default
-- hover
-- active
-- disabled
-- loading
+- `none`, `sm`, `md`, and `lg` padding;
+- `none`, `sm`, `md`, and `lg` shadows;
+- optional `hoverable` behavior;
+- `className` and native div props.
 
-Props
+Cards are the primary content surfaces for feed posts, profiles, settings, notifications, and empty/error states.
 
-- variant
-- size
-- loading
-- disabled
-- icon
-- children
-- onClick
-- type
+### `Avatar`
 
-Accessibility
+File: `src/components/ui/Avatar.jsx`
 
-- keyboard accessible
-- proper focus state
+Displays an image when `photoURL` is present and otherwise renders up to two initials. Supported sizes are `xs`, `sm`, `md`, `lg`, and `xl`. `bordered` controls the surface ring; `name`, `photoURL`, and `className` provide identity and styling.
 
----
+The current application intentionally supports initials fallback because media upload is not implemented.
 
-## Input
+### `Input`
 
-Purpose
+File: `src/components/ui/Input.jsx`
 
-Standard text input.
+A labeled native input wrapper. It supports `id`, `label`, `required`, `error`, `helperText`, and all remaining native input props. It links validation/helper text through `aria-describedby` and marks invalid fields with `aria-invalid`.
 
-Supports
+### `Textarea`
 
-- text
-- email
-- password
-- search
-- number
+File: `src/components/ui/Textarea.jsx`
 
-Props
+A labeled native textarea wrapper with the same error, helper-text, required, and accessibility conventions as `Input`. It is used by profile, post, and form flows.
 
-- label
-- placeholder
-- value
-- onChange
-- error
-- helperText
-- required
-- disabled
+`CommentComposer` uses a specialized native textarea because it needs auto-resizing and Enter-to-submit behavior.
 
----
+### `EmptyState`
 
-## Textarea
+File: `src/components/ui/EmptyState.jsx`
 
-Purpose
+Displays an optional icon, title, description, and action. The `compact` prop provides a smaller page-section version. It is used by feed, discovery, connections, notifications, and the not-found page.
 
-Long-form text input.
+## Layout components
 
-Used for
+### `Navbar`
 
-- posts
-- comments
-- bio
+File: `src/components/layout/Navbar.jsx`
 
-Supports
+The authenticated top navigation. It provides:
 
-- character count
-- validation
+- CampusConnect brand link;
+- links to Dashboard, Discover, Connections, Notifications, Settings, and Profile;
+- notification unread badge from `useNotifications`;
+- responsive mobile menu;
+- signed-in avatar link;
+- skip-to-main-content link;
+- keyboard focus states.
 
----
+It does not contain messages, events, clubs, marketplace, or saved-post navigation.
 
-## Card
+### `PageContainer`
 
-Purpose
+File: `src/components/layout/PageContainer.jsx`
 
-Reusable content container.
+Renders the semantic `<main>` region with the `main-content` ID, focus target, responsive padding, entrance animation, and configurable `maxWidth`. The default width is `max-w-5xl`.
 
-Used by
+### `Section`
 
-- posts
-- profile
-- settings
-- dashboard widgets
+File: `src/components/layout/Section.jsx`
 
-Props
+A semantic content section with a title, optional subtitle, optional action area, and children. It is used in profile and similar card-based layouts.
 
-- children
-- padding
-- shadow
-- hoverable
+## Feed components
 
----
+### `Feed`
 
-## Avatar
+File: `src/components/feed/Feed.jsx`
 
-Purpose
+Connects `usePosts` to the post composer and post list. It owns feed-level loading, error, and empty rendering, and passes the current Auth UID and delete callback to each `PostCard`.
 
-Display user identity.
+It does not query Firestore directly.
 
-Supports
+### `PostComposer`
 
-- image
-- initials fallback
+File: `src/components/feed/PostComposer.jsx`
 
-Sizes
+A text-only post form using `Textarea`, `Button`, and `Avatar`. It prevents empty submission, disables the form while submitting, clears successful content, and displays a local error.
 
-- xs
-- sm
-- md
-- lg
-- xl
+### `PostCard`
 
----
+File: `src/components/feed/PostCard.jsx`
 
-## Badge
+Renders an author snapshot, timestamp, text content, author-only delete confirmation, like action, comment count, and expandable `CommentList`. It uses `usePostLike` and Motion for the like/expand transitions.
 
-Purpose
+There is no media, share, bookmark, edit, or repost action.
 
-Display short metadata.
+### `CommentList`
 
-Examples
+File: `src/components/feed/CommentList.jsx`
 
-- department
-- year
-- admin
-- verified
+Subscribes through `useComments`, renders `CommentComposer`, and displays loading, error, empty, or `CommentItem` states.
 
-Variants
+### `CommentComposer`
 
-- default
-- success
-- warning
-- danger
-- info
+File: `src/components/feed/CommentComposer.jsx`
 
----
+A compact comment input with auto-resizing textarea, Enter-to-submit unless Shift is pressed, local error feedback, and loading state.
 
-## Spinner
+### `CommentItem`
 
-Purpose
+File: `src/components/feed/CommentItem.jsx`
 
-Loading indicator.
+Renders a comment author avatar, author name, timestamp, multiline content, and an author-only delete action.
 
-Sizes
+## Search components
 
-- sm
-- md
-- lg
+### `StudentCard`
 
----
+File: `src/components/search/StudentCard.jsx`
 
-## Skeleton
+Renders a bounded discovery result with avatar/initials, display name, department, academic year, up to three skills plus a remainder count, and a link to `/users/:uid`.
 
-Purpose
+The search input itself is page-local to `Discover`; there is no shared `SearchBar` component.
 
-Loading placeholder.
+## Notification components
 
-Used while fetching data.
+### `NotificationItem`
 
-Avoid replacing every loading state with a spinner.
+File: `src/components/notifications/NotificationItem.jsx`
 
----
+Renders a notification actor, relative timestamp, unread state, profile link, mark-as-read action, dismissal action, and the appropriate accept/decline or view-profile action for the two active notification types:
 
-## Alert
+- `connection_request`;
+- `connection_accepted`.
 
-Purpose
+It calls connection services for inline request actions through explicit callbacks and does not subscribe to Firebase itself.
 
-Display feedback.
+## Development component
 
-Variants
+### `SecurityTestPanel`
 
-- success
-- warning
-- error
-- info
+File: `src/components/dev/SecurityTestPanel.jsx`
 
-Dismissible when appropriate.
+A development-only panel used by Settings and Notifications to run the Milestone 8 notification audit or Milestone 9 user/settings audit. It displays blocked/failed results and disposable-test cleanup reports.
 
----
+It must not be rendered as a production feature. The underlying functions also guard against production execution.
 
-## EmptyState
+## Page-local components
 
-Purpose
+`Connections.jsx` contains page-local `PersonCard`, `PersonCardInner`, and `Tab` components. They are intentionally local because they combine connection-specific data loading and actions and are not currently reused elsewhere.
 
-Displayed when no data exists.
+The route pages also contain small form, tab, and state-rendering structures. Do not create a generic component for every repeated JSX fragment without a demonstrated reuse case.
 
-Contains
+## Reuse and naming rules
 
-- icon
-- title
-- description
-- optional action button
+Before adding a component:
 
----
+1. Check whether an existing component already owns the responsibility.
+2. Extend a generic primitive when the new behavior remains generic.
+3. Keep domain-specific behavior in the relevant feature folder or page.
+4. Keep Firebase operations out of reusable UI components.
+5. Use singular PascalCase names that describe the responsibility.
+6. Preserve loading, error, empty, disabled, and keyboard states where applicable.
+7. Prefer semantic HTML and visible focus styles.
 
-## Modal
+Avoid vague or speculative names such as `CardNew`, `Button2`, `Component1`, or a component for an unimplemented feature.
 
-Purpose
+## Deferred component ideas
 
-Overlay dialog.
+These do not exist in the current source tree and should be introduced only with their associated feature:
 
-Must support
+- messaging conversation/message components;
+- post share/bookmark/edit controls;
+- media upload and preview components;
+- modal, dropdown, tooltip, badge, spinner, skeleton, and alert primitives;
+- profile-specific extracted components;
+- a sidebar or dashboard layout system;
+- a reusable search-bar abstraction.
 
-- close button
-- escape key
-- backdrop click
-- focus trap
-
----
-
-## Dropdown
-
-Purpose
-
-Context menus.
-
-Examples
-
-- profile menu
-- post actions
-
----
-
-## Tooltip
-
-Purpose
-
-Explain icons.
-
-Should never contain essential information.
-
----
-
-# Layout Components
-
----
-
-## Navbar
-
-Contains
-
-- logo
-- search
-- notifications
-- messages
-- profile menu
-
-Always visible after login.
-
----
-
-## Sidebar
-
-Contains navigation.
-
-Supports
-
-- desktop
-- collapsed
-- mobile drawer
-
----
-
-## DashboardLayout
-
-Provides
-
-- navbar
-- sidebar
-- page container
-
-Used by authenticated pages.
-
----
-
-## AuthLayout
-
-Used for
-
-- login
-- signup
-- forgot password
-
-Provides consistent authentication pages.
-
----
-
-## PageContainer
-
-Provides
-
-- max width
-- padding
-- responsive spacing
-
-Every page should use this component.
-
----
-
-## Section
-
-Reusable content section.
-
-Supports
-
-- title
-- subtitle
-- actions
-
----
-
-# Profile Components
-
----
-
-## ProfileHeader
-
-Displays
-
-- avatar
-- name
-- department
-- year
-- bio
-- action buttons
-
----
-
-## ProfileStats
-
-Displays
-
-- friends
-- posts
-- likes
-
----
-
-## ProfileCard
-
-Reusable information card.
-
----
-
-## SkillsList
-
-Displays user skills.
-
----
-
-## SocialLinks
-
-Displays
-
-- GitHub
-- LinkedIn
-- Portfolio
-- Website
-
----
-
-# Feed Components
-
----
-
-## PostComposer
-
-Used to create posts.
-
-Supports
-
-- text
-- image (future)
-- emoji (future)
-
----
-
-## PostCard
-
-Displays
-
-- author
-- content
-- media
-- timestamp
-- actions
-
----
-
-## PostActions
-
-Contains
-
-- like
-- comment
-- share
-- bookmark
-
----
-
-## CommentList
-
-Displays comments.
-
----
-
-## CommentItem
-
-Single comment.
-
----
-
-# Search Components
-
----
-
-## SearchBar
-
-Reusable search component.
-
-Supports
-
-- debounce
-- loading
-- clear button
-
----
-
-## UserCard
-
-Search result card.
-
----
-
-# Friends Components
-
----
-
-## FriendCard
-
-Displays
-
-- avatar
-- name
-- department
-- mutual friends
-
----
-
-## FriendRequestCard
-
-Displays pending requests.
-
----
-
-# Messaging Components
-
----
-
-## ConversationList
-
-Sidebar conversation list.
-
----
-
-## ChatWindow
-
-Displays conversation.
-
----
-
-## MessageBubble
-
-Supports
-
-- sent
-- received
-
----
-
-## MessageInput
-
-Supports
-
-- text
-- attachments (future)
-
----
-
-# Notifications
-
----
-
-## NotificationItem
-
-Displays
-
-- icon
-- message
-- timestamp
-
-Supports
-
-- read
-- unread
-
----
-
-# Settings
-
----
-
-## SettingsSection
-
-Reusable settings group.
-
----
-
-## ToggleSwitch
-
-Reusable toggle.
-
----
-
-## ConfirmDialog
-
-Reusable confirmation dialog.
-
-Used before destructive actions.
-
----
-
-# Component Principles
-
-Every component should be
-
-- reusable
-- composable
-- responsive
-- accessible
-- documented
-- independently testable
-
----
-
-# Reuse Rules
-
-Before creating a component:
-
-Ask:
-
-Can Button solve this?
-
-Can Card solve this?
-
-Can Section solve this?
-
-Can PageContainer solve this?
-
-Never create a second version of an existing component unless there is a compelling architectural reason.
-
----
-
-# Naming Rules
-
-Component names should be:
-
-- descriptive
-- singular
-- PascalCase
-
-Examples
-
-Button
-
-PostCard
-
-ProfileHeader
-
-MessageBubble
-
-Avoid vague names.
-
-Do not use:
-
-Component1
-
-CardNew
-
-Button2
-
-TempCard
-
----
-
-# Definition of Done
-
-A component is complete only if it:
-
-- is reusable
-- is responsive
-- supports accessibility
-- follows DESIGN_SYSTEM.md
-- follows CODING_RULES.md
-- is documented
-- avoids duplicated logic
-- can be reused elsewhere without modification
-
----
-
-# Component Enhancements (v2)
-
-These guidelines extend the existing component definitions.
-
-## Button
-
-Every button must support:
-
-- loading state
-- disabled state
-- keyboard focus
-- optional leading icon
-- optional trailing icon
-
-Primary buttons should be visually dominant.
-
----
-
-## Card
-
-Cards should support:
-
-- header
-- body
-- footer
-- optional actions
-
-Cards should never contain excessive nesting.
-
-Prefer composition over specialized card variants.
-
----
-
-## Avatar
-
-Avatar should support:
-
-- image
-- initials fallback
-
-Future support:
-
-- online indicator
-- profile upload
-- status badge
-
-Avatar should align consistently across:
-
-- profile
-- feed
-- comments
-- messaging
-- search
-
----
-
-## Textarea
-
-Textarea should support:
-
-- multiline content
-- preserved line breaks
-- validation
-- character count (future)
-
-Rendered content should preserve user formatting.
-
----
-
-## Section
-
-Every page should be divided into reusable sections.
-
-A section may contain:
-
-- title
-- subtitle
-- actions
-- children
-
-Future support:
-
-- collapsible sections
-
----
-
-# Feed Components
-
-## Feed
-
-Responsibilities:
-
-- render PostComposer
-- render PostCard list
-- loading state
-- empty state
-- error state
-
-Feed must not directly query Firestore.
-
-Use services and hooks.
-
----
-
-## PostComposer
-
-Responsibilities:
-
-- create posts
-- validate content
-- prevent empty submissions
-- loading state
-
-Future support:
-
-- image upload
-- emoji picker
-- markdown
-- mentions
-
----
-
-## PostCard
-
-Responsibilities:
-
-- display author
-- timestamp
-- content
-- actions
-
-Future support:
-
-- likes
-- comments
-- bookmarks
-- sharing
-- edited badge
-
----
-
-# Future Components
-
-The following components should be introduced only when required by future milestones:
-
-Comments
-
-- CommentComposer
-- CommentItem
-- CommentList
-
-Likes
-
-- LikeButton
-
-Notifications
-
-- NotificationCard
-
-Messaging
-
-- ConversationList
-- MessageBubble
-- MessageComposer
-
-Search
-
-- UserSearchResult
-
-Friends
-
-- FriendCard
-- FriendRequestCard
-
-Settings
-
-- SettingsCard
-- PreferenceToggle
-
-Avoid implementing these components until the associated feature is being developed.
-
----
-
-# Reusability Rule
-
-Before creating a new component, always ask:
-
-Can an existing component be extended?
-
-If yes, extend it.
-
-If no, create a new reusable component.
-
-Avoid one-off components unless they represent a unique feature.
-
----
-
-# Visual Consistency
-
-All reusable components must follow:
-
-- DESIGN_SYSTEM.md
-- consistent spacing
-- accessible interactions
-- responsive layouts
-- predictable APIs
-
-Consistency is more important than introducing new visual styles.
+Their absence is intentional, not an incomplete implementation of this library.

@@ -1,6 +1,6 @@
 # CampusConnect Architecture
 
-**Status:** Current implementation reference (Milestone 13A)
+**Status:** Current implementation reference (Milestone 13C)
 
 This document describes the architecture that exists in the repository today. It does not describe proposed messaging, media storage, search infrastructure, or other deferred work.
 
@@ -141,7 +141,7 @@ The service modules are the Firebase boundary:
 - `authService.js`: Firebase Auth persistence, subscriptions, login, signup, logout, reset, and Auth error normalization.
 - `userService.js`: profile creation, profile subscriptions, profile/settings updates, point reads, normalization, and bounded user-directory caching.
 - `postService.js`: post creation, newest-post subscription, deletion, and comment-counter updates.
-- `commentService.js`: comment subscriptions plus batched comment create/delete and parent counter updates.
+- `commentService.js`: authoritative profile lookup, canonical comment snapshots, comment subscriptions, plus batched comment create/delete and parent counter updates.
 - `likeService.js`: atomic like/unlike transactions and the current user's like subscription.
 - `connectionService.js`: canonical relationship IDs, relationship transactions, notifications associated with connection transitions, and relationship subscriptions.
 - `notificationService.js`: recipient-scoped notification subscription, normalization, read updates, batch mark-as-read, and dismissal.
@@ -201,17 +201,19 @@ The full field-level schema and current rule behavior are documented in [FIRESTO
 The browser is treated as untrusted. Firestore Rules enforce the active authorization model, including:
 
 - authenticated access to application data where permitted;
-- owner-only user updates and immutable identity fields;
-- author-restricted post deletion;
+- strict user creation/resulting-document schemas, owner-only updates, and immutable identity fields;
+- author-restricted post deletion and no generic post editing;
+- exact like document schemas and transaction-coupled like counters;
+- canonical comment snapshots, denied comment updates, and child/parent counter coupling;
 - user-owned like creation/deletion;
 - canonical connection IDs and participant arrays;
-- recipient-only notification list queries;
-- recipient-only notification read-state updates;
+- recipient-only notification list and point reads;
+- recipient-only routine notification read-state updates, with narrowly validated acceptance refreshes and sender-side cancellation cleanup;
 - connection state transitions and notification transaction relationships.
 
 The development-only `SecurityTestPanel` exercises selected notification and user/settings rejection scenarios. It is not a production test runner and is not a replacement for automated emulator tests.
 
-The current rules also have known areas for future hardening. For example, the author update branch for posts is broader than the current UI, and comment-counter validation does not fully prove a matching comment mutation. These are documentation/audit findings, not changes made by this milestone.
+The Rules intentionally retain one documented limitation: the parent `/posts/{postId}` match can validate an exact nonnegative counter delta but cannot identify which arbitrary child comment changed in the same batch. Child-side `getAfter()` checks reject standalone and mismatched comment writes, while a parent-only exact delta remains possible until the data model adds a causality marker or ledger.
 
 ## Demo and deployment
 
@@ -230,6 +232,7 @@ The recruiter demo uses a normal Firebase Auth account configured through `VITE_
 - No media upload or Firebase Storage integration exists.
 - No post editing, post sharing, post search, bookmarks, private messaging, clubs, events, marketplace, or direct account deletion exists.
 - Notification generation currently originates in client connection transactions rather than a trusted background event processor.
+- The parent-only exact comment-counter limitation remains; a future ledger or server-side event model would be needed to prove arbitrary child causality.
 
 ## Deferred architecture, not current implementation
 

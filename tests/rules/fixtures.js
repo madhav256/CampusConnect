@@ -51,7 +51,7 @@ export function userFixture(uid, overrides = {}) {
 export function postFixture(id, authorId, overrides = {}) {
   return {
     authorId,
-    authorName: authorId === TEST_UIDS.alice ? "Alice Test" : "Bob Test",
+    authorName: authorId === TEST_UIDS.alice ? "Alice Test" : authorId === TEST_UIDS.bob ? "Bob Test" : "Carol Test",
     authorAvatar: null,
     content: "A deterministic rules-test post.",
     likesCount: 0,
@@ -59,14 +59,19 @@ export function postFixture(id, authorId, overrides = {}) {
     createdAt: timestamp,
     updatedAt: timestamp,
     ...overrides,
-    id,
   };
 }
 
 export function commentFixture(authorId, overrides = {}) {
+  const names = {
+    alice: "Alice Test",
+    bob: "Bob Test",
+    carol: "Carol Test",
+  };
+
   return {
     authorId,
-    authorName: authorId === TEST_UIDS.alice ? "Alice Test" : "Bob Test",
+    authorName: names[authorId] || "Test Student",
     authorAvatar: null,
     content: "A deterministic rules-test comment.",
     createdAt: timestamp,
@@ -92,12 +97,17 @@ export function notificationFixture(recipientId, actorId, overrides = {}) {
   const connectionId = [recipientId, actorId].sort().join("_");
   const type = overrides.type || "connection_request";
   const id = overrides.id || `${type === "connection_accepted" ? "acc" : "req"}_${connectionId}`;
+  const names = {
+    alice: "Alice Test",
+    bob: "Bob Test",
+    carol: "Carol Test",
+  };
 
   return {
     id,
     recipientId,
     actorId,
-    actorName: actorId === TEST_UIDS.alice ? "Alice Test" : "Bob Test",
+    actorName: names[actorId] || "Test Student",
     actorAvatar: null,
     type,
     referenceId: connectionId,
@@ -118,7 +128,7 @@ export async function seedBaseData(testEnvironment) {
 
     batch.set(
       db.collection("posts").doc(TEST_IDS.alicePost),
-      postFixture(TEST_IDS.alicePost, TEST_UIDS.alice)
+      postFixture(TEST_IDS.alicePost, TEST_UIDS.alice, { commentsCount: 1 })
     );
     batch.set(
       db.collection("posts").doc(TEST_IDS.bobPost),

@@ -42,9 +42,6 @@ export default function NotificationItem({
     setActionError(null);
     try {
       await acceptConnectionRequest(currentUid, notification.actorId);
-      if (onMarkAsRead && !notification.isRead) {
-        onMarkAsRead(notification.id);
-      }
     } catch (err) {
       setActionError(err.message || "Failed to accept request.");
       setIsBusy(false);

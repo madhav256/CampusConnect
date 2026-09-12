@@ -1,6 +1,6 @@
 # CampusConnect Firestore Schema
 
-**Status:** Active client schema and rule reference (Milestone 13A)
+**Status:** Active client schema and Rule reference (Milestone 13C)
 
 This document describes the collections used by the current browser application. Firebase Admin SDK demo seeding can add deterministic metadata outside the client write path; those seeder-only details are called out explicitly.
 
@@ -54,6 +54,8 @@ Stores the current profile, account metadata, discoverability setting, and notif
 
 `createUserProfile` creates defaults for optional profile fields. `updateUserProfile` updates editable profile fields and `updatedAt`; `updateUserSettings` updates discoverability, notification preferences, and `updatedAt`.
 
+Client profile creation must provide exactly this field set, use the authenticated UID and email, use the documented nested map shapes, and write both timestamps with `serverTimestamp()`. The Rules reject extra or missing fields, invalid primitive/nested types, cross-user identity, and client-supplied timestamps. Updates validate the resulting full document, preserve `uid`, `email`, and `createdAt`, and permit partial notification-preference maps.
+
 ### Queries and privacy behavior
 
 - `subscribeToUserProfile(uid)` performs a document subscription.
@@ -73,7 +75,7 @@ The current Rules allow authenticated users to read the full `users/{uid}` docum
 - `isDiscoverable` and notification preference values are type-checked on update.
 - User document deletion is denied by the active Rules.
 
-The create rule is less restrictive than the update rule; the Admin seeder also bypasses client Rules. Rule-hardening is a future engineering task, not part of this documentation milestone.
+The Admin seeder bypasses client Rules by design, but browser profile creation and updates use the strict validators above. The broader public/private profile boundary remains deferred: authenticated users can still read the full profile document.
 
 ## 2. `posts/{postId}`
 
@@ -88,7 +90,7 @@ Stores text feed posts.
 | `likesCount` | number | Denormalized like counter |
 | `commentsCount` | number | Denormalized comment counter |
 | `createdAt` | timestamp | Creation time |
-| `updatedAt` | timestamp | Last counter or content update time |
+| `updatedAt` | timestamp | Last validated counter update time |
 
 Client-created posts use an auto-generated Firestore document ID and initialize both counters to zero. The demo seeder uses deterministic IDs such as `demo_post_01` and writes seeded counter values through Admin SDK.
 
@@ -102,9 +104,9 @@ Client-created posts use an auto-generated Firestore document ID and initialize 
 
 ### Rule behavior and known limitation
 
-The Rules include dedicated post-update validators for atomic like updates and comment-count batches. They preserve the main post fields on those paths. There is also an author update branch that preserves `authorId` but is broader than the current UI; it should be audited before relying on Rules as a complete post-edit schema.
+Posts are not editable through the client Rules. The only permitted post updates are validated atomic like/unlike transactions and comment-counter mutations. Like updates preserve all unrelated post fields, require an exact one-count delta, and require the matching like document's after-state. Counter updates preserve all unrelated post fields, require an exact one-count delta, a nonnegative result, and a server `updatedAt`.
 
-The comment-count validator restricts changed keys but does not independently prove that a matching comment was created/deleted or that the delta is exactly one. This is a known hardening candidate.
+Comment create/delete Rules also inspect the parent post's after-state, so standalone child writes and wrong deltas are rejected. Firestore Rules cannot identify an arbitrary comment ID from the parent post match, however; a parent-only exact `+1`/`-1` update remains a documented residual limitation.
 
 ## 3. `posts/{postId}/comments/{commentId}`
 
@@ -126,9 +128,12 @@ Comments are read with `orderBy("createdAt", "asc")` when a post's comments are 
 ### Rule behavior
 
 - Authenticated users can read comments.
-- A comment can be created when `authorId` matches the caller.
-- Only the comment author can update or delete the comment.
-- The current Rules do not enforce a complete comment field whitelist or independently validate the parent counter relationship.
+- Comment creates require exactly the documented six fields, a nonempty string body, server timestamps, the authenticated author UID, and canonical `displayName`/`photoURL` values read from `users/{authorId}`.
+- A create must be batched with the parent post's exact `commentsCount + 1` and server `updatedAt` after-state.
+- Comment updates are denied.
+- Only the comment author can delete, and deletion must be batched with the parent post's exact nonnegative `commentsCount - 1` and server `updatedAt` after-state.
+
+`commentService` obtains the authoritative Firestore profile before writing a comment; the caller-provided AuthContext display-name/avatar arguments are not trusted for the denormalized snapshot.
 
 ## 4. `posts/{postId}/likes/{uid}`
 
@@ -241,10 +246,11 @@ Notification preferences are read before the connection transaction and determin
 ### Rule behavior
 
 - Notification list queries are recipient-only.
-- Single-document reads additionally allow the recipient, the stored actor in constrained cases, or an absent-document pre-check path.
+- Both notification list queries and point reads are recipient-only; actors and unrelated users cannot read a notification.
 - Creates require the exact schema, recipient path, actor identity, verified actor profile values, deterministic ID/type, and the corresponding connection state in the same transaction using `existsAfter()`/`getAfter()`.
-- Only the recipient can update, and only `isRead` may change.
-- The recipient can delete notifications; the actor has a narrowly constrained request-deletion path tied to connection deletion.
+- The recipient can normally update only `isRead`. During the pending-to-accepted transition, the accepting actor may also refresh an existing deterministic acceptance notification in that same transaction; the full schema, actor profile, and connection before/after relationship remain validated.
+- The recipient can delete notifications. The request sender may delete a request notification only while atomically deleting its still-pending connection; an absent deterministic request-notification delete remains idempotent.
+- `cancelConnectionRequest` therefore reads only the connection as the sender and directly deletes the deterministic notification path without pre-reading it.
 
 The Admin SDK demo seeder writes two deterministic notifications directly and may include `isDemo`; Admin credentials bypass client Rules. `isDemo` is not part of the normal client notification schema.
 

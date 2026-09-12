@@ -127,9 +127,9 @@ export async function cancelConnectionRequest(fromUid, toUid) {
   const notifRef = doc(firestore, "users", toUid, "notifications", `req_${docId}`);
 
   await runTransaction(firestore, async (transaction) => {
-    // Reads first:
+    // Read only the connection. Notification cleanup is intentionally idempotent:
+    // the recipient may have already deleted the notification.
     const connDoc = await transaction.get(connRef);
-    const notifDoc = await transaction.get(notifRef);
 
     if (!connDoc.exists()) {
       throw new Error("Connection request no longer exists.");
@@ -144,20 +144,15 @@ export async function cancelConnectionRequest(fromUid, toUid) {
       throw new Error("Only the sender can cancel this request.");
     }
 
-    // Mandatory connection deletion:
     transaction.delete(connRef);
-
-    // Conditional notification deletion:
-    if (notifDoc.exists()) {
-      transaction.delete(notifRef);
-    }
+    transaction.delete(notifRef);
   });
 }
 
 /**
  * Accepts an incoming pending request. Only the receiver may accept.
  * Updates connection to accepted, cleans up the incoming notification if it exists,
- * and atomically creates an acceptance notification for the sender.
+ * and atomically creates an acceptance notification for the sender when one is absent.
  *
  * @param {string} currentUid - The accepting user's UID (must be receiverId)
  * @param {string} targetUid - The requesting user's UID (must be senderId)
@@ -209,7 +204,12 @@ export async function acceptConnectionRequest(currentUid, targetUid) {
       transaction.delete(incomingNotifRef);
     }
 
-    // Create acceptance notification for the sender (targetUid) if enabled by recipient
+    // Create or refresh acceptance notification for the sender (targetUid) if enabled by recipient.
+    // We always set the notification to ensure it exists with valid data after the transaction.
+    // This approach is idempotent and ensures:
+    // - If no notification existed, we create a valid one
+    // - If a notification existed, we refresh it with current data (timestamps, profile info)
+    // - The result is always a valid notification representing this acceptance event
     if (shouldNotifyRecipient) {
       transaction.set(acceptedNotifRef, {
         id: `acc_${docId}`,

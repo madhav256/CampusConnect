@@ -1,6 +1,6 @@
 # CampusConnect Roadmap
 
-**Status:** Status-aware roadmap (Milestone 13A)
+**Status:** Status-aware roadmap (Milestone 13C)
 
 Checked items describe work that exists in the current repository. Unchecked items are proposed or deferred; they are not implemented merely because they appear here.
 
@@ -27,6 +27,7 @@ Checked items describe work that exists in the current repository. Unchecked ite
 - [x] Development-only Firestore security audit panel.
 - [x] Public README and recruiter demo documentation.
 - [x] Milestone 13A documentation and architecture reconciliation.
+- [x] Milestone 13C Firestore Rules hardening and emulator regression expansion.
 
 ## Current maintenance contract
 
@@ -48,13 +49,21 @@ Checked items describe work that exists in the current repository. Unchecked ite
 - [x] Add pure helper tests for profile/notification normalization and canonical connection IDs.
 - [x] Add safe local `test:unit`, `test:rules`, and aggregate `test` scripts.
 
+#### Milestone 13C — delivered
+
+- [x] Enforce strict user creation and resulting-document update schemas, including identity, nested maps, types, and server timestamps.
+- [x] Remove generic post editing and validate like/counter mutation shapes and deltas.
+- [x] Enforce canonical comment snapshots, exact comment schemas, child/parent counter coupling, and denied comment updates.
+- [x] Enforce exact like document schemas and retain atomic like/unlike coupling.
+- [x] Restrict notification point reads to recipients and make sender cancellation cleanup idempotent without an actor pre-read.
+- [x] Expand emulator Rules regressions and retain one clearly labeled parent-only counter limitation test.
+
 #### Remaining 13B/13C work
 
 - [ ] Add service integration tests against Auth and Firestore emulators.
-- [ ] Audit the broad post-author update path.
-- [ ] Strengthen comment-counter postconditions.
-- [ ] Resolve the documented user/profile, snapshot, and notification read gaps.
 - [ ] Add CI checks for lint, build, and automated tests.
+- [ ] Resolve the broader public/private profile data boundary.
+- [ ] Replace the residual parent-only comment-counter limitation with a causality-proving data model or trusted server-side event path.
 - [ ] Add an application error boundary if the product requires a visible runtime recovery path.
 
 ### 2. Public/private data boundary

@@ -9,6 +9,7 @@ import {
   increment,
 } from "firebase/firestore";
 import { db, isFirebaseConfigured } from "../firebase/config";
+import { fetchUserById } from "./userService";
 
 function requireDb() {
   if (!isFirebaseConfigured || !db) {
@@ -21,18 +22,23 @@ function requireDb() {
 
 export async function createComment(postId, authorId, authorName, authorAvatar, content) {
   const firestore = requireDb();
-  
+  const authorProfile = await fetchUserById(authorId);
+
+  if (!authorProfile) {
+    throw new Error("Your profile is not ready. Please try again.");
+  }
+
   // Reference to the subcollection
   const commentsRef = collection(firestore, "posts", postId, "comments");
   const newCommentRef = doc(commentsRef);
-  
+
   // Reference to the parent post
   const postRef = doc(firestore, "posts", postId);
 
   const newComment = {
     authorId,
-    authorName,
-    authorAvatar,
+    authorName: authorProfile.displayName,
+    authorAvatar: authorProfile.photoURL,
     content: content.trim(),
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
@@ -53,7 +59,7 @@ export function subscribeToComments(postId, callback, onError) {
   const firestore = requireDb();
   const commentsRef = collection(firestore, "posts", postId, "comments");
   const q = query(commentsRef, orderBy("createdAt", "asc"));
-  
+
   return onSnapshot(
     q,
     (snapshot) => {
@@ -67,9 +73,9 @@ export function subscribeToComments(postId, callback, onError) {
   );
 }
 
-export async function deleteComment(postId, commentId) {
+export function deleteComment(postId, commentId) {
   const firestore = requireDb();
-  
+
   const commentRef = doc(firestore, "posts", postId, "comments", commentId);
   const postRef = doc(firestore, "posts", postId);
 
@@ -80,5 +86,5 @@ export async function deleteComment(postId, commentId) {
     updatedAt: serverTimestamp(),
   });
 
-  await batch.commit();
+  return batch.commit();
 }

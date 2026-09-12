@@ -10,34 +10,118 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
-    // Validates atomic like/unlike transactions on posts
+    function isValidSocialLinks(socialLinks) {
+      return socialLinks is map &&
+             socialLinks.keys().hasOnly(['github', 'linkedin', 'portfolio', 'website']) &&
+             socialLinks.keys().hasAll(['github', 'linkedin', 'portfolio', 'website']) &&
+             socialLinks.github is string &&
+             socialLinks.linkedin is string &&
+             socialLinks.portfolio is string &&
+             socialLinks.website is string;
+    }
+
+    function isValidNotificationPreferencesForCreate(preferences) {
+      return preferences is map &&
+             preferences.keys().hasOnly(['connectionRequests', 'connectionAccepted']) &&
+             preferences.keys().hasAll(['connectionRequests', 'connectionAccepted']) &&
+             preferences.connectionRequests is bool &&
+             preferences.connectionAccepted is bool;
+    }
+
+    function isValidNotificationPreferencesForUpdate(preferences) {
+      return preferences is map &&
+             preferences.keys().hasOnly(['connectionRequests', 'connectionAccepted']) &&
+             (!('connectionRequests' in preferences) || preferences.connectionRequests is bool) &&
+             (!('connectionAccepted' in preferences) || preferences.connectionAccepted is bool);
+    }
+
+    function isValidUserCreate(userId) {
+      let d = request.resource.data;
+      return d.keys().hasOnly([
+               'uid', 'displayName', 'email', 'photoURL', 'bio',
+               'department', 'year', 'skills', 'socialLinks',
+               'isDiscoverable', 'notificationPreferences',
+               'createdAt', 'updatedAt'
+             ]) &&
+             d.keys().hasAll([
+               'uid', 'displayName', 'email', 'photoURL', 'bio',
+               'department', 'year', 'skills', 'socialLinks',
+               'isDiscoverable', 'notificationPreferences',
+               'createdAt', 'updatedAt'
+             ]) &&
+             d.uid == userId &&
+             d.uid == request.auth.uid &&
+             d.email == request.auth.token.email &&
+             d.displayName is string &&
+             d.email is string &&
+             (d.photoURL == null || d.photoURL is string) &&
+             d.bio is string &&
+             d.department is string &&
+             d.year is string &&
+             d.skills is list &&
+             isValidSocialLinks(d.socialLinks) &&
+             d.isDiscoverable is bool &&
+             isValidNotificationPreferencesForCreate(d.notificationPreferences) &&
+             d.createdAt == request.time &&
+             d.updatedAt == request.time;
+    }
+
+    function isValidUserUpdateShape() {
+      let d = request.resource.data;
+      return d.keys().hasOnly([
+               'uid', 'displayName', 'email', 'photoURL', 'bio',
+               'department', 'year', 'skills', 'socialLinks',
+               'isDiscoverable', 'notificationPreferences',
+               'createdAt', 'updatedAt'
+             ]) &&
+             d.keys().hasAll([
+               'uid', 'displayName', 'email', 'photoURL', 'bio',
+               'department', 'year', 'skills', 'socialLinks',
+               'isDiscoverable', 'notificationPreferences',
+               'createdAt', 'updatedAt'
+             ]) &&
+             d.displayName is string &&
+             d.email is string &&
+             (d.photoURL == null || d.photoURL is string) &&
+             d.bio is string &&
+             d.department is string &&
+             d.year is string &&
+             d.skills is list &&
+             isValidSocialLinks(d.socialLinks) &&
+             d.isDiscoverable is bool &&
+             isValidNotificationPreferencesForUpdate(d.notificationPreferences) &&
+             d.updatedAt == request.time;
+    }
+
+    // Validates atomic like/unlike transactions on posts.
     function isValidPostLikeUpdate(postId) {
       let likePath = /databases/$(database)/documents/posts/$(postId)/likes/$(request.auth.uid);
-      
-      // Liking: like document exists after transaction and likesCount incremented by exactly 1
+
       let isLike = existsAfter(likePath) &&
                    getAfter(likePath).data.userId == request.auth.uid &&
                    request.resource.data.likesCount == resource.data.likesCount + 1;
 
-      // Unliking: like document no longer exists after transaction and likesCount decremented by exactly 1
-      let isUnlike = !existsAfter(likePath) &&
+      let isUnlike = exists(likePath) &&
+                     !existsAfter(likePath) &&
                      request.resource.data.likesCount == resource.data.likesCount - 1 &&
                      request.resource.data.likesCount >= 0;
 
-      // Ensure all other post fields are strictly immutable
-      let postFieldsProtected = 
+      let postFieldsProtected =
         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likesCount', 'updatedAt']) &&
         request.resource.data.authorId == resource.data.authorId &&
         request.resource.data.authorName == resource.data.authorName &&
         request.resource.data.authorAvatar == resource.data.authorAvatar &&
         request.resource.data.content == resource.data.content &&
         request.resource.data.createdAt == resource.data.createdAt &&
-        request.resource.data.commentsCount == resource.data.commentsCount;
+        request.resource.data.commentsCount == resource.data.commentsCount &&
+        request.resource.data.updatedAt == request.time;
 
       return (isLike || isUnlike) && postFieldsProtected;
     }
 
-    // Validates comment count updates from commentService
+    // Validates the exact parent mutation used by comment create/delete batches.
+    // A parent-only exact +/-1 write remains a documented limitation because this
+    // match does not know which arbitrary comment path changed in the same batch.
     function isValidPostCommentCountUpdate() {
       return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['commentsCount', 'updatedAt']) &&
              request.resource.data.authorId == resource.data.authorId &&
@@ -45,40 +129,188 @@ service cloud.firestore {
              request.resource.data.authorAvatar == resource.data.authorAvatar &&
              request.resource.data.content == resource.data.content &&
              request.resource.data.createdAt == resource.data.createdAt &&
-             request.resource.data.likesCount == resource.data.likesCount;
+             request.resource.data.likesCount == resource.data.likesCount &&
+             request.resource.data.updatedAt == request.time &&
+             request.resource.data.commentsCount >= 0 &&
+             (
+               request.resource.data.commentsCount == resource.data.commentsCount + 1 ||
+               request.resource.data.commentsCount == resource.data.commentsCount - 1
+             );
+    }
+
+    function isValidCommentSchema() {
+      let d = request.resource.data;
+      let actorPath = /databases/$(database)/documents/users/$(request.auth.uid);
+      return exists(actorPath) &&
+             d.keys().hasOnly(['authorId', 'authorName', 'authorAvatar', 'content', 'createdAt', 'updatedAt']) &&
+             d.keys().hasAll(['authorId', 'authorName', 'authorAvatar', 'content', 'createdAt', 'updatedAt']) &&
+             d.authorId == request.auth.uid &&
+             d.authorName == get(actorPath).data.get('displayName', 'CampusConnect Student') &&
+             d.authorAvatar == get(actorPath).data.get('photoURL', null) &&
+             d.authorName is string &&
+             (d.authorAvatar == null || d.authorAvatar is string) &&
+             d.content is string &&
+             d.content.size() > 0 &&
+             d.createdAt == request.time &&
+             d.updatedAt == request.time;
+    }
+
+    function isValidCommentCreate(postId) {
+      let postPath = /databases/$(database)/documents/posts/$(postId);
+      return exists(postPath) &&
+             getAfter(postPath).data.commentsCount == get(postPath).data.commentsCount + 1 &&
+             getAfter(postPath).data.commentsCount >= 0 &&
+             getAfter(postPath).data.updatedAt == request.time;
+    }
+
+    function isValidCommentDelete(postId) {
+      let postPath = /databases/$(database)/documents/posts/$(postId);
+      return resource != null &&
+             exists(postPath) &&
+             getAfter(postPath).data.commentsCount == get(postPath).data.commentsCount - 1 &&
+             getAfter(postPath).data.commentsCount >= 0 &&
+             getAfter(postPath).data.updatedAt == request.time;
+    }
+
+    function isValidLikeCreate(userId) {
+      let d = request.resource.data;
+      return d.keys().hasOnly(['userId', 'createdAt']) &&
+             d.keys().hasAll(['userId', 'createdAt']) &&
+             d.userId == userId &&
+             d.userId == request.auth.uid &&
+             d.createdAt == request.time;
     }
 
     // 1. Users collection
     match /users/{userId} {
       allow read: if isAuthenticated();
-      allow create: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidUserCreate(userId);
       allow update: if isOwner(userId) &&
-        // Protect identity and creation immutability
+        resource.data.uid == userId &&
+        request.resource.data.uid == userId &&
         request.resource.data.uid == resource.data.uid &&
         request.resource.data.email == resource.data.email &&
         request.resource.data.createdAt == resource.data.createdAt &&
-        
-        // Strictly prevent arbitrary field injection
-        request.resource.data.keys().hasOnly([
-          'uid', 'displayName', 'email', 'photoURL', 'bio', 
-          'department', 'year', 'skills', 'socialLinks', 
-          'isDiscoverable', 'notificationPreferences', 
-          'createdAt', 'updatedAt'
-        ]) &&
-        
-        // Validate settings types when present
-        (!('isDiscoverable' in request.resource.data) || request.resource.data.isDiscoverable is bool) &&
-        (!('notificationPreferences' in request.resource.data) || (
-          request.resource.data.notificationPreferences is map &&
-          request.resource.data.notificationPreferences.keys().hasOnly(['connectionRequests', 'connectionAccepted']) &&
-          (!('connectionRequests' in request.resource.data.notificationPreferences) || request.resource.data.notificationPreferences.connectionRequests is bool) &&
-          (!('connectionAccepted' in request.resource.data.notificationPreferences) || request.resource.data.notificationPreferences.connectionAccepted is bool)
-        ));
+        isValidUserUpdateShape();
 
       allow delete: if false;
+
+      // 2. User notifications subcollection
+      match /notifications/{notificationId} {
+        function isValidNotificationSchema(uId) {
+          let d = request.resource.data;
+          let keys = d.keys();
+          return keys.hasOnly(['id', 'recipientId', 'actorId', 'actorName', 'actorAvatar', 'type', 'referenceId', 'isRead', 'createdAt']) &&
+                 keys.hasAll(['id', 'recipientId', 'actorId', 'actorName', 'actorAvatar', 'type', 'referenceId', 'isRead', 'createdAt']) &&
+                 d.id == notificationId &&
+                 d.recipientId == uId &&
+                 d.actorId == request.auth.uid &&
+                 d.actorId != uId &&
+                 d.isRead == false &&
+                 d.createdAt == request.time &&
+                 d.recipientId is string &&
+                 d.actorId is string &&
+                 d.actorName is string &&
+                 (d.actorAvatar == null || d.actorAvatar is string) &&
+                 d.type is string &&
+                 d.referenceId is string &&
+                 d.isRead is bool &&
+                 d.createdAt is timestamp;
+        }
+
+        function isValidActorProfile() {
+          let actorDoc = get(/databases/$(database)/documents/users/$(request.auth.uid));
+          return actorDoc != null &&
+                 request.resource.data.actorName == actorDoc.data.get('displayName', 'CampusConnect Student') &&
+                 request.resource.data.actorAvatar == actorDoc.data.get('photoURL', null);
+        }
+
+        function isValidConnectionRequestNotification(uId, notifId) {
+          let connId = request.resource.data.referenceId;
+          let connPath = /databases/$(database)/documents/connections/$(connId);
+          return notifId == 'req_' + connId &&
+                 request.resource.data.type == 'connection_request' &&
+                 existsAfter(connPath) &&
+                 getAfter(connPath).data.status == 'pending' &&
+                 getAfter(connPath).data.senderId == request.auth.uid &&
+                 getAfter(connPath).data.receiverId == uId;
+        }
+
+        function isValidConnectionAcceptedNotification(uId, notifId) {
+          let connId = request.resource.data.referenceId;
+          let connPath = /databases/$(database)/documents/connections/$(connId);
+          return notifId == 'acc_' + connId &&
+                 request.resource.data.type == 'connection_accepted' &&
+                 existsAfter(connPath) &&
+                 getAfter(connPath).data.status == 'accepted' &&
+                 getAfter(connPath).data.receiverId == request.auth.uid &&
+                 getAfter(connPath).data.senderId == uId;
+        }
+
+        // Allows an acceptance transaction to refresh an existing deterministic
+        // notification without granting the actor general notification updates.
+        function isValidConnectionAcceptedNotificationUpdate(uId, notifId) {
+          let connId = request.resource.data.referenceId;
+          let connPath = /databases/$(database)/documents/connections/$(connId);
+          return resource != null &&
+                 resource.data.id == notifId &&
+                 resource.data.recipientId == uId &&
+                 resource.data.actorId == request.auth.uid &&
+                 resource.data.type == 'connection_accepted' &&
+                 resource.data.referenceId == connId &&
+                 existsAfter(connPath) &&
+                 getAfter(connPath).data.status == 'accepted' &&
+                 getAfter(connPath).data.receiverId == request.auth.uid &&
+                 getAfter(connPath).data.senderId == uId;
+        }
+
+        function isValidRequestCancellationDelete(uId) {
+          return resource != null &&
+                 resource.data.id == notificationId &&
+                 resource.data.recipientId == uId &&
+                 resource.data.actorId == request.auth.uid &&
+                 resource.data.type == 'connection_request' &&
+                 notificationId == 'req_' + resource.data.referenceId &&
+                 exists(/databases/$(database)/documents/connections/$(resource.data.referenceId)) &&
+                 get(/databases/$(database)/documents/connections/$(resource.data.referenceId)).data.status == 'pending' &&
+                 get(/databases/$(database)/documents/connections/$(resource.data.referenceId)).data.senderId == request.auth.uid &&
+                 get(/databases/$(database)/documents/connections/$(resource.data.referenceId)).data.receiverId == uId &&
+                 !existsAfter(/databases/$(database)/documents/connections/$(resource.data.referenceId));
+        }
+
+        allow list: if isAuthenticated() && request.auth.uid == userId;
+        allow get: if isAuthenticated() && request.auth.uid == userId;
+
+        allow create: if isAuthenticated() &&
+          isValidNotificationSchema(userId) &&
+          isValidActorProfile() &&
+          (
+            isValidConnectionRequestNotification(userId, notificationId) ||
+            isValidConnectionAcceptedNotification(userId, notificationId)
+          );
+
+        allow update: if isAuthenticated() && (
+          (
+            request.auth.uid == userId &&
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead']) &&
+            request.resource.data.isRead is bool
+          ) ||
+          (
+            isValidNotificationSchema(userId) &&
+            isValidActorProfile() &&
+            isValidConnectionAcceptedNotificationUpdate(userId, notificationId)
+          )
+        );
+
+        allow delete: if isAuthenticated() && (
+          request.auth.uid == userId ||
+          isValidRequestCancellationDelete(userId) ||
+          (resource == null && notificationId.matches('^req_.*'))
+        );
+      }
     }
 
-    // 2. Posts collection
+    // 3. Posts collection
     match /posts/{postId} {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated() &&
@@ -87,47 +319,39 @@ service cloud.firestore {
         request.resource.data.commentsCount == 0 &&
         request.resource.data.createdAt == request.time;
 
-      
-      // Update rules:
-      // Post author can update, maintaining author identity;
-      // Alternatively, authenticated students can update ONLY via validated comment count batches
-      // or validated atomic like/unlike transactions using getAfter()/existsAfter().
+      // Posts are not editable. Only the validated counter/like paths remain.
       allow update: if isAuthenticated() && (
-        (resource.data.authorId == request.auth.uid && request.resource.data.authorId == resource.data.authorId) ||
         isValidPostCommentCountUpdate() ||
         isValidPostLikeUpdate(postId)
       );
-      
-      // Only the author can delete their own post
+
       allow delete: if isAuthenticated() && resource.data.authorId == request.auth.uid;
 
-      // 3. Comments subcollection
       match /comments/{commentId} {
         allow read: if isAuthenticated();
-        allow create: if isAuthenticated() && request.resource.data.authorId == request.auth.uid;
-        allow update: if isAuthenticated() && resource.data.authorId == request.auth.uid && request.resource.data.authorId == resource.data.authorId;
-        allow delete: if isAuthenticated() && resource.data.authorId == request.auth.uid;
+        allow create: if isAuthenticated() &&
+          isValidCommentSchema() &&
+          isValidCommentCreate(postId);
+        allow update: if false;
+        allow delete: if isAuthenticated() &&
+          resource.data.authorId == request.auth.uid &&
+          isValidCommentDelete(postId);
       }
 
-      // 4. Likes subcollection
       match /likes/{userId} {
         allow read: if isAuthenticated();
-        allow create: if isAuthenticated() && 
-          request.auth.uid == userId && 
-          request.resource.data.userId == request.auth.uid;
+        allow create: if isAuthenticated() && isValidLikeCreate(userId);
         allow delete: if isAuthenticated() && request.auth.uid == userId;
         allow update: if false;
       }
     }
 
-    // 5. Connections collection
+    // 4. Connections collection
     match /connections/{connectionId} {
-      // Helper: Validates canonical sorted ID: min(uid1, uid2) + "_" + max(uid1, uid2)
       function isValidConnectionId(connId, sId, rId) {
         return connId == (sId < rId ? sId + '_' + rId : rId + '_' + sId);
       }
 
-      // Helper: Validates users array strictly matches sorted participant pair
       function isValidUsersArray(users, sId, rId) {
         return users.size() == 2 &&
                users.hasAll([sId, rId]) &&
@@ -135,154 +359,35 @@ service cloud.firestore {
                users[1] == (sId < rId ? rId : sId);
       }
 
-      // Single-document get: allow if caller is participant, or if doc does not exist yet (needed for getDoc and atomic transaction pre-checks)
       allow get: if isAuthenticated() && (resource == null || request.auth.uid in resource.data.users);
-
-      // List queries: participant-only for array-contains queries
       allow list: if isAuthenticated() && request.auth.uid in resource.data.users;
 
-      // Create pending request with strict invariants
       allow create: if isAuthenticated() &&
-        // Caller must be sender
         request.resource.data.senderId == request.auth.uid &&
-        // Sender cannot connect with themselves
         request.resource.data.receiverId != request.auth.uid &&
-        // Enforce exact canonical connectionId
         isValidConnectionId(connectionId, request.resource.data.senderId, request.resource.data.receiverId) &&
-        // Enforce exact sorted users array
         isValidUsersArray(request.resource.data.users, request.resource.data.senderId, request.resource.data.receiverId) &&
-        // State must be initialized to pending
         request.resource.data.status == 'pending' &&
-        // Timestamps must be valid server timestamps
         request.resource.data.createdAt == request.time &&
         request.resource.data.updatedAt == request.time &&
-        // No extraneous or arbitrary fields
         request.resource.data.keys().hasOnly(['users', 'senderId', 'receiverId', 'status', 'createdAt', 'updatedAt']) &&
         request.resource.data.keys().hasAll(['users', 'senderId', 'receiverId', 'status', 'createdAt', 'updatedAt']);
 
-      // Update: Only pending -> accepted transition allowed by receiverId
       allow update: if isAuthenticated() &&
-        // Only receiver can accept
         resource.data.receiverId == request.auth.uid &&
-        // Must transition strictly from pending to accepted
         resource.data.status == 'pending' &&
         request.resource.data.status == 'accepted' &&
-        // Core participant identity and creation time are completely immutable
         request.resource.data.senderId == resource.data.senderId &&
         request.resource.data.receiverId == resource.data.receiverId &&
         request.resource.data.users == resource.data.users &&
         request.resource.data.createdAt == resource.data.createdAt &&
-        // Only status and updatedAt may change
         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt']) &&
-        // UpdatedAt must be server timestamp
         request.resource.data.updatedAt == request.time;
 
-      // Delete: Granular delete permissions
       allow delete: if isAuthenticated() && (
-        // Sender cancels their own pending outgoing request
         (resource.data.status == 'pending' && resource.data.senderId == request.auth.uid) ||
-        // Receiver declines their own pending incoming request
         (resource.data.status == 'pending' && resource.data.receiverId == request.auth.uid) ||
-        // Either connected participant removes an accepted connection
         (resource.data.status == 'accepted' && request.auth.uid in resource.data.users)
-      );
-    }
-
-    // 6. User Notifications subcollection
-    match /users/{userId}/notifications/{notificationId} {
-      
-      // Helper: Validates exact schema keys, types, and baseline invariants
-      function isValidNotificationSchema(uId) {
-        let d = request.resource.data;
-        let keys = d.keys();
-        return keys.hasOnly(['id', 'recipientId', 'actorId', 'actorName', 'actorAvatar', 'type', 'referenceId', 'isRead', 'createdAt']) &&
-               keys.hasAll(['id', 'recipientId', 'actorId', 'actorName', 'actorAvatar', 'type', 'referenceId', 'isRead', 'createdAt']) &&
-               d.id == notificationId &&
-               d.recipientId == uId &&
-               d.actorId == request.auth.uid &&
-               d.actorId != uId &&
-               d.isRead == false &&
-               d.createdAt == request.time &&
-               d.recipientId is string &&
-               d.actorId is string &&
-               d.actorName is string &&
-               (d.actorAvatar == null || d.actorAvatar is string) &&
-               d.type is string &&
-               d.referenceId is string &&
-               d.isRead is bool &&
-               d.createdAt is timestamp;
-      }
-
-      // Helper: Validates actor name and avatar against the actor's real /users document
-      function isValidActorProfile() {
-        let actorDoc = get(/databases/$(database)/documents/users/$(request.auth.uid));
-        return actorDoc != null &&
-               request.resource.data.actorName == actorDoc.data.get('displayName', 'CampusConnect Student') &&
-               request.resource.data.actorAvatar == actorDoc.data.get('photoURL', null);
-      }
-
-      // Helper: Validates connection_request notification matches atomic connection transaction
-      function isValidConnectionRequestNotification(uId, notifId) {
-        let connId = request.resource.data.referenceId;
-        let connPath = /databases/$(database)/documents/connections/$(connId);
-        return notifId == 'req_' + connId &&
-               request.resource.data.type == 'connection_request' &&
-               existsAfter(connPath) &&
-               getAfter(connPath).data.status == 'pending' &&
-               getAfter(connPath).data.senderId == request.auth.uid &&
-               getAfter(connPath).data.receiverId == uId;
-      }
-
-      // Helper: Validates connection_accepted notification matches atomic connection transaction
-      function isValidConnectionAcceptedNotification(uId, notifId) {
-        let connId = request.resource.data.referenceId;
-        let connPath = /databases/$(database)/documents/connections/$(connId);
-        return notifId == 'acc_' + connId &&
-               request.resource.data.type == 'connection_accepted' &&
-               existsAfter(connPath) &&
-               getAfter(connPath).data.status == 'accepted' &&
-               getAfter(connPath).data.receiverId == request.auth.uid &&
-               getAfter(connPath).data.senderId == uId;
-      }
-
-      // 1. Read: 
-      // - List queries: strictly recipient-only (protects privacy)
-      allow list: if isAuthenticated() && request.auth.uid == userId;
-
-      // - Single document get: allow recipient, or actor of the specific request notification,
-      //   or pre-check reads when the document does not exist
-      allow get: if isAuthenticated() && (
-        request.auth.uid == userId ||
-        (resource != null && resource.data.actorId == request.auth.uid) ||
-        (resource == null && notificationId.matches('^req_.*') && notificationId.matches('.*' + request.auth.uid + '.*'))
-      );
-
-      // 2. Create: Strictly bound to an atomic connection transaction with verified profile
-      allow create: if isAuthenticated() &&
-        isValidNotificationSchema(userId) &&
-        isValidActorProfile() &&
-        (
-          isValidConnectionRequestNotification(userId, notificationId) ||
-          isValidConnectionAcceptedNotification(userId, notificationId)
-        );
-
-      // 3. Update: Only recipient may update, and only the 'isRead' field
-      allow update: if isAuthenticated() &&
-        request.auth.uid == userId &&
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead']) &&
-        request.resource.data.isRead is bool;
-
-      // 4. Delete:
-      // - Recipient can delete any notification in their inbox
-      // - Sender/actor may ONLY delete an outgoing connection_request notification
-      //   if the connection document is deleted in the same transaction
-      allow delete: if isAuthenticated() && (
-        request.auth.uid == userId ||
-        (
-          resource.data.actorId == request.auth.uid &&
-          resource.data.type == 'connection_request' &&
-          !existsAfter(/databases/$(database)/documents/connections/$(resource.data.referenceId))
-        )
       );
     }
   }

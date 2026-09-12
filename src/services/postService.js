@@ -9,10 +9,14 @@ import {
   orderBy,
   query,
   serverTimestamp,
+  startAfter,
+  endBefore,
   updateDoc,
+  getDocs
 } from "firebase/firestore";
 
 import { db, isFirebaseConfigured } from "../firebase/config";
+import { POSTS_PER_PAGE } from "../constants";
 
 function requireDb() {
   if (!isFirebaseConfigured || !db) {
@@ -25,7 +29,7 @@ function requireDb() {
 
 export async function createPost(authorId, authorName, authorAvatar, content) {
   const postsRef = collection(requireDb(), "posts");
-  
+
   const newPost = {
     authorId,
     authorName,
@@ -41,28 +45,83 @@ export async function createPost(authorId, authorName, authorAvatar, content) {
   return docRef.id;
 }
 
-export function subscribeToPosts(callback, onError) {
+export function subscribeToNewerPosts(callback, onError, newestPostDoc = null) {
   const postsRef = collection(requireDb(), "posts");
-  // Order posts by creation time descending (newest first), limited to 50
-  const q = query(postsRef, orderBy("createdAt", "desc"), limit(50));
+  let q = query(postsRef, orderBy("createdAt", "desc"));
 
-  
+  if (newestPostDoc !== null) {
+    // Get posts strictly newer than newestPostDoc (higher timestamp)
+    q = query(q, endBefore(newestPostDoc));
+  }
+
+  // Returns DocumentSnapshots in the callback
   return onSnapshot(
     q,
     (snapshot) => {
-      const posts = snapshot.docs.map((docSnap) => ({
-        id: docSnap.id,
-        ...docSnap.data(),
-      }));
-      callback(posts);
+      // snapshot.docs is an array of DocumentSnapshot, newest first due to desc sort
+      callback(snapshot.docs);
     },
     onError
   );
 }
 
+export async function fetchOlderPosts(pageSize, oldestPostDoc = null) {
+  const postsRef = collection(requireDb(), "posts");
+  let q = query(postsRef, orderBy("createdAt", "desc"), limit(pageSize));
+
+  if (oldestPostDoc !== null) {
+    // Get posts strictly older than oldestPostDoc (lower timestamp)
+    q = query(q, startAfter(oldestPostDoc));
+  }
+
+  const snapshot = await getDocs(q);
+  // Return DocumentSnapshots (newest first due to desc sort)
+  return snapshot.docs;
+}
+
 export async function deletePost(postId) {
   const postRef = doc(requireDb(), "posts", postId);
   await deleteDoc(postRef);
+}
+
+export function subscribeToEmptyFeed(callback, onError) {
+  const postsRef = collection(requireDb(), "posts");
+  // Empty-feed realtime bootstrap: orderBy("createdAt", "desc") + limit(1)
+  const q = query(
+    postsRef,
+    orderBy("createdAt", "desc"),
+    limit(1)
+  );
+
+  // Returns DocumentSnapshots in the callback
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      // snapshot.docs is an array of DocumentSnapshot, newest first due to desc sort
+      callback(snapshot.docs);
+    },
+    onError
+  );
+}
+
+export function subscribeToBootstrapPosts(callback, onError) {
+  const postsRef = collection(requireDb(), "posts");
+  const BOOTSTRAP_LIMIT = POSTS_PER_PAGE * 3;
+  const q = query(
+    postsRef,
+    orderBy("createdAt", "desc"),
+    limit(BOOTSTRAP_LIMIT)
+  );
+
+  // Returns DocumentSnapshots in the callback
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      // snapshot.docs is an array of DocumentSnapshot, newest first due to desc sort
+      callback(snapshot.docs);
+    },
+    onError
+  );
 }
 
 export async function updateCommentsCount(postId, amount) {

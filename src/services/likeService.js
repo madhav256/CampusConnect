@@ -24,7 +24,7 @@ function requireDb() {
  *
  * @param {string} postId - ID of the post
  * @param {string} userId - Auth UID of the user
- * @returns {Promise<boolean>} Resulting isLiked state (true if now liked, false if unliked)
+ * @returns {Promise<{isLiked: boolean, likesCount: number}>} Resulting like state and updated likes count
  */
 export async function togglePostLike(postId, userId) {
   if (!postId || !userId) {
@@ -52,7 +52,10 @@ export async function togglePostLike(postId, userId) {
         likesCount: Math.max(0, currentLikes - 1),
         updatedAt: serverTimestamp(),
       });
-      return false;
+      return {
+        isLiked: false,
+        likesCount: Math.max(0, currentLikes - 1)
+      };
     } else {
       // User has not liked: like post
       transaction.set(likeRef, {
@@ -63,7 +66,10 @@ export async function togglePostLike(postId, userId) {
         likesCount: currentLikes + 1,
         updatedAt: serverTimestamp(),
       });
-      return true;
+      return {
+        isLiked: true,
+        likesCount: currentLikes + 1
+      };
     }
   });
 }

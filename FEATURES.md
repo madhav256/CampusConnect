@@ -36,7 +36,7 @@ There is no active image-upload flow, cover-image upload, or profile-photo manag
 - Dashboard at `/dashboard`.
 - Text post creation.
 - Feed ordered by newest `createdAt`.
-- Real-time subscription to the newest 50 posts.
+- Real-time subscription to newer posts with cursor-based pagination for older posts.
 - Author-only post deletion, with inline confirmation.
 - Empty, loading, and error states.
 - Multiline post rendering.

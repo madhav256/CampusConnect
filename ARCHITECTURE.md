@@ -1,6 +1,6 @@
 # CampusConnect Architecture
 
-**Status:** Current implementation reference (Milestone 13C)
+**Status:** Current implementation reference (Milestone 14)
 
 This document describes the architecture that exists in the repository today. It does not describe proposed messaging, media storage, search infrastructure, or other deferred work.
 
@@ -48,7 +48,7 @@ Firebase Storage is not part of the active client architecture. The Firebase con
 `src/App.jsx` owns the route table:
 
 | Route | Access | Page |
-| --- | --- | --- |
+| --- | --- | ---
 | `/` | Public | Login and optional demo login |
 | `/register` | Public | Account registration |
 | `/dashboard` | Authenticated | Real-time campus feed |
@@ -166,13 +166,13 @@ Each subscription is owned by a hook or service caller and is cleaned up on unmo
 
 The current read limits are deliberate MVP safeguards:
 
-- feed: newest 50 posts;
+- feed: newest 10 posts loaded initially, with pagination for older posts;
 - directory: newest 100 users ordered by `updatedAt`;
 - notifications: newest 30 notifications ordered by `createdAt`;
 - search: 300 ms input debounce, followed by client-side filtering across display name, department, year, and skills;
 - directory result cache: two-minute module-level cache in `userService.js`.
 
-The feed and directory do not currently implement cursor pagination or external full-text search.
+The feed now uses cursor-based pagination for improved scalability while maintaining realtime updates for new posts.
 
 ### Atomic writes
 
@@ -228,7 +228,7 @@ The recruiter demo uses a normal Firebase Auth account configured through `VITE_
 - Email verification is not required after sign-up.
 - Public/private profile data share the `users/{uid}` document, and authenticated profile reads currently include the email field even though public UI components do not render it.
 - Search discoverability is filtered in the client; direct authenticated profile reads remain available by product policy.
-- The feed, directory, and notification reads are bounded rather than paginated.
+- The feed, directory, and notification reads are bounded rather than paginated (except feed which now uses cursor-based pagination).
 - No media upload or Firebase Storage integration exists.
 - No post editing, post sharing, post search, bookmarks, private messaging, clubs, events, marketplace, or direct account deletion exists.
 - Notification generation currently originates in client connection transactions rather than a trusted background event processor.
@@ -240,9 +240,6 @@ The following are possible later milestones and should not be treated as active 
 
 - service integration, end-to-end, and CI verification beyond the current emulator Rules suite;
 - separate public profile and private account/settings documents;
-- cursor-based feed pagination and eventually indexed directory search;
 - trusted server-side event processing for notifications;
 - a minimal connection-gated one-to-one messaging model;
 - media storage with separate Storage Rules and lifecycle cleanup.
-
-Any future milestone must first be designed against the active service, hook, and Rules patterns rather than copied from older planning documents.

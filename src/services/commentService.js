@@ -7,6 +7,7 @@ import {
   serverTimestamp,
   writeBatch,
   increment,
+  getDoc
 } from "firebase/firestore";
 import { db, isFirebaseConfigured } from "../firebase/config";
 import { fetchUserById } from "./userService";
@@ -52,7 +53,22 @@ export async function createComment(postId, authorId, authorName, authorAvatar, 
   });
 
   await batch.commit();
-  return newCommentRef.id;
+
+  // Get the updated comments count from the post document
+  const postDoc = await getDoc(postRef);
+  if (postDoc.exists()) {
+    const data = postDoc.data();
+    return {
+      commentId: newCommentRef.id,
+      commentsCount: data.commentsCount || 0
+    };
+  } else {
+    // Fallback if post document doesn't exist (shouldn't happen)
+    return {
+      commentId: newCommentRef.id,
+      commentsCount: 0
+    };
+  }
 }
 
 export function subscribeToComments(postId, callback, onError) {
@@ -73,7 +89,7 @@ export function subscribeToComments(postId, callback, onError) {
   );
 }
 
-export function deleteComment(postId, commentId) {
+export async function deleteComment(postId, commentId) {
   const firestore = requireDb();
 
   const commentRef = doc(firestore, "posts", postId, "comments", commentId);
@@ -86,5 +102,21 @@ export function deleteComment(postId, commentId) {
     updatedAt: serverTimestamp(),
   });
 
-  return batch.commit();
+  await batch.commit();
+
+  // Get the updated comments count from the post document
+  const postDoc = await getDoc(postRef);
+  if (postDoc.exists()) {
+    const data = postDoc.data();
+    return {
+      success: true,
+      commentsCount: data.commentsCount || 0
+    };
+  } else {
+    // Fallback if post document doesn't exist (shouldn't happen)
+    return {
+      success: true,
+      commentsCount: 0
+    };
+  }
 }

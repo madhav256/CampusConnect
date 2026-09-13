@@ -9,10 +9,10 @@ import { usePostLike } from "../../hooks/usePostLike";
 
 function formatTimestamp(timestamp) {
   if (!timestamp) return "Just now";
-  
+
   // Handle Firestore Timestamp
   const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
-  
+
   return new Intl.DateTimeFormat("en-US", {
     month: "short",
     day: "numeric",
@@ -21,11 +21,11 @@ function formatTimestamp(timestamp) {
   }).format(date);
 }
 
-export default function PostCard({ post, currentUserId, onDelete }) {
+export default function PostCard({ post, currentUserId, onDelete, updatePost }) {
   const [showComments, setShowComments] = useState(false);
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
-  const { isLiked, isPending, toggleLike } = usePostLike(post.id, currentUserId);
+  const { isLiked, isPending, toggleLike } = usePostLike(post.id, currentUserId, updatePost);
   const isAuthor = currentUserId === post.authorId;
 
   const handleLikeClick = async () => {
@@ -59,7 +59,7 @@ export default function PostCard({ post, currentUserId, onDelete }) {
             </p>
           </div>
         </div>
-        
+
         {isAuthor && (
           isConfirmingDelete ? (
             <div className="flex items-center gap-1.5">
@@ -94,7 +94,7 @@ export default function PostCard({ post, currentUserId, onDelete }) {
           )
         )}
       </div>
-      
+
       <div className="mt-4 whitespace-pre-wrap text-ink leading-relaxed">
         {post.content}
       </div>
@@ -153,7 +153,7 @@ export default function PostCard({ post, currentUserId, onDelete }) {
             transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
             className="overflow-hidden"
           >
-            <CommentList postId={post.id} />
+            <CommentList postId={post.id} updatePost={updatePost} />
           </motion.div>
         )}
       </AnimatePresence>

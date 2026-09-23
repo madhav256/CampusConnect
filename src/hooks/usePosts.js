@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { subscribeToNewerPosts, fetchOlderPosts, createPost, deletePost, subscribeToEmptyFeed } from "../services/postService";
+import { subscribeToNewerPosts, fetchOlderPosts, createPost, deletePost, subscribeToEmptyFeed, subscribeToPostUpdatesInRange } from "../services/postService";
 import { useAuth } from "./useAuth";
 import { POSTS_PER_PAGE } from "../constants";
 import { db, isFirebaseConfigured } from "../firebase/config";
@@ -28,9 +28,19 @@ export function usePosts() {
   const bootstrapListenerUnsubscribeRef = useRef(null);
   const normalListenerUnsubscribeRef = useRef(null);
   const emptyFeedListenerUnsubscribeRef = useRef(null);
+  // Ref to hold the current postsDocs for filtering in the range listener
+  const postsDocsRef = useRef([]);
+  // Ref to hold the unsubscribe function for the range listener
+  const rangeListenerUnsubscribeRef = useRef(null);
+
+  // UseEffect to keep postsDocsRef in sync
+  useEffect(() => {
+    postsDocsRef.current = postsDocs;
+  }, [postsDocs]);
+
 
   // Derive posts array from genuine DocumentSnapshots and local updates
-  const posts = postsDocs.map(doc => {
+  const posts = (postsDocs || []).map(doc => {
     const docData = doc.data();
     const updates = postUpdates.get(doc.id) || {};
     return {
@@ -78,8 +88,7 @@ export function usePosts() {
       }
 
       // Fetch the first page deterministically
-      const firstPageSnapshot = await fetchOlderPosts(POSTS_PER_PAGE, null);
-      const firstPageDocs = firstPageSnapshot.docs;
+      const firstPageDocs = await fetchOlderPosts(POSTS_PER_PAGE, null);
 
       setPostsDocs(firstPageDocs);
 
@@ -152,11 +161,10 @@ export function usePosts() {
                 emptyFeedListenerUnsubscribeRef.current = null;
               }
               // Now fetch the first page (there is at least one post)
-              fetchOlderPosts(POSTS_PER_PAGE, null).then((snapshot) => {
-                const docs = snapshot.docs;
-                setPostsDocs(docs);
-                if (docs.length > 0) {
-                  const newestDoc = docs[0];
+              fetchOlderPosts(POSTS_PER_PAGE, null).then((firstPageDocs) => {
+                setPostsDocs(firstPageDocs);
+                if (firstPageDocs.length > 0) {
+                  const newestDoc = firstPageDocs[0];
                   // Set up newer-post listener
                   const unsubscribeNormal = subscribeToNewerPosts(
                     (newerDocsSnapshot) => {
@@ -299,6 +307,60 @@ export function usePosts() {
       throw err;
     }
   }, [user]);
+
+  // Range listener for post updates within the current feed range
+  useEffect(() => {
+    if (!user || postsDocs.length === 0) {
+      // No user or no posts: ensure no listener is running.
+      if (rangeListenerUnsubscribeRef.current) {
+        rangeListenerUnsubscribeRef.current();
+        rangeListenerUnsubscribeRef.current = null;
+      }
+      return;
+    }
+
+    const newestDoc = postsDocs[0];
+    const oldestDoc = postsDocs[postsDocs.length - 1];
+
+    // Stop previous listener if any.
+    if (rangeListenerUnsubscribeRef.current) {
+      rangeListenerUnsubscribeRef.current();
+    }
+
+    // Start new listener for the current range.
+    rangeListenerUnsubscribeRef.current = subscribeToPostUpdatesInRange(
+      newestDoc,
+      oldestDoc,
+      (updatedDoc) => {
+        const postId = updatedDoc.id;
+        // Only update if this post is currently in our feed.
+        if (postsDocsRef.current.some((doc) => doc.id === postId)) {
+          setPostUpdates((prev) => {
+            const newMap = new Map(prev);
+            const existing = newMap.get(postId) || {};
+            newMap.set(postId, {
+              ...existing,
+              likesCount: updatedDoc.data().likesCount,
+              commentsCount: updatedDoc.data().commentsCount
+            });
+            return newMap;
+          });
+        }
+      },
+      (err) => {
+        console.error("Error subscribing to post updates in range:", err);
+      }
+    );
+
+    // Cleanup on unmount or before next restart.
+    return () => {
+      if (rangeListenerUnsubscribeRef.current) {
+        rangeListenerUnsubscribeRef.current();
+        rangeListenerUnsubscribeRef.current = null;
+      }
+    };
+  }, [user, postsDocs]);
+
 
   // Clean up listeners on unmount
   useEffect(() => {

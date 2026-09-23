@@ -10,7 +10,9 @@ import {
   query,
   serverTimestamp,
   startAfter,
+  startAt,
   endBefore,
+  endAt,
   updateDoc,
   getDocs
 } from "firebase/firestore";
@@ -119,6 +121,32 @@ export function subscribeToBootstrapPosts(callback, onError) {
     (snapshot) => {
       // snapshot.docs is an array of DocumentSnapshot, newest first due to desc sort
       callback(snapshot.docs);
+    },
+    onError
+  );
+}
+
+export function subscribeToPostUpdatesInRange(newestDoc, oldestDoc, callback, onError) {
+  if (!newestDoc || !oldestDoc) {
+    return () => {};
+  }
+
+  const postsRef = collection(requireDb(), "posts");
+  const q = query(
+    postsRef,
+    orderBy("createdAt", "desc"),
+    startAt(newestDoc),
+    endAt(oldestDoc)
+  );
+
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      snapshot.docChanges().forEach((change) => {
+        if (change.type === "added" || change.type === "modified") {
+          callback(change.doc);
+        }
+      });
     },
     onError
   );

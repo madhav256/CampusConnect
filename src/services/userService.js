@@ -231,13 +231,11 @@ export function subscribeToUserProfile(uid, callback, onError) {
     }
 
     const privateSettings = normalizeUserSettings(uid, userData);
-    const publicProfile = publicData
-      ? normalizePublicProfile(uid, publicData)
-      : normalizePublicProfile(uid, userData);
+    const publicProfile = normalizePublicProfile(uid, publicData);
 
     callback({
       uid,
-      // Public profile fields prefer publicProfiles, falling back to users
+      // Public profile fields strictly from publicProfiles/{uid}
       displayName: publicProfile.displayName,
       photoURL: publicProfile.photoURL,
       bio: publicProfile.bio,
@@ -266,10 +264,10 @@ export function subscribeToUserProfile(uid, callback, onError) {
       hasUserSnap = true;
       userData = null;
       userError = err;
-      if (hasPublicSnap) {
+      if (onError) {
+        onError(err);
+      } else if (hasPublicSnap) {
         emit();
-      } else if (onError) {
-        // Wait for public listener
       }
     },
   );
@@ -286,10 +284,10 @@ export function subscribeToUserProfile(uid, callback, onError) {
       hasPublicSnap = true;
       publicData = null;
       publicError = err;
-      if (hasUserSnap) {
+      if (onError) {
+        onError(err);
+      } else if (hasUserSnap) {
         emit();
-      } else if (onError) {
-        // Wait for user listener
       }
     },
   );
@@ -315,9 +313,7 @@ export async function updateUserProfile(uid, updates) {
     getDoc(userRef),
   ]);
 
-  const currentSource = pubSnap.exists()
-    ? pubSnap.data()
-    : (userSnap.exists() ? userSnap.data() : {});
+  const currentSource = pubSnap.exists() ? pubSnap.data() : {};
   const isDiscoverable = userSnap.exists()
     ? userSnap.data()?.isDiscoverable !== false
     : true;
@@ -444,13 +440,8 @@ export async function updateUserSettings(uid, settingsUpdates) {
     batch.update(userRef, updates);
 
     if (newDiscoverableValue === true) {
-      const [pubSnap, uSnap] = await Promise.all([
-        getDoc(pubRef),
-        getDoc(userRef),
-      ]);
-      const sourceData = pubSnap.exists()
-        ? pubSnap.data()
-        : (uSnap.exists() ? uSnap.data() : {});
+      const pubSnap = await getDoc(pubRef);
+      const sourceData = pubSnap.exists() ? pubSnap.data() : {};
 
       batch.set(indexRef, {
         uid,
@@ -484,8 +475,8 @@ export async function fetchAllUsers(limitCount = 100) {
   }
 
   const firestore = requireDb();
-  const usersRef = collection(firestore, "users");
-  const q = query(usersRef, orderBy("updatedAt", "desc"), limit(limitCount));
+  const indexRef = collection(firestore, "directoryIndex");
+  const q = query(indexRef, orderBy("updatedAt", "desc"), limit(limitCount));
   const snapshot = await getDocs(q);
 
   const users = snapshot.docs.map((docSnap) =>
@@ -502,23 +493,12 @@ export async function fetchUserById(uid) {
     return null;
   }
 
-  try {
-    const pubRef = publicProfileDocRef(uid);
-    const pubSnap = await getDoc(pubRef);
-    if (pubSnap.exists()) {
-      return normalizeProfile(uid, pubSnap.data());
-    }
-  } catch (err) {
-    console.warn(`[Bridge] publicProfiles read failed for ${uid}, falling back to users`, err);
-  }
-
-  // Fallback to users/{uid}
-  const uRef = userDocRef(uid);
-  const uSnap = await getDoc(uRef);
-  if (!uSnap.exists()) {
+  const pubRef = publicProfileDocRef(uid);
+  const pubSnap = await getDoc(pubRef);
+  if (!pubSnap.exists()) {
     return null;
   }
 
-  return normalizeProfile(uid, uSnap.data());
+  return normalizeProfile(uid, pubSnap.data());
 }
 

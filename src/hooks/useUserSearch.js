@@ -41,10 +41,6 @@ export function useUserSearch(searchTerm = "") {
         const term = trimmed.toLowerCase();
         const matched = allUsers
           .filter((user) => {
-            // Keep self visible, but exclude other students who disabled discoverability
-            return user.uid === currentUid || user.isDiscoverable !== false;
-          })
-          .filter((user) => {
             const nameMatch = user.displayName?.toLowerCase().includes(term);
             const deptMatch = user.department?.toLowerCase().includes(term);
             const yearMatch = user.year?.toLowerCase().includes(term);

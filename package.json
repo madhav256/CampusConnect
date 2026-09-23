@@ -12,7 +12,9 @@
     "test:rules:run": "vitest run tests/rules",
     "test:rules": "firebase emulators:exec --project demo-campusconnect-rules-test --only firestore \"npm run test:rules:run\"",
     "test": "npm run test:unit && npm run test:rules",
-    "seed:demo": "node scripts/seedDemoData.mjs"
+    "seed:demo": "node scripts/seedDemoData.mjs",
+    "emulators": "firebase emulators:start --project demo-campusconnect-rules-test --only firestore,auth",
+    "emulators:seed": "node scripts/seedEmulator14b.mjs"
   },
   "dependencies": {
     "firebase": "^12.15.0",

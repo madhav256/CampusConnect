@@ -16,6 +16,8 @@ import {
   postFixture,
   seedBaseData,
   userFixture,
+  publicProfileFixture,
+  directoryIndexFixture,
 } from "./fixtures.js";
 
 const serverTimestamp = () => firebase.firestore.FieldValue.serverTimestamp();
@@ -33,6 +35,14 @@ async function expectPermissionDenied(operation) {
 
 function userRef(context, uid) {
   return context.firestore().collection("users").doc(uid);
+}
+
+function publicProfileRef(context, uid) {
+  return context.firestore().collection("publicProfiles").doc(uid);
+}
+
+function directoryIndexRef(context, uid) {
+  return context.firestore().collection("directoryIndex").doc(uid);
 }
 
 function postRef(context, postId) {
@@ -164,99 +174,206 @@ describe("users rules", () => {
     );
   });
 
-  it("allow authenticated users to read another profile under the current policy", async () => {
-    await assertSucceeds(userRef(contextFor(TEST_UIDS.alice), TEST_UIDS.bob).get());
+  it("allow owner to read their own private profile", async () => {
+    await assertSucceeds(userRef(contextFor(TEST_UIDS.alice), TEST_UIDS.alice).get());
   });
 
-  it("allow a valid owner profile creation", async () => {
-    const context = contextFor("new-user");
-    await assertSucceeds(
-      userRef(context, "new-user").set(userCreateData("new-user"))
+  it("reject cross-user reads from private users collection", async () => {
+    await expectPermissionDenied(() =>
+      userRef(contextFor(TEST_UIDS.alice), TEST_UIDS.bob).get()
     );
+  });
+
+  it("allow a valid owner discoverable user creation via atomic batch", async () => {
+    const context = contextFor("new-user");
+    const db = context.firestore();
+    const batch = db.batch();
+    batch.set(userRef(context, "new-user"), userCreateData("new-user"));
+    batch.set(publicProfileRef(context, "new-user"), publicProfileFixture("new-user"));
+    batch.set(directoryIndexRef(context, "new-user"), {
+      ...directoryIndexFixture("new-user"),
+      updatedAt: serverTimestamp(),
+    });
+    await assertSucceeds(batch.commit());
+  });
+
+  it("allow a valid owner non-discoverable user creation via atomic batch", async () => {
+    const context = contextFor("non-disc-user");
+    const db = context.firestore();
+    const batch = db.batch();
+    batch.set(userRef(context, "non-disc-user"), userCreateData("non-disc-user", { isDiscoverable: false }));
+    batch.set(publicProfileRef(context, "non-disc-user"), publicProfileFixture("non-disc-user"));
+    await assertSucceeds(batch.commit());
+  });
+
+  it("reject broken/non-atomic user creation without publicProfiles", async () => {
+    const context = contextFor("single-user");
+    await expectPermissionDenied(() =>
+      userRef(context, "single-user").set(userCreateData("single-user"))
+    );
+  });
+
+  it("reject discoverable user creation missing directoryIndex", async () => {
+    const context = contextFor("incomplete-user");
+    const db = context.firestore();
+    const batch = db.batch();
+    batch.set(userRef(context, "incomplete-user"), userCreateData("incomplete-user", { isDiscoverable: true }));
+    batch.set(publicProfileRef(context, "incomplete-user"), publicProfileFixture("incomplete-user"));
+    await expectPermissionDenied(() => batch.commit());
+  });
+
+  it("reject non-discoverable user creation with directoryIndex", async () => {
+    const context = contextFor("non-disc-with-index");
+    const db = context.firestore();
+    const batch = db.batch();
+    batch.set(userRef(context, "non-disc-with-index"), userCreateData("non-disc-with-index", { isDiscoverable: false }));
+    batch.set(publicProfileRef(context, "non-disc-with-index"), publicProfileFixture("non-disc-with-index"));
+    batch.set(directoryIndexRef(context, "non-disc-with-index"), {
+      ...directoryIndexFixture("non-disc-with-index"),
+      updatedAt: serverTimestamp(),
+    });
+    await expectPermissionDenied(() => batch.commit());
   });
 
   it("reject a profile created under the wrong document ID", async () => {
     const context = contextFor("new-user");
-    await expectPermissionDenied(() =>
-      userRef(context, "different-document").set(userCreateData("new-user"))
-    );
+    const db = context.firestore();
+    const batch = db.batch();
+    batch.set(userRef(context, "different-document"), userCreateData("new-user"));
+    batch.set(publicProfileRef(context, "new-user"), publicProfileFixture("new-user"));
+    batch.set(directoryIndexRef(context, "new-user"), {
+      ...directoryIndexFixture("new-user"),
+      updatedAt: serverTimestamp(),
+    });
+    await expectPermissionDenied(() => batch.commit());
   });
 
   it("reject a profile with a mismatched embedded UID", async () => {
     const context = contextFor("mismatched-user");
-    await expectPermissionDenied(() =>
-      userRef(context, "mismatched-user").set(
-        userCreateData("mismatched-user", { uid: "different-uid" })
-      )
+    const db = context.firestore();
+    const batch = db.batch();
+    batch.set(
+      userRef(context, "mismatched-user"),
+      userCreateData("mismatched-user", { uid: "different-uid" })
     );
+    batch.set(publicProfileRef(context, "mismatched-user"), publicProfileFixture("mismatched-user"));
+    batch.set(directoryIndexRef(context, "mismatched-user"), {
+      ...directoryIndexFixture("mismatched-user"),
+      updatedAt: serverTimestamp(),
+    });
+    await expectPermissionDenied(() => batch.commit());
   });
 
   it("reject an extra field on profile creation", async () => {
     const context = contextFor("extra-user");
-    await expectPermissionDenied(() =>
-      userRef(context, "extra-user").set(
-        userCreateData("extra-user", { role: "admin" })
-      )
+    const db = context.firestore();
+    const batch = db.batch();
+    batch.set(
+      userRef(context, "extra-user"),
+      userCreateData("extra-user", { role: "admin" })
     );
+    batch.set(publicProfileRef(context, "extra-user"), publicProfileFixture("extra-user"));
+    batch.set(directoryIndexRef(context, "extra-user"), {
+      ...directoryIndexFixture("extra-user"),
+      updatedAt: serverTimestamp(),
+    });
+    await expectPermissionDenied(() => batch.commit());
   });
 
   it("reject a profile missing a required field", async () => {
     const context = contextFor("missing-user");
     const data = userCreateData("missing-user");
     delete data.bio;
-    await expectPermissionDenied(() =>
-      userRef(context, "missing-user").set(data)
-    );
+    const db = context.firestore();
+    const batch = db.batch();
+    batch.set(userRef(context, "missing-user"), data);
+    batch.set(publicProfileRef(context, "missing-user"), publicProfileFixture("missing-user"));
+    batch.set(directoryIndexRef(context, "missing-user"), {
+      ...directoryIndexFixture("missing-user"),
+      updatedAt: serverTimestamp(),
+    });
+    await expectPermissionDenied(() => batch.commit());
   });
 
   it("reject invalid profile primitive types", async () => {
     const context = contextFor("invalid-type-user");
-    await expectPermissionDenied(() =>
-      userRef(context, "invalid-type-user").set(
-        userCreateData("invalid-type-user", { isDiscoverable: "true" })
-      )
+    const db = context.firestore();
+    const batch = db.batch();
+    batch.set(
+      userRef(context, "invalid-type-user"),
+      userCreateData("invalid-type-user", { isDiscoverable: "true" })
     );
+    batch.set(publicProfileRef(context, "invalid-type-user"), publicProfileFixture("invalid-type-user"));
+    batch.set(directoryIndexRef(context, "invalid-type-user"), {
+      ...directoryIndexFixture("invalid-type-user"),
+      updatedAt: serverTimestamp(),
+    });
+    await expectPermissionDenied(() => batch.commit());
   });
 
   it("reject invalid nested preference shapes", async () => {
     const context = contextFor("invalid-preferences-user");
-    await expectPermissionDenied(() =>
-      userRef(context, "invalid-preferences-user").set(
-        userCreateData("invalid-preferences-user", {
-          notificationPreferences: { sms: true },
-        })
-      )
+    const db = context.firestore();
+    const batch = db.batch();
+    batch.set(
+      userRef(context, "invalid-preferences-user"),
+      userCreateData("invalid-preferences-user", {
+        notificationPreferences: { sms: true },
+      })
     );
+    batch.set(publicProfileRef(context, "invalid-preferences-user"), publicProfileFixture("invalid-preferences-user"));
+    batch.set(directoryIndexRef(context, "invalid-preferences-user"), {
+      ...directoryIndexFixture("invalid-preferences-user"),
+      updatedAt: serverTimestamp(),
+    });
+    await expectPermissionDenied(() => batch.commit());
   });
 
   it("reject client-supplied profile timestamps", async () => {
     const context = contextFor("invalid-time-user");
-    await expectPermissionDenied(() =>
-      userRef(context, "invalid-time-user").set(
-        userCreateData("invalid-time-user", { createdAt: timestamp })
-      )
+    const db = context.firestore();
+    const batch = db.batch();
+    batch.set(
+      userRef(context, "invalid-time-user"),
+      userCreateData("invalid-time-user", { createdAt: timestamp })
     );
+    batch.set(publicProfileRef(context, "invalid-time-user"), publicProfileFixture("invalid-time-user"));
+    batch.set(directoryIndexRef(context, "invalid-time-user"), {
+      ...directoryIndexFixture("invalid-time-user"),
+      updatedAt: serverTimestamp(),
+    });
+    await expectPermissionDenied(() => batch.commit());
   });
 
   it("reject a profile email that does not match Auth", async () => {
     const context = contextFor("email-user", "email-user@example.test");
-    await expectPermissionDenied(() =>
-      userRef(context, "email-user").set(
-        userCreateData("email-user", { email: "spoofed@example.test" })
-      )
+    const db = context.firestore();
+    const batch = db.batch();
+    batch.set(
+      userRef(context, "email-user"),
+      userCreateData("email-user", { email: "spoofed@example.test" })
     );
+    batch.set(publicProfileRef(context, "email-user"), publicProfileFixture("email-user"));
+    batch.set(directoryIndexRef(context, "email-user"), {
+      ...directoryIndexFixture("email-user"),
+      updatedAt: serverTimestamp(),
+    });
+    await expectPermissionDenied(() => batch.commit());
   });
 
-  it("allow legitimate profile and partial settings updates", async () => {
+  it("reject legacy public-field mutation at Intermediate Gate", async () => {
     const context = contextFor(TEST_UIDS.alice);
-
-    await assertSucceeds(
+    await expectPermissionDenied(() =>
       userRef(context, TEST_UIDS.alice).update({
         bio: "Updated test bio",
         skills: ["Testing", "Rules"],
         updatedAt: serverTimestamp(),
       })
     );
+  });
+
+  it("allow legitimate settings updates on users", async () => {
+    const context = contextFor(TEST_UIDS.alice);
     await assertSucceeds(
       userRef(context, TEST_UIDS.alice).update({
         notificationPreferences: { connectionRequests: false },
@@ -282,15 +399,9 @@ describe("users rules", () => {
     );
   });
 
-  it("reject invalid profile update types and field injection", async () => {
+  it("reject invalid settings update types and field injection", async () => {
     const context = contextFor(TEST_UIDS.alice);
 
-    await expectPermissionDenied(() =>
-      userRef(context, TEST_UIDS.alice).update({ skills: "not-a-list" })
-    );
-    await expectPermissionDenied(() =>
-      userRef(context, TEST_UIDS.alice).update({ socialLinks: { github: true } })
-    );
     await expectPermissionDenied(() =>
       userRef(context, TEST_UIDS.alice).update({ role: "admin" })
     );
@@ -304,6 +415,165 @@ describe("users rules", () => {
   it("reject user deletion", async () => {
     await expectPermissionDenied(() =>
       userRef(contextFor(TEST_UIDS.alice), TEST_UIDS.alice).delete()
+    );
+  });
+});
+
+describe("publicProfiles rules", () => {
+  it("allow authenticated read of any public profile", async () => {
+    await assertSucceeds(publicProfileRef(contextFor(TEST_UIDS.alice), TEST_UIDS.bob).get());
+  });
+
+  it("reject unauthenticated read of public profiles", async () => {
+    await expectPermissionDenied(() =>
+      publicProfileRef(unauthenticated(), TEST_UIDS.bob).get()
+    );
+  });
+
+  it("reject public profile update by non-owner", async () => {
+    await expectPermissionDenied(() =>
+      publicProfileRef(contextFor(TEST_UIDS.alice), TEST_UIDS.bob).update({
+        bio: "Hacked bio",
+      })
+    );
+  });
+
+  it("reject discoverable profile update without matching directoryIndex update", async () => {
+    const context = contextFor(TEST_UIDS.alice);
+    await expectPermissionDenied(() =>
+      publicProfileRef(context, TEST_UIDS.alice).update({
+        department: "Information Technology",
+      })
+    );
+  });
+
+  it("allow discoverable profile update with matching directoryIndex update", async () => {
+    const context = contextFor(TEST_UIDS.alice);
+    const db = context.firestore();
+    const batch = db.batch();
+    batch.update(publicProfileRef(context, TEST_UIDS.alice), {
+      department: "Information Technology",
+    });
+    batch.update(directoryIndexRef(context, TEST_UIDS.alice), {
+      department: "Information Technology",
+      updatedAt: serverTimestamp(),
+    });
+    await assertSucceeds(batch.commit());
+  });
+
+  it("reject public profile with timestamps or private fields", async () => {
+    const context = contextFor(TEST_UIDS.alice);
+    const db = context.firestore();
+    const batch = db.batch();
+    batch.update(publicProfileRef(context, TEST_UIDS.alice), {
+      department: "Information Technology",
+      updatedAt: serverTimestamp(),
+    });
+    batch.update(directoryIndexRef(context, TEST_UIDS.alice), {
+      department: "Information Technology",
+      updatedAt: serverTimestamp(),
+    });
+    await expectPermissionDenied(() => batch.commit());
+  });
+});
+
+describe("directoryIndex rules", () => {
+  it("allow authenticated read of directory index", async () => {
+    await assertSucceeds(directoryIndexRef(contextFor(TEST_UIDS.alice), TEST_UIDS.bob).get());
+  });
+
+  it("reject unauthenticated read of directory index", async () => {
+    await expectPermissionDenied(() =>
+      directoryIndexRef(unauthenticated(), TEST_UIDS.bob).get()
+    );
+  });
+
+  it("reject directoryIndex write by non-owner", async () => {
+    await expectPermissionDenied(() =>
+      directoryIndexRef(contextFor(TEST_UIDS.alice), TEST_UIDS.bob).update({
+        department: "IT",
+      })
+    );
+  });
+
+  it("reject forged directoryIndex projection", async () => {
+    const context = contextFor(TEST_UIDS.alice);
+    const db = context.firestore();
+    const batch = db.batch();
+    batch.update(publicProfileRef(context, TEST_UIDS.alice), {
+      department: "Mathematics",
+    });
+    batch.update(directoryIndexRef(context, TEST_UIDS.alice), {
+      department: "Physics", // forged!
+      updatedAt: serverTimestamp(),
+    });
+    await expectPermissionDenied(() => batch.commit());
+  });
+});
+
+describe("discoverability atomic transitions", () => {
+  it("allow atomic discoverability toggle from true to false", async () => {
+    const context = contextFor(TEST_UIDS.alice);
+    const db = context.firestore();
+    const batch = db.batch();
+    batch.update(userRef(context, TEST_UIDS.alice), {
+      isDiscoverable: false,
+      updatedAt: serverTimestamp(),
+    });
+    batch.delete(directoryIndexRef(context, TEST_UIDS.alice));
+    await assertSucceeds(batch.commit());
+  });
+
+  it("reject non-atomic discoverability toggle from true to false (missing directoryIndex delete)", async () => {
+    const context = contextFor(TEST_UIDS.alice);
+    await expectPermissionDenied(() =>
+      userRef(context, TEST_UIDS.alice).update({
+        isDiscoverable: false,
+        updatedAt: serverTimestamp(),
+      })
+    );
+  });
+
+  it("allow atomic discoverability toggle from false to true", async () => {
+    await testEnvironment.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().collection("users").doc("toggle-user").set(
+        userFixture("toggle-user", { isDiscoverable: false })
+      );
+      await ctx.firestore().collection("publicProfiles").doc("toggle-user").set(
+        publicProfileFixture("toggle-user")
+      );
+    });
+
+    const context = contextFor("toggle-user");
+    const db = context.firestore();
+    const batch = db.batch();
+    batch.update(userRef(context, "toggle-user"), {
+      isDiscoverable: true,
+      updatedAt: serverTimestamp(),
+    });
+    batch.set(directoryIndexRef(context, "toggle-user"), {
+      ...directoryIndexFixture("toggle-user"),
+      updatedAt: serverTimestamp(),
+    });
+    await assertSucceeds(batch.commit());
+  });
+
+  it("reject non-atomic discoverability toggle from false to true (missing directoryIndex create)", async () => {
+    await testEnvironment.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().collection("users").doc("toggle-user-2").set(
+        userFixture("toggle-user-2", { isDiscoverable: false })
+      );
+      await ctx.firestore().collection("publicProfiles").doc("toggle-user-2").set(
+        publicProfileFixture("toggle-user-2")
+      );
+    });
+
+    const context = contextFor("toggle-user-2");
+    await expectPermissionDenied(() =>
+      userRef(context, "toggle-user-2").update({
+        isDiscoverable: true,
+        updatedAt: serverTimestamp(),
+      })
     );
   });
 });

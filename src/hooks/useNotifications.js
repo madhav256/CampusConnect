@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useAuth } from "./useAuth";
+import { useUserProfile } from "./useUserProfile";
 import {
   subscribeToNotifications,
   markNotificationAsRead,
@@ -24,8 +25,9 @@ import {
 export function useNotifications() {
   const { user: authUser } = useAuth();
   const currentUid = authUser?.uid;
+  const { profile, loading: profileLoading } = useUserProfile(currentUid);
 
-  const [notifications, setNotifications] = useState([]);
+  const [rawNotifications, setRawNotifications] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -37,7 +39,7 @@ export function useNotifications() {
     const unsubscribe = subscribeToNotifications(
       currentUid,
       (items) => {
-        setNotifications(items);
+        setRawNotifications(items);
         setIsLoading(false);
         setError(null);
       },
@@ -50,6 +52,19 @@ export function useNotifications() {
 
     return () => unsubscribe();
   }, [currentUid]);
+
+  const notifications = useMemo(() => {
+    const prefs = profile?.notificationPreferences;
+    return rawNotifications.filter((n) => {
+      if (n.type === "connection_request" && prefs?.connectionRequests === false) {
+        return false;
+      }
+      if (n.type === "connection_accepted" && prefs?.connectionAccepted === false) {
+        return false;
+      }
+      return true;
+    });
+  }, [rawNotifications, profile?.notificationPreferences]);
 
   const unreadCount = notifications.filter((n) => !n.isRead).length;
 
@@ -86,7 +101,7 @@ export function useNotifications() {
   return {
     notifications,
     unreadCount,
-    isLoading: !currentUid ? false : isLoading,
+    isLoading: !currentUid ? false : (isLoading || profileLoading),
     error,
     markAsRead: handleMarkAsRead,
     markAllAsRead: handleMarkAllAsRead,

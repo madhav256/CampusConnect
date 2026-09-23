@@ -117,6 +117,50 @@ export function notificationFixture(recipientId, actorId, overrides = {}) {
   };
 }
 
+export function publicProfileFixture(uid, overrides = {}) {
+  const names = {
+    alice: "Alice Test",
+    bob: "Bob Test",
+    carol: "Carol Test",
+  };
+
+  return {
+    uid,
+    displayName: names[uid] || "Test Student",
+    photoURL: null,
+    bio: "Rules test profile",
+    department: "Computer Science",
+    year: "Senior",
+    skills: ["Testing"],
+    socialLinks: {
+      github: "",
+      linkedin: "",
+      portfolio: "",
+      website: "",
+    },
+    ...overrides,
+  };
+}
+
+export function directoryIndexFixture(uid, overrides = {}) {
+  const names = {
+    alice: "Alice Test",
+    bob: "Bob Test",
+    carol: "Carol Test",
+  };
+
+  return {
+    uid,
+    displayName: names[uid] || "Test Student",
+    photoURL: null,
+    department: "Computer Science",
+    year: "Senior",
+    skills: ["Testing"],
+    updatedAt: timestamp,
+    ...overrides,
+  };
+}
+
 export async function seedBaseData(testEnvironment) {
   await testEnvironment.withSecurityRulesDisabled(async (context) => {
     const db = context.firestore();
@@ -124,6 +168,8 @@ export async function seedBaseData(testEnvironment) {
 
     for (const uid of Object.values(TEST_UIDS)) {
       batch.set(db.collection("users").doc(uid), userFixture(uid));
+      batch.set(db.collection("publicProfiles").doc(uid), publicProfileFixture(uid));
+      batch.set(db.collection("directoryIndex").doc(uid), directoryIndexFixture(uid));
     }
 
     batch.set(

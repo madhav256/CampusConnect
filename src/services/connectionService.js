@@ -54,10 +54,6 @@ export async function sendConnectionRequest(fromUid, toUid) {
 
   // Fetch actor's verified profile for denormalized notification payload
   const senderProfile = await fetchUserById(fromUid);
-  // Fetch recipient's profile to check their connection request notification preference
-  const recipientProfile = await fetchUserById(toUid);
-  const shouldNotifyRecipient =
-    recipientProfile?.notificationPreferences?.connectionRequests !== false;
 
   await runTransaction(firestore, async (transaction) => {
     const connDoc = await transaction.get(connRef);
@@ -91,20 +87,18 @@ export async function sendConnectionRequest(fromUid, toUid) {
       updatedAt: serverTimestamp(),
     });
 
-    // Create recipient's connection_request notification atomically if enabled by recipient
-    if (shouldNotifyRecipient) {
-      transaction.set(notifRef, {
-        id: `req_${docId}`,
-        recipientId: toUid,
-        actorId: fromUid,
-        actorName: senderProfile?.displayName || "CampusConnect Student",
-        actorAvatar: senderProfile?.photoURL || null,
-        type: "connection_request",
-        referenceId: docId,
-        isRead: false,
-        createdAt: serverTimestamp(),
-      });
-    }
+    // Create recipient's connection_request notification unconditionally (recipient filters client-side)
+    transaction.set(notifRef, {
+      id: `req_${docId}`,
+      recipientId: toUid,
+      actorId: fromUid,
+      actorName: senderProfile?.displayName || "CampusConnect Student",
+      actorAvatar: senderProfile?.photoURL || null,
+      type: "connection_request",
+      referenceId: docId,
+      isRead: false,
+      createdAt: serverTimestamp(),
+    });
   });
 }
 
@@ -170,10 +164,6 @@ export async function acceptConnectionRequest(currentUid, targetUid) {
 
   // Fetch accepting user's profile for the acceptance notification payload
   const acceptorProfile = await fetchUserById(currentUid);
-  // Fetch recipient's (targetUid) profile to check their connection accepted notification preference
-  const recipientProfile = await fetchUserById(targetUid);
-  const shouldNotifyRecipient =
-    recipientProfile?.notificationPreferences?.connectionAccepted !== false;
 
   await runTransaction(firestore, async (transaction) => {
     // Reads first:
@@ -204,25 +194,19 @@ export async function acceptConnectionRequest(currentUid, targetUid) {
       transaction.delete(incomingNotifRef);
     }
 
-    // Create or refresh acceptance notification for the sender (targetUid) if enabled by recipient.
-    // We always set the notification to ensure it exists with valid data after the transaction.
-    // This approach is idempotent and ensures:
-    // - If no notification existed, we create a valid one
-    // - If a notification existed, we refresh it with current data (timestamps, profile info)
-    // - The result is always a valid notification representing this acceptance event
-    if (shouldNotifyRecipient) {
-      transaction.set(acceptedNotifRef, {
-        id: `acc_${docId}`,
-        recipientId: targetUid,
-        actorId: currentUid,
-        actorName: acceptorProfile?.displayName || "CampusConnect Student",
-        actorAvatar: acceptorProfile?.photoURL || null,
-        type: "connection_accepted",
-        referenceId: docId,
-        isRead: false,
-        createdAt: serverTimestamp(),
-      });
-    }
+    // Create or refresh acceptance notification for the sender (targetUid) unconditionally.
+    // Recipient filters notifications on the client side according to their own preferences.
+    transaction.set(acceptedNotifRef, {
+      id: `acc_${docId}`,
+      recipientId: targetUid,
+      actorId: currentUid,
+      actorName: acceptorProfile?.displayName || "CampusConnect Student",
+      actorAvatar: acceptorProfile?.photoURL || null,
+      type: "connection_accepted",
+      referenceId: docId,
+      isRead: false,
+      createdAt: serverTimestamp(),
+    });
   });
 }
 

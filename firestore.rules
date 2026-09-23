@@ -37,6 +37,8 @@ service cloud.firestore {
 
     function isValidUserCreate(userId) {
       let d = request.resource.data;
+      let pubPath = /databases/$(database)/documents/publicProfiles/$(userId);
+      let dirPath = /databases/$(database)/documents/directoryIndex/$(userId);
       return d.keys().hasOnly([
                'uid', 'displayName', 'email', 'photoURL', 'bio',
                'department', 'year', 'skills', 'socialLinks',
@@ -63,34 +65,91 @@ service cloud.firestore {
              d.isDiscoverable is bool &&
              isValidNotificationPreferencesForCreate(d.notificationPreferences) &&
              d.createdAt == request.time &&
-             d.updatedAt == request.time;
+             d.updatedAt == request.time &&
+             existsAfter(pubPath) &&
+             (d.isDiscoverable == true ? existsAfter(dirPath) : !existsAfter(dirPath));
     }
 
-    function isValidUserUpdateShape() {
+    function isValidPublicProfileSchema(userId) {
       let d = request.resource.data;
       return d.keys().hasOnly([
-               'uid', 'displayName', 'email', 'photoURL', 'bio',
-               'department', 'year', 'skills', 'socialLinks',
-               'isDiscoverable', 'notificationPreferences',
-               'createdAt', 'updatedAt'
+               'uid', 'displayName', 'photoURL', 'bio',
+               'department', 'year', 'skills', 'socialLinks'
              ]) &&
              d.keys().hasAll([
-               'uid', 'displayName', 'email', 'photoURL', 'bio',
-               'department', 'year', 'skills', 'socialLinks',
-               'isDiscoverable', 'notificationPreferences',
-               'createdAt', 'updatedAt'
+               'uid', 'displayName', 'photoURL', 'bio',
+               'department', 'year', 'skills', 'socialLinks'
              ]) &&
+             d.uid == userId &&
+             d.uid == request.auth.uid &&
              d.displayName is string &&
-             d.email is string &&
              (d.photoURL == null || d.photoURL is string) &&
              d.bio is string &&
              d.department is string &&
              d.year is string &&
              d.skills is list &&
-             isValidSocialLinks(d.socialLinks) &&
-             d.isDiscoverable is bool &&
-             isValidNotificationPreferencesForUpdate(d.notificationPreferences) &&
+             isValidSocialLinks(d.socialLinks);
+    }
+
+    function isMatchingDirectoryProjection(dirPath, data) {
+      let dirDoc = getAfter(dirPath);
+      return dirDoc != null &&
+             dirDoc.data.uid == data.uid &&
+             dirDoc.data.displayName == data.displayName &&
+             dirDoc.data.photoURL == data.photoURL &&
+             dirDoc.data.department == data.department &&
+             dirDoc.data.year == data.year &&
+             dirDoc.data.skills == data.skills;
+    }
+
+    function isValidPublicProfileProjection(userId) {
+      let userPath = /databases/$(database)/documents/users/$(userId);
+      let dirPath = /databases/$(database)/documents/directoryIndex/$(userId);
+      let userDoc = getAfter(userPath);
+      return userDoc != null && (
+        userDoc.data.isDiscoverable == true ? (
+          existsAfter(dirPath) &&
+          isMatchingDirectoryProjection(dirPath, request.resource.data)
+        ) : (
+          !existsAfter(dirPath)
+        )
+      );
+    }
+
+    function isValidDirectoryIndexSchema(userId) {
+      let d = request.resource.data;
+      return d.keys().hasOnly([
+               'uid', 'displayName', 'photoURL', 'department',
+               'year', 'skills', 'updatedAt'
+             ]) &&
+             d.keys().hasAll([
+               'uid', 'displayName', 'photoURL', 'department',
+               'year', 'skills', 'updatedAt'
+             ]) &&
+             d.uid == userId &&
+             d.uid == request.auth.uid &&
+             d.displayName is string &&
+             (d.photoURL == null || d.photoURL is string) &&
+             d.department is string &&
+             d.year is string &&
+             d.skills is list &&
              d.updatedAt == request.time;
+    }
+
+    function isValidDirectoryIndexSync(userId) {
+      let userPath = /databases/$(database)/documents/users/$(userId);
+      let pubPath = /databases/$(database)/documents/publicProfiles/$(userId);
+      let userDoc = getAfter(userPath);
+      let pubDoc = getAfter(pubPath);
+      return userDoc != null &&
+             userDoc.data.isDiscoverable == true &&
+             pubDoc != null &&
+             request.resource.data.uid == pubDoc.data.uid &&
+             request.resource.data.displayName == pubDoc.data.displayName &&
+             request.resource.data.photoURL == pubDoc.data.photoURL &&
+             request.resource.data.department == pubDoc.data.department &&
+             request.resource.data.year == pubDoc.data.year &&
+             request.resource.data.skills == pubDoc.data.skills;
     }
 
     // Validates atomic like/unlike transactions on posts.
@@ -140,13 +199,16 @@ service cloud.firestore {
 
     function isValidCommentSchema() {
       let d = request.resource.data;
-      let actorPath = /databases/$(database)/documents/users/$(request.auth.uid);
-      return exists(actorPath) &&
+      let pubPath = /databases/$(database)/documents/publicProfiles/$(request.auth.uid);
+      let userPath = /databases/$(database)/documents/users/$(request.auth.uid);
+      let hasPub = exists(pubPath);
+      let actorDoc = hasPub ? get(pubPath) : get(userPath);
+      return (hasPub || exists(userPath)) &&
              d.keys().hasOnly(['authorId', 'authorName', 'authorAvatar', 'content', 'createdAt', 'updatedAt']) &&
              d.keys().hasAll(['authorId', 'authorName', 'authorAvatar', 'content', 'createdAt', 'updatedAt']) &&
              d.authorId == request.auth.uid &&
-             d.authorName == get(actorPath).data.get('displayName', 'CampusConnect Student') &&
-             d.authorAvatar == get(actorPath).data.get('photoURL', null) &&
+             d.authorName == actorDoc.data.get('displayName', 'CampusConnect Student') &&
+             d.authorAvatar == actorDoc.data.get('photoURL', null) &&
              d.authorName is string &&
              (d.authorAvatar == null || d.authorAvatar is string) &&
              d.content is string &&
@@ -181,17 +243,24 @@ service cloud.firestore {
              d.createdAt == request.time;
     }
 
-    // 1. Users collection
+    // 1. Users collection (Private account / settings - Intermediate Gate)
     match /users/{userId} {
-      allow read: if isAuthenticated();
+      allow read: if isOwner(userId);
       allow create: if isOwner(userId) && isValidUserCreate(userId);
       allow update: if isOwner(userId) &&
         resource.data.uid == userId &&
         request.resource.data.uid == userId &&
-        request.resource.data.uid == resource.data.uid &&
         request.resource.data.email == resource.data.email &&
         request.resource.data.createdAt == resource.data.createdAt &&
-        isValidUserUpdateShape();
+        request.resource.data.updatedAt == request.time &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isDiscoverable', 'notificationPreferences', 'updatedAt']) &&
+        (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['notificationPreferences']) ||
+         isValidNotificationPreferencesForUpdate(request.resource.data.notificationPreferences)) &&
+        (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['isDiscoverable']) ||
+         request.resource.data.isDiscoverable is bool) &&
+        (request.resource.data.isDiscoverable == true ?
+          existsAfter(/databases/$(database)/documents/directoryIndex/$(userId)) :
+          !existsAfter(/databases/$(database)/documents/directoryIndex/$(userId)));
 
       allow delete: if false;
 
@@ -219,8 +288,11 @@ service cloud.firestore {
         }
 
         function isValidActorProfile() {
-          let actorDoc = get(/databases/$(database)/documents/users/$(request.auth.uid));
-          return actorDoc != null &&
+          let pubPath = /databases/$(database)/documents/publicProfiles/$(request.auth.uid);
+          let userPath = /databases/$(database)/documents/users/$(request.auth.uid);
+          let hasPub = exists(pubPath);
+          let actorDoc = hasPub ? get(pubPath) : get(userPath);
+          return (hasPub || exists(userPath)) &&
                  request.resource.data.actorName == actorDoc.data.get('displayName', 'CampusConnect Student') &&
                  request.resource.data.actorAvatar == actorDoc.data.get('photoURL', null);
         }
@@ -308,6 +380,31 @@ service cloud.firestore {
           (resource == null && notificationId.matches('^req_.*'))
         );
       }
+    }
+
+    // 1b. Public profiles collection (Sole authority for public profile fields)
+    match /publicProfiles/{userId} {
+      allow read: if isAuthenticated();
+      allow create: if isOwner(userId) &&
+        isValidPublicProfileSchema(userId) &&
+        isValidPublicProfileProjection(userId);
+      allow update: if isOwner(userId) &&
+        isValidPublicProfileSchema(userId) &&
+        isValidPublicProfileProjection(userId);
+      allow delete: if false;
+    }
+
+    // 1c. Directory index collection (Projection of publicProfiles)
+    match /directoryIndex/{userId} {
+      allow read: if isAuthenticated();
+      allow create: if isOwner(userId) &&
+        isValidDirectoryIndexSchema(userId) &&
+        isValidDirectoryIndexSync(userId);
+      allow update: if isOwner(userId) &&
+        isValidDirectoryIndexSchema(userId) &&
+        isValidDirectoryIndexSync(userId);
+      allow delete: if isOwner(userId) &&
+        getAfter(/databases/$(database)/documents/users/$(userId)).data.isDiscoverable == false;
     }
 
     // 3. Posts collection

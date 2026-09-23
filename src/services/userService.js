@@ -8,7 +8,6 @@ import {
   orderBy,
   query,
   serverTimestamp,
-  setDoc,
   updateDoc,
   writeBatch,
 } from "firebase/firestore";
@@ -124,7 +123,10 @@ export async function createUserProfile({ uid, displayName, email, photoURL, isD
   if (existingUser.exists()) {
     const existingPub = await getDoc(pubRef);
     const privateSettings = normalizeUserSettings(uid, existingUser.data());
-    const publicProfile = normalizePublicProfile(uid, existingPub.exists() ? existingPub.data() : null);
+    const publicProfile = normalizePublicProfile(
+      uid,
+      existingPub.exists() ? existingPub.data() : existingUser.data(),
+    );
     return {
       uid,
       ...privateSettings,
@@ -135,10 +137,27 @@ export async function createUserProfile({ uid, displayName, email, photoURL, isD
   const firestore = requireDb();
   const batch = writeBatch(firestore);
 
-  const privateUser = {
+  const cleanDisplayName = displayName || "CampusConnect Student";
+  const cleanPhotoURL = photoURL || null;
+  const isDisc = Boolean(isDiscoverable);
+
+  // 1. users/{uid}: legacy-compatible full public profile + required private fields
+  const fullUserDoc = {
     uid,
+    displayName: cleanDisplayName,
     email: email || "",
-    isDiscoverable: Boolean(isDiscoverable),
+    photoURL: cleanPhotoURL,
+    bio: "",
+    department: "",
+    year: "",
+    skills: [],
+    socialLinks: {
+      github: "",
+      linkedin: "",
+      portfolio: "",
+      website: "",
+    },
+    isDiscoverable: isDisc,
     notificationPreferences: {
       connectionRequests: true,
       connectionAccepted: true,
@@ -147,10 +166,11 @@ export async function createUserProfile({ uid, displayName, email, photoURL, isD
     updatedAt: serverTimestamp(),
   };
 
+  // 2. publicProfiles/{uid}: strict 8-field public profile
   const publicProfile = {
     uid,
-    displayName: displayName || "CampusConnect Student",
-    photoURL: photoURL || null,
+    displayName: cleanDisplayName,
+    photoURL: cleanPhotoURL,
     bio: "",
     department: "",
     year: "",
@@ -163,14 +183,15 @@ export async function createUserProfile({ uid, displayName, email, photoURL, isD
     },
   };
 
-  batch.set(uRef, privateUser);
+  batch.set(uRef, fullUserDoc);
   batch.set(pubRef, publicProfile);
 
-  if (privateUser.isDiscoverable) {
+  // 3. directoryIndex/{uid}: projection when discoverable
+  if (isDisc) {
     batch.set(indexRef, {
       uid,
-      displayName: displayName || "CampusConnect Student",
-      photoURL: photoURL || null,
+      displayName: cleanDisplayName,
+      photoURL: cleanPhotoURL,
       department: "",
       year: "",
       skills: [],
@@ -183,7 +204,7 @@ export async function createUserProfile({ uid, displayName, email, photoURL, isD
 
   return {
     uid,
-    ...normalizeUserSettings(uid, privateUser),
+    ...normalizeUserSettings(uid, fullUserDoc),
     ...normalizePublicProfile(uid, publicProfile),
   };
 }
@@ -195,20 +216,28 @@ export function subscribeToUserProfile(uid, callback, onError) {
   let publicData = null;
   let hasUserSnap = false;
   let hasPublicSnap = false;
+  let publicError = null;
+  let userError = null;
 
   const emit = () => {
     if (!hasUserSnap || !hasPublicSnap) return;
     if (!userData && !publicData) {
+      if (userError && publicError && onError) {
+        onError(userError);
+        return;
+      }
       callback(null);
       return;
     }
 
     const privateSettings = normalizeUserSettings(uid, userData);
-    const publicProfile = normalizePublicProfile(uid, publicData);
+    const publicProfile = publicData
+      ? normalizePublicProfile(uid, publicData)
+      : normalizePublicProfile(uid, userData);
 
     callback({
       uid,
-      // Public profile fields strictly from publicProfiles
+      // Public profile fields prefer publicProfiles, falling back to users
       displayName: publicProfile.displayName,
       photoURL: publicProfile.photoURL,
       bio: publicProfile.bio,
@@ -220,8 +249,8 @@ export function subscribeToUserProfile(uid, callback, onError) {
       email: privateSettings.email,
       isDiscoverable: privateSettings.isDiscoverable,
       notificationPreferences: privateSettings.notificationPreferences,
-      createdAt: privateSettings.createdAt,
-      updatedAt: privateSettings.updatedAt,
+      createdAt: privateSettings.createdAt || userData?.createdAt || null,
+      updatedAt: privateSettings.updatedAt || userData?.updatedAt || null,
     });
   };
 
@@ -230,10 +259,18 @@ export function subscribeToUserProfile(uid, callback, onError) {
     (snapshot) => {
       hasUserSnap = true;
       userData = snapshot.exists() ? snapshot.data() : null;
+      userError = null;
       emit();
     },
     (err) => {
-      if (onError) onError(err);
+      hasUserSnap = true;
+      userData = null;
+      userError = err;
+      if (hasPublicSnap) {
+        emit();
+      } else if (onError) {
+        // Wait for public listener
+      }
     },
   );
 
@@ -242,10 +279,18 @@ export function subscribeToUserProfile(uid, callback, onError) {
     (snapshot) => {
       hasPublicSnap = true;
       publicData = snapshot.exists() ? snapshot.data() : null;
+      publicError = null;
       emit();
     },
     (err) => {
-      if (onError) onError(err);
+      hasPublicSnap = true;
+      publicData = null;
+      publicError = err;
+      if (hasUserSnap) {
+        emit();
+      } else if (onError) {
+        // Wait for user listener
+      }
     },
   );
 
@@ -270,23 +315,39 @@ export async function updateUserProfile(uid, updates) {
     getDoc(userRef),
   ]);
 
-  const currentPub = pubSnap.exists() ? pubSnap.data() : {};
-  const isDiscoverable = userSnap.exists() ? userSnap.data()?.isDiscoverable !== false : true;
+  const currentSource = pubSnap.exists()
+    ? pubSnap.data()
+    : (userSnap.exists() ? userSnap.data() : {});
+  const isDiscoverable = userSnap.exists()
+    ? userSnap.data()?.isDiscoverable !== false
+    : true;
 
-  const newDisplayName = updates.displayName !== undefined ? updates.displayName : (currentPub.displayName || "CampusConnect Student");
-  const newPhotoURL = updates.photoURL !== undefined ? updates.photoURL : (currentPub.photoURL || null);
-  const newDepartment = updates.department !== undefined ? updates.department : (currentPub.department || "");
-  const newYear = updates.year !== undefined ? updates.year : (currentPub.year || "");
-  const newSkills = Array.isArray(updates.skills) ? updates.skills : (currentPub.skills || []);
+  const newDisplayName = updates.displayName !== undefined
+    ? updates.displayName
+    : (currentSource.displayName || "CampusConnect Student");
+  const newPhotoURL = updates.photoURL !== undefined
+    ? updates.photoURL
+    : (currentSource.photoURL || null);
+  const newDepartment = updates.department !== undefined
+    ? updates.department
+    : (currentSource.department || "");
+  const newYear = updates.year !== undefined
+    ? updates.year
+    : (currentSource.year || "");
+  const newSkills = Array.isArray(updates.skills)
+    ? updates.skills
+    : (currentSource.skills || []);
   const newSocialLinks = {
     github: "",
     linkedin: "",
     portfolio: "",
     website: "",
-    ...(currentPub.socialLinks || {}),
+    ...(currentSource.socialLinks || {}),
     ...(updates.socialLinks || {}),
   };
-  const newBio = updates.bio !== undefined ? updates.bio : (currentPub.bio || "");
+  const newBio = updates.bio !== undefined
+    ? updates.bio
+    : (currentSource.bio || "");
 
   const publicProfileData = {
     uid,
@@ -299,9 +360,23 @@ export async function updateUserProfile(uid, updates) {
     socialLinks: newSocialLinks,
   };
 
+  // Mirrored strictly to allowed legacy public fields in users/{uid}
+  const legacyUsersUpdates = {
+    displayName: newDisplayName,
+    photoURL: newPhotoURL,
+    bio: newBio,
+    department: newDepartment,
+    year: newYear,
+    skills: newSkills,
+    socialLinks: newSocialLinks,
+    updatedAt: serverTimestamp(),
+  };
+
+  const batch = writeBatch(firestore);
+  batch.set(pubRef, publicProfileData, { merge: true });
+  batch.update(userRef, legacyUsersUpdates);
+
   if (isDiscoverable) {
-    const batch = writeBatch(firestore);
-    batch.set(pubRef, publicProfileData, { merge: true });
     batch.set(indexRef, {
       uid,
       displayName: newDisplayName,
@@ -311,11 +386,9 @@ export async function updateUserProfile(uid, updates) {
       skills: newSkills,
       updatedAt: serverTimestamp(),
     });
-    await batch.commit();
-  } else {
-    await setDoc(pubRef, publicProfileData, { merge: true });
   }
 
+  await batch.commit();
   usersCache = null;
 }
 
@@ -371,16 +444,21 @@ export async function updateUserSettings(uid, settingsUpdates) {
     batch.update(userRef, updates);
 
     if (newDiscoverableValue === true) {
-      const pubSnap = await getDoc(pubRef);
-      const pubData = pubSnap.exists() ? pubSnap.data() : {};
+      const [pubSnap, uSnap] = await Promise.all([
+        getDoc(pubRef),
+        getDoc(userRef),
+      ]);
+      const sourceData = pubSnap.exists()
+        ? pubSnap.data()
+        : (uSnap.exists() ? uSnap.data() : {});
 
       batch.set(indexRef, {
         uid,
-        displayName: pubData.displayName || "CampusConnect Student",
-        photoURL: pubData.photoURL || null,
-        department: pubData.department || "",
-        year: pubData.year || "",
-        skills: Array.isArray(pubData.skills) ? pubData.skills : [],
+        displayName: sourceData.displayName || "CampusConnect Student",
+        photoURL: sourceData.photoURL || null,
+        department: sourceData.department || "",
+        year: sourceData.year || "",
+        skills: Array.isArray(sourceData.skills) ? sourceData.skills : [],
         updatedAt: serverTimestamp(),
       });
     } else {
@@ -406,12 +484,12 @@ export async function fetchAllUsers(limitCount = 100) {
   }
 
   const firestore = requireDb();
-  const directoryRef = collection(firestore, "directoryIndex");
-  const q = query(directoryRef, orderBy("updatedAt", "desc"), limit(limitCount));
+  const usersRef = collection(firestore, "users");
+  const q = query(usersRef, orderBy("updatedAt", "desc"), limit(limitCount));
   const snapshot = await getDocs(q);
 
   const users = snapshot.docs.map((docSnap) =>
-    normalizePublicProfile(docSnap.id, docSnap.data())
+    normalizeProfile(docSnap.id, docSnap.data()),
   );
 
   usersCache = users;
@@ -424,13 +502,23 @@ export async function fetchUserById(uid) {
     return null;
   }
 
-  const pubRef = publicProfileDocRef(uid);
-  const snapshot = await getDoc(pubRef);
+  try {
+    const pubRef = publicProfileDocRef(uid);
+    const pubSnap = await getDoc(pubRef);
+    if (pubSnap.exists()) {
+      return normalizeProfile(uid, pubSnap.data());
+    }
+  } catch (err) {
+    console.warn(`[Bridge] publicProfiles read failed for ${uid}, falling back to users`, err);
+  }
 
-  if (!snapshot.exists()) {
+  // Fallback to users/{uid}
+  const uRef = userDocRef(uid);
+  const uSnap = await getDoc(uRef);
+  if (!uSnap.exists()) {
     return null;
   }
 
-  return normalizePublicProfile(uid, snapshot.data());
+  return normalizeProfile(uid, uSnap.data());
 }
 

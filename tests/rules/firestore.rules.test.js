@@ -178,8 +178,8 @@ describe("users rules", () => {
     await assertSucceeds(userRef(contextFor(TEST_UIDS.alice), TEST_UIDS.alice).get());
   });
 
-  it("reject cross-user reads from private users collection", async () => {
-    await expectPermissionDenied(() =>
+  it("allow cross-user reads from users collection during Bridge", async () => {
+    await assertSucceeds(
       userRef(contextFor(TEST_UIDS.alice), TEST_UIDS.bob).get()
     );
   });
@@ -361,12 +361,22 @@ describe("users rules", () => {
     await expectPermissionDenied(() => batch.commit());
   });
 
-  it("reject legacy public-field mutation at Intermediate Gate", async () => {
+  it("allow legacy public-field mutation during Bridge dual-write", async () => {
     const context = contextFor(TEST_UIDS.alice);
-    await expectPermissionDenied(() =>
+    await assertSucceeds(
       userRef(context, TEST_UIDS.alice).update({
         bio: "Updated test bio",
         skills: ["Testing", "Rules"],
+        updatedAt: serverTimestamp(),
+      })
+    );
+  });
+
+  it("reject unauthorized field injection (e.g. isDemo) on user update during Bridge", async () => {
+    const context = contextFor(TEST_UIDS.alice);
+    await expectPermissionDenied(() =>
+      userRef(context, TEST_UIDS.alice).update({
+        isDemo: true,
         updatedAt: serverTimestamp(),
       })
     );

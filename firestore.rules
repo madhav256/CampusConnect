@@ -243,9 +243,9 @@ service cloud.firestore {
              d.createdAt == request.time;
     }
 
-    // 1. Users collection (Private account / settings - Intermediate Gate)
+    // 1. Users collection (Private account / settings - Bridge Transitional State)
     match /users/{userId} {
-      allow read: if isOwner(userId);
+      allow read: if isAuthenticated();
       allow create: if isOwner(userId) && isValidUserCreate(userId);
       allow update: if isOwner(userId) &&
         resource.data.uid == userId &&
@@ -253,7 +253,24 @@ service cloud.firestore {
         request.resource.data.email == resource.data.email &&
         request.resource.data.createdAt == resource.data.createdAt &&
         request.resource.data.updatedAt == request.time &&
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isDiscoverable', 'notificationPreferences', 'updatedAt']) &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'displayName', 'photoURL', 'bio', 'department', 'year', 'skills', 'socialLinks',
+          'isDiscoverable', 'notificationPreferences', 'updatedAt'
+        ]) &&
+        (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['displayName']) ||
+         request.resource.data.displayName is string) &&
+        (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['photoURL']) ||
+         request.resource.data.photoURL == null || request.resource.data.photoURL is string) &&
+        (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['bio']) ||
+         request.resource.data.bio is string) &&
+        (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['department']) ||
+         request.resource.data.department is string) &&
+        (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['year']) ||
+         request.resource.data.year is string) &&
+        (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['skills']) ||
+         request.resource.data.skills is list) &&
+        (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['socialLinks']) ||
+         isValidSocialLinks(request.resource.data.socialLinks)) &&
         (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['notificationPreferences']) ||
          isValidNotificationPreferencesForUpdate(request.resource.data.notificationPreferences)) &&
         (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['isDiscoverable']) ||

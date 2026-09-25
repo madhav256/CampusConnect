@@ -69,7 +69,13 @@ function notificationRef(context, recipientId, notificationId) {
 
 function userCreateData(uid, overrides = {}) {
   return {
-    ...userFixture(uid),
+    uid,
+    email: `${uid}@example.test`,
+    isDiscoverable: true,
+    notificationPreferences: {
+      connectionRequests: true,
+      connectionAccepted: true,
+    },
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
     ...overrides,
@@ -283,13 +289,29 @@ describe("users rules", () => {
   it("reject a profile missing a required field", async () => {
     const context = contextFor("missing-user");
     const data = userCreateData("missing-user");
-    delete data.bio;
+    delete data.isDiscoverable;
     const db = context.firestore();
     const batch = db.batch();
     batch.set(userRef(context, "missing-user"), data);
     batch.set(publicProfileRef(context, "missing-user"), publicProfileFixture("missing-user"));
     batch.set(directoryIndexRef(context, "missing-user"), {
       ...directoryIndexFixture("missing-user"),
+      updatedAt: serverTimestamp(),
+    });
+    await expectPermissionDenied(() => batch.commit());
+  });
+
+  it("reject legacy public fields in user create", async () => {
+    const context = contextFor("legacy-create-user");
+    const db = context.firestore();
+    const batch = db.batch();
+    batch.set(
+      userRef(context, "legacy-create-user"),
+      userCreateData("legacy-create-user", { bio: "Forbidden bio in private user doc" })
+    );
+    batch.set(publicProfileRef(context, "legacy-create-user"), publicProfileFixture("legacy-create-user"));
+    batch.set(directoryIndexRef(context, "legacy-create-user"), {
+      ...directoryIndexFixture("legacy-create-user"),
       updatedAt: serverTimestamp(),
     });
     await expectPermissionDenied(() => batch.commit());
@@ -361,9 +383,9 @@ describe("users rules", () => {
     await expectPermissionDenied(() => batch.commit());
   });
 
-  it("allow legacy public-field mutation during Bridge dual-write", async () => {
+  it("reject legacy public-field mutation during Cleanup-Lock", async () => {
     const context = contextFor(TEST_UIDS.alice);
-    await assertSucceeds(
+    await expectPermissionDenied(() =>
       userRef(context, TEST_UIDS.alice).update({
         bio: "Updated test bio",
         skills: ["Testing", "Rules"],
@@ -372,7 +394,27 @@ describe("users rules", () => {
     );
   });
 
-  it("reject unauthorized field injection (e.g. isDemo) on user update during Bridge", async () => {
+  it("reject mixed private and legacy field update during Cleanup-Lock", async () => {
+    const context = contextFor(TEST_UIDS.alice);
+    await expectPermissionDenied(() =>
+      userRef(context, TEST_UIDS.alice).update({
+        isDiscoverable: false,
+        displayName: "Hacked Name",
+        updatedAt: serverTimestamp(),
+      })
+    );
+  });
+
+  it("allow updatedAt-only update on users", async () => {
+    const context = contextFor(TEST_UIDS.alice);
+    await assertSucceeds(
+      userRef(context, TEST_UIDS.alice).update({
+        updatedAt: serverTimestamp(),
+      })
+    );
+  });
+
+  it("reject unauthorized field injection (e.g. isDemo) on user update during Cleanup-Lock", async () => {
     const context = contextFor(TEST_UIDS.alice);
     await expectPermissionDenied(() =>
       userRef(context, TEST_UIDS.alice).update({

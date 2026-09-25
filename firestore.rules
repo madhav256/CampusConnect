@@ -40,28 +40,17 @@ service cloud.firestore {
       let pubPath = /databases/$(database)/documents/publicProfiles/$(userId);
       let dirPath = /databases/$(database)/documents/directoryIndex/$(userId);
       return d.keys().hasOnly([
-               'uid', 'displayName', 'email', 'photoURL', 'bio',
-               'department', 'year', 'skills', 'socialLinks',
-               'isDiscoverable', 'notificationPreferences',
-               'createdAt', 'updatedAt'
+               'uid', 'email', 'isDiscoverable',
+               'notificationPreferences', 'createdAt', 'updatedAt'
              ]) &&
              d.keys().hasAll([
-               'uid', 'displayName', 'email', 'photoURL', 'bio',
-               'department', 'year', 'skills', 'socialLinks',
-               'isDiscoverable', 'notificationPreferences',
-               'createdAt', 'updatedAt'
+               'uid', 'email', 'isDiscoverable',
+               'notificationPreferences', 'createdAt', 'updatedAt'
              ]) &&
              d.uid == userId &&
              d.uid == request.auth.uid &&
              d.email == request.auth.token.email &&
-             d.displayName is string &&
              d.email is string &&
-             (d.photoURL == null || d.photoURL is string) &&
-             d.bio is string &&
-             d.department is string &&
-             d.year is string &&
-             d.skills is list &&
-             isValidSocialLinks(d.socialLinks) &&
              d.isDiscoverable is bool &&
              isValidNotificationPreferencesForCreate(d.notificationPreferences) &&
              d.createdAt == request.time &&
@@ -243,7 +232,7 @@ service cloud.firestore {
              d.createdAt == request.time;
     }
 
-    // 1. Users collection (Private account / settings - Bridge Transitional State)
+    // 1. Users collection (Private account / settings - Cleanup-Lock State)
     match /users/{userId} {
       allow read: if isAuthenticated();
       allow create: if isOwner(userId) && isValidUserCreate(userId);
@@ -254,23 +243,8 @@ service cloud.firestore {
         request.resource.data.createdAt == resource.data.createdAt &&
         request.resource.data.updatedAt == request.time &&
         request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'displayName', 'photoURL', 'bio', 'department', 'year', 'skills', 'socialLinks',
           'isDiscoverable', 'notificationPreferences', 'updatedAt'
         ]) &&
-        (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['displayName']) ||
-         request.resource.data.displayName is string) &&
-        (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['photoURL']) ||
-         request.resource.data.photoURL == null || request.resource.data.photoURL is string) &&
-        (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['bio']) ||
-         request.resource.data.bio is string) &&
-        (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['department']) ||
-         request.resource.data.department is string) &&
-        (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['year']) ||
-         request.resource.data.year is string) &&
-        (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['skills']) ||
-         request.resource.data.skills is list) &&
-        (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['socialLinks']) ||
-         isValidSocialLinks(request.resource.data.socialLinks)) &&
         (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['notificationPreferences']) ||
          isValidNotificationPreferencesForUpdate(request.resource.data.notificationPreferences)) &&
         (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['isDiscoverable']) ||

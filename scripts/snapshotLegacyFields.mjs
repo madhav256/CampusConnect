@@ -52,11 +52,13 @@ async function captureSnapshot() {
       }
     }
 
+    const hasDemo = Object.prototype.hasOwnProperty.call(data, "isDemo");
     snapshotData.users[uid] = {
       profileFields,
       // isDemo is migration/demo metadata, separated from profile fields
       metadata: {
-        isDemo: Boolean(data.isDemo),
+        isDemoPresent: hasDemo,
+        ...(hasDemo ? { isDemo: Boolean(data.isDemo) } : {}),
       },
     };
   }

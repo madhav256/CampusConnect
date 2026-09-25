@@ -33,3 +33,7 @@ dist-ssr
 scripts/credentials/
 *serviceAccount*.json
 *service-account*.json
+
+# Milestone 14B production snapshots
+scripts/snapshots/
+*.snapshot.json

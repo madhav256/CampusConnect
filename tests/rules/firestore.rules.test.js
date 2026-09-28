@@ -184,8 +184,8 @@ describe("users rules", () => {
     await assertSucceeds(userRef(contextFor(TEST_UIDS.alice), TEST_UIDS.alice).get());
   });
 
-  it("allow cross-user reads from users collection during Bridge", async () => {
-    await assertSucceeds(
+  it("reject cross-user reads from private users collection", async () => {
+    await expectPermissionDenied(() =>
       userRef(contextFor(TEST_UIDS.alice), TEST_UIDS.bob).get()
     );
   });
@@ -383,7 +383,7 @@ describe("users rules", () => {
     await expectPermissionDenied(() => batch.commit());
   });
 
-  it("reject legacy public-field mutation during Cleanup-Lock", async () => {
+  it("reject legacy public-field mutation under Strict Rules", async () => {
     const context = contextFor(TEST_UIDS.alice);
     await expectPermissionDenied(() =>
       userRef(context, TEST_UIDS.alice).update({
@@ -394,7 +394,7 @@ describe("users rules", () => {
     );
   });
 
-  it("reject mixed private and legacy field update during Cleanup-Lock", async () => {
+  it("reject mixed private and legacy field update under Strict Rules", async () => {
     const context = contextFor(TEST_UIDS.alice);
     await expectPermissionDenied(() =>
       userRef(context, TEST_UIDS.alice).update({
@@ -414,7 +414,7 @@ describe("users rules", () => {
     );
   });
 
-  it("reject unauthorized field injection (e.g. isDemo) on user update during Cleanup-Lock", async () => {
+  it("reject unauthorized field injection (e.g. isDemo) on user update under Strict Rules", async () => {
     const context = contextFor(TEST_UIDS.alice);
     await expectPermissionDenied(() =>
       userRef(context, TEST_UIDS.alice).update({

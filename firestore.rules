@@ -232,9 +232,9 @@ service cloud.firestore {
              d.createdAt == request.time;
     }
 
-    // 1. Users collection (Private account / settings - Cleanup-Lock State)
+    // 1. Users collection (Private account / settings - Strict Boundary State)
     match /users/{userId} {
-      allow read: if isAuthenticated();
+      allow read: if isOwner(userId);
       allow create: if isOwner(userId) && isValidUserCreate(userId);
       allow update: if isOwner(userId) &&
         resource.data.uid == userId &&

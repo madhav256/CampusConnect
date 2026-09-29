@@ -192,7 +192,7 @@ export async function seedEmulatorData() {
     senderId: "student-b",
     receiverId: "student-a",
     status: "accepted",
-    participants: ["student-a", "student-b"],
+    users: ["student-a", "student-b"],
     createdAt: now,
     updatedAt: now,
   });
@@ -233,7 +233,66 @@ export async function seedEmulatorData() {
     createdAt: now,
   });
 
-  console.log("Emulator 14B representative seeding complete!");
+  // 8. Milestone 16: Seed deterministic conversation & messages (student-a <-> student-b)
+  const conversationId = "student-a_student-b";
+  const t0 = Timestamp.fromMillis(now.toMillis() - 7200000); // 2 hours ago
+  const t1 = Timestamp.fromMillis(now.toMillis() - 3600000); // 1 hour ago
+  const t2 = Timestamp.fromMillis(now.toMillis() - 1800000); // 30 mins ago
+
+  const convRef = db.collection("conversations").doc(conversationId);
+  await convRef.set({
+    id: conversationId,
+    participants: ["student-a", "student-b"],
+    participantProfiles: {
+      "student-a": {
+        displayName: "Alice Chen",
+        photoURL: null,
+      },
+      "student-b": {
+        displayName: "Bob Smith",
+        photoURL: null,
+      },
+    },
+    lastMessage: {
+      id: "msg-demo-3",
+      content: "Let me know if you want to collaborate on the data preprocessing pipeline!",
+      senderId: "student-b",
+      createdAt: t2,
+    },
+    unreadCount: {
+      "student-a": 1,
+      "student-b": 0,
+    },
+    createdAt: t0,
+    updatedAt: t2,
+  });
+
+  const msgsColl = convRef.collection("messages");
+  await msgsColl.doc("msg-demo-1").set({
+    id: "msg-demo-1",
+    conversationId,
+    senderId: "student-a",
+    content: "Hi Bob, welcome to CampusConnect! Have you started the ML project yet?",
+    createdAt: t0,
+  });
+
+  await msgsColl.doc("msg-demo-2").set({
+    id: "msg-demo-2",
+    conversationId,
+    senderId: "student-b",
+    content: "Hey Alice! Yes, just setting up the PyTorch environment now.",
+    createdAt: t1,
+  });
+
+  await msgsColl.doc("msg-demo-3").set({
+    id: "msg-demo-3",
+    conversationId,
+    senderId: "student-b",
+    content: "Let me know if you want to collaborate on the data preprocessing pipeline!",
+    createdAt: t2,
+  });
+
+  console.log("Emulator 14B representative seeding complete (including Milestone 16 messaging)!");
 }
 
 // If run directly from CLI

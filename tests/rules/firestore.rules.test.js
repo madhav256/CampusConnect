@@ -12,6 +12,8 @@ import {
   TEST_UIDS,
   commentFixture,
   connectionFixture,
+  conversationFixture,
+  messageFixture,
   notificationFixture,
   postFixture,
   seedBaseData,
@@ -59,6 +61,50 @@ function likeRef(context, postId, uid) {
 
 function connectionRef(context, connectionId) {
   return context.firestore().collection("connections").doc(connectionId);
+}
+
+function conversationRef(context, conversationId) {
+  return context.firestore().collection("conversations").doc(conversationId);
+}
+
+function messageRef(context, conversationId, messageId) {
+  return conversationRef(context, conversationId).collection("messages").doc(messageId);
+}
+
+async function seedConversation(
+  uidA = TEST_UIDS.alice,
+  uidB = TEST_UIDS.bob,
+  overrides = {}
+) {
+  const conversationId = [uidA, uidB].sort().join("_");
+  const conversation = conversationFixture(uidA, uidB, overrides);
+  await testEnvironment.withSecurityRulesDisabled(async (context) => {
+    await context
+      .firestore()
+      .collection("conversations")
+      .doc(conversationId)
+      .set(conversation);
+  });
+  return conversation;
+}
+
+async function seedMessage(
+  conversationId,
+  messageId,
+  senderId = TEST_UIDS.alice,
+  overrides = {}
+) {
+  const message = messageFixture(conversationId, senderId, { id: messageId, ...overrides });
+  await testEnvironment.withSecurityRulesDisabled(async (context) => {
+    await context
+      .firestore()
+      .collection("conversations")
+      .doc(conversationId)
+      .collection("messages")
+      .doc(messageId)
+      .set(message);
+  });
+  return message;
 }
 
 function notificationRef(context, recipientId, notificationId) {
@@ -1803,6 +1849,1159 @@ describe("notifications rules", () => {
           createdAt: serverTimestamp(),
         });
       })
+    );
+  });
+});
+
+describe("conversations rules", () => {
+  it("allow participants to read and query their conversation", async () => {
+    await seedConversation(TEST_UIDS.alice, TEST_UIDS.bob);
+
+    const alice = contextFor(TEST_UIDS.alice);
+    const bob = contextFor(TEST_UIDS.bob);
+
+    // Point get
+    await assertSucceeds(conversationRef(alice, "alice_bob").get());
+    await assertSucceeds(conversationRef(bob, "alice_bob").get());
+
+    // List query
+    await assertSucceeds(
+      alice
+        .firestore()
+        .collection("conversations")
+        .where("participants", "array-contains", TEST_UIDS.alice)
+        .get()
+    );
+  });
+
+  it("reject unauthenticated reads to conversations", async () => {
+    await seedConversation(TEST_UIDS.alice, TEST_UIDS.bob);
+
+    const unauth = unauthenticated();
+    await expectPermissionDenied(() => conversationRef(unauth, "alice_bob").get());
+  });
+
+  it("reject non-participant reads to conversations", async () => {
+    await seedConversation(TEST_UIDS.alice, TEST_UIDS.bob);
+
+    const carol = contextFor(TEST_UIDS.carol);
+
+    // Point get
+    await expectPermissionDenied(() => conversationRef(carol, "alice_bob").get());
+
+    // List query trying to query alice's conversations
+    await expectPermissionDenied(() =>
+      carol
+        .firestore()
+        .collection("conversations")
+        .where("participants", "array-contains", TEST_UIDS.alice)
+        .get()
+    );
+  });
+
+  it("allow valid first-message conversation creation when connection is accepted", async () => {
+    await seedAcceptedConnection(TEST_UIDS.alice, TEST_UIDS.bob);
+
+    const alice = contextFor(TEST_UIDS.alice);
+    const db = alice.firestore();
+    const batch = db.batch();
+
+    const conversationData = {
+      id: "alice_bob",
+      participants: ["alice", "bob"],
+      participantProfiles: {
+        alice: { displayName: "Alice Test", photoURL: null },
+        bob: { displayName: "Bob Test", photoURL: null },
+      },
+      lastMessage: {
+        id: "msg-first-1",
+        content: "First message from Alice!",
+        senderId: "alice",
+        createdAt: serverTimestamp(),
+      },
+      unreadCount: {
+        alice: 0,
+        bob: 1,
+      },
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    };
+
+    const messageData = {
+      id: "msg-first-1",
+      conversationId: "alice_bob",
+      senderId: "alice",
+      content: "First message from Alice!",
+      createdAt: serverTimestamp(),
+    };
+
+    batch.set(conversationRef(alice, "alice_bob"), conversationData);
+    batch.set(messageRef(alice, "alice_bob", "msg-first-1"), messageData);
+
+    await assertSucceeds(batch.commit());
+  });
+
+  it("reject conversation creation with no message (missing atomic child message)", async () => {
+    await seedAcceptedConnection(TEST_UIDS.alice, TEST_UIDS.bob);
+
+    const alice = contextFor(TEST_UIDS.alice);
+
+    const conversationData = {
+      id: "alice_bob",
+      participants: ["alice", "bob"],
+      participantProfiles: {
+        alice: { displayName: "Alice Test", photoURL: null },
+        bob: { displayName: "Bob Test", photoURL: null },
+      },
+      lastMessage: {
+        id: "msg-standalone-1",
+        content: "Standalone without child message",
+        senderId: "alice",
+        createdAt: serverTimestamp(),
+      },
+      unreadCount: {
+        alice: 0,
+        bob: 1,
+      },
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    };
+
+    // Attempting to write conversation document without writing the corresponding message document
+    await expectPermissionDenied(() =>
+      conversationRef(alice, "alice_bob").set(conversationData)
+    );
+  });
+
+  it("reject conversation creation with mismatched message ID", async () => {
+    await seedAcceptedConnection(TEST_UIDS.alice, TEST_UIDS.bob);
+
+    const alice = contextFor(TEST_UIDS.alice);
+    const db = alice.firestore();
+    const batch = db.batch();
+
+    const conversationData = {
+      id: "alice_bob",
+      participants: ["alice", "bob"],
+      participantProfiles: {
+        alice: { displayName: "Alice Test", photoURL: null },
+        bob: { displayName: "Bob Test", photoURL: null },
+      },
+      lastMessage: {
+        id: "msg-declared-id",
+        content: "Hello",
+        senderId: "alice",
+        createdAt: serverTimestamp(),
+      },
+      unreadCount: {
+        alice: 0,
+        bob: 1,
+      },
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    };
+
+    // Message created with a different ID than lastMessage.id
+    const messageData = {
+      id: "msg-actual-different-id",
+      conversationId: "alice_bob",
+      senderId: "alice",
+      content: "Hello",
+      createdAt: serverTimestamp(),
+    };
+
+    batch.set(conversationRef(alice, "alice_bob"), conversationData);
+    batch.set(messageRef(alice, "alice_bob", "msg-actual-different-id"), messageData);
+
+    await expectPermissionDenied(() => batch.commit());
+  });
+
+  it("reject conversation creation with mismatched message content", async () => {
+    await seedAcceptedConnection(TEST_UIDS.alice, TEST_UIDS.bob);
+
+    const alice = contextFor(TEST_UIDS.alice);
+    const db = alice.firestore();
+    const batch = db.batch();
+
+    const conversationData = {
+      id: "alice_bob",
+      participants: ["alice", "bob"],
+      participantProfiles: {
+        alice: { displayName: "Alice Test", photoURL: null },
+        bob: { displayName: "Bob Test", photoURL: null },
+      },
+      lastMessage: {
+        id: "msg-content-mismatch",
+        content: "Content in conversation summary",
+        senderId: "alice",
+        createdAt: serverTimestamp(),
+      },
+      unreadCount: {
+        alice: 0,
+        bob: 1,
+      },
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    };
+
+    const messageData = {
+      id: "msg-content-mismatch",
+      conversationId: "alice_bob",
+      senderId: "alice",
+      content: "Different content in message document",
+      createdAt: serverTimestamp(),
+    };
+
+    batch.set(conversationRef(alice, "alice_bob"), conversationData);
+    batch.set(messageRef(alice, "alice_bob", "msg-content-mismatch"), messageData);
+
+    await expectPermissionDenied(() => batch.commit());
+  });
+
+  it("reject conversation creation with mismatched sender", async () => {
+    await seedAcceptedConnection(TEST_UIDS.alice, TEST_UIDS.bob);
+
+    const alice = contextFor(TEST_UIDS.alice);
+    const db = alice.firestore();
+    const batch = db.batch();
+
+    // Alice tries to create conversation declaring Bob as sender
+    const conversationData = {
+      id: "alice_bob",
+      participants: ["alice", "bob"],
+      participantProfiles: {
+        alice: { displayName: "Alice Test", photoURL: null },
+        bob: { displayName: "Bob Test", photoURL: null },
+      },
+      lastMessage: {
+        id: "msg-sender-mismatch",
+        content: "Forged message as Bob",
+        senderId: "bob",
+        createdAt: serverTimestamp(),
+      },
+      unreadCount: {
+        alice: 0,
+        bob: 1,
+      },
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    };
+
+    const messageData = {
+      id: "msg-sender-mismatch",
+      conversationId: "alice_bob",
+      senderId: "bob",
+      content: "Forged message as Bob",
+      createdAt: serverTimestamp(),
+    };
+
+    batch.set(conversationRef(alice, "alice_bob"), conversationData);
+    batch.set(messageRef(alice, "alice_bob", "msg-sender-mismatch"), messageData);
+
+    await expectPermissionDenied(() => batch.commit());
+  });
+
+  it("reject conversation creation with mismatched timestamp", async () => {
+    await seedAcceptedConnection(TEST_UIDS.alice, TEST_UIDS.bob);
+
+    const alice = contextFor(TEST_UIDS.alice);
+    const db = alice.firestore();
+    const batch = db.batch();
+
+    const conversationData = {
+      id: "alice_bob",
+      participants: ["alice", "bob"],
+      participantProfiles: {
+        alice: { displayName: "Alice Test", photoURL: null },
+        bob: { displayName: "Bob Test", photoURL: null },
+      },
+      lastMessage: {
+        id: "msg-time-mismatch",
+        content: "Message with non-server time",
+        senderId: "alice",
+        createdAt: laterTimestamp,
+      },
+      unreadCount: {
+        alice: 0,
+        bob: 1,
+      },
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    };
+
+    const messageData = {
+      id: "msg-time-mismatch",
+      conversationId: "alice_bob",
+      senderId: "alice",
+      content: "Message with non-server time",
+      createdAt: laterTimestamp,
+    };
+
+    batch.set(conversationRef(alice, "alice_bob"), conversationData);
+    batch.set(messageRef(alice, "alice_bob", "msg-time-mismatch"), messageData);
+
+    await expectPermissionDenied(() => batch.commit());
+  });
+
+  it("reject conversation creation when connection does not exist", async () => {
+    // No connection seeded
+    const alice = contextFor(TEST_UIDS.alice);
+    const conversationData = {
+      ...conversationFixture(TEST_UIDS.alice, TEST_UIDS.bob),
+      lastMessage: {
+        content: "Hello",
+        senderId: "alice",
+        createdAt: serverTimestamp(),
+      },
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    };
+
+    await expectPermissionDenied(() =>
+      conversationRef(alice, "alice_bob").set(conversationData)
+    );
+  });
+
+  it("reject conversation creation when connection is pending", async () => {
+    await seedPendingConnection(TEST_UIDS.alice, TEST_UIDS.bob);
+
+    const alice = contextFor(TEST_UIDS.alice);
+    const conversationData = {
+      ...conversationFixture(TEST_UIDS.alice, TEST_UIDS.bob),
+      lastMessage: {
+        content: "Hello",
+        senderId: "alice",
+        createdAt: serverTimestamp(),
+      },
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    };
+
+    await expectPermissionDenied(() =>
+      conversationRef(alice, "alice_bob").set(conversationData)
+    );
+  });
+
+  it("reject conversation creation with non-canonical or forged document ID", async () => {
+    await seedAcceptedConnection(TEST_UIDS.alice, TEST_UIDS.bob);
+
+    const alice = contextFor(TEST_UIDS.alice);
+    const conversationData = {
+      ...conversationFixture(TEST_UIDS.alice, TEST_UIDS.bob),
+      id: "bob_alice", // wrong order
+      lastMessage: {
+        content: "Hello",
+        senderId: "alice",
+        createdAt: serverTimestamp(),
+      },
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    };
+
+    // Attempt writing to unsorted ID
+    await expectPermissionDenied(() =>
+      conversationRef(alice, "bob_alice").set(conversationData)
+    );
+
+    // Attempt mismatched doc ID
+    await expectPermissionDenied(() =>
+      conversationRef(alice, "alice_bob").set({
+        ...conversationData,
+        id: "forged_id",
+      })
+    );
+  });
+
+  it("reject conversation creation with unsorted or invalid participant arrays", async () => {
+    await seedAcceptedConnection(TEST_UIDS.alice, TEST_UIDS.bob);
+
+    const alice = contextFor(TEST_UIDS.alice);
+
+    // Unsorted
+    await expectPermissionDenied(() =>
+      conversationRef(alice, "alice_bob").set({
+        ...conversationFixture(TEST_UIDS.alice, TEST_UIDS.bob),
+        participants: ["bob", "alice"],
+        lastMessage: { content: "Hello", senderId: "alice", createdAt: serverTimestamp() },
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      })
+    );
+
+    // Only 1 participant
+    await expectPermissionDenied(() =>
+      conversationRef(alice, "alice_bob").set({
+        ...conversationFixture(TEST_UIDS.alice, TEST_UIDS.bob),
+        participants: ["alice"],
+        lastMessage: { content: "Hello", senderId: "alice", createdAt: serverTimestamp() },
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      })
+    );
+
+    // 3 participants
+    await expectPermissionDenied(() =>
+      conversationRef(alice, "alice_bob").set({
+        ...conversationFixture(TEST_UIDS.alice, TEST_UIDS.bob),
+        participants: ["alice", "bob", "carol"],
+        lastMessage: { content: "Hello", senderId: "alice", createdAt: serverTimestamp() },
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      })
+    );
+  });
+
+  it("reject conversation creation when actor is not a participant", async () => {
+    await seedAcceptedConnection(TEST_UIDS.alice, TEST_UIDS.bob);
+
+    const carol = contextFor(TEST_UIDS.carol);
+
+    await expectPermissionDenied(() =>
+      conversationRef(carol, "alice_bob").set({
+        ...conversationFixture(TEST_UIDS.alice, TEST_UIDS.bob),
+        lastMessage: { content: "Carol injects", senderId: "carol", createdAt: serverTimestamp() },
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      })
+    );
+  });
+
+  it("reject conversation creation with forged initial unread counts", async () => {
+    await seedAcceptedConnection(TEST_UIDS.alice, TEST_UIDS.bob);
+
+    const alice = contextFor(TEST_UIDS.alice);
+
+    // Sender tries to give herself unread count > 0
+    await expectPermissionDenied(() =>
+      conversationRef(alice, "alice_bob").set({
+        ...conversationFixture(TEST_UIDS.alice, TEST_UIDS.bob),
+        unreadCount: { alice: 1, bob: 0 },
+        lastMessage: { content: "Hi", senderId: "alice", createdAt: serverTimestamp() },
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      })
+    );
+
+    // Sender tries to give recipient unread count != 1 (e.g. 5)
+    await expectPermissionDenied(() =>
+      conversationRef(alice, "alice_bob").set({
+        ...conversationFixture(TEST_UIDS.alice, TEST_UIDS.bob),
+        unreadCount: { alice: 0, bob: 5 },
+        lastMessage: { content: "Hi", senderId: "alice", createdAt: serverTimestamp() },
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      })
+    );
+  });
+
+  it("reject conversation creation with forged participantProfiles not matching publicProfiles authority", async () => {
+    await seedAcceptedConnection(TEST_UIDS.alice, TEST_UIDS.bob);
+
+    const alice = contextFor(TEST_UIDS.alice);
+
+    // Forged displayName for Bob
+    await expectPermissionDenied(() =>
+      conversationRef(alice, "alice_bob").set({
+        ...conversationFixture(TEST_UIDS.alice, TEST_UIDS.bob),
+        participantProfiles: {
+          alice: { displayName: "Alice Test", photoURL: null },
+          bob: { displayName: "Forged Impersonator Name", photoURL: null },
+        },
+        lastMessage: { content: "Hi", senderId: "alice", createdAt: serverTimestamp() },
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      })
+    );
+  });
+
+  it("reject conversation creation when a participant is missing publicProfiles authority", async () => {
+    await seedAcceptedConnection(TEST_UIDS.alice, TEST_UIDS.bob);
+
+    await testEnvironment.withSecurityRulesDisabled(async (context) => {
+      await context.firestore().collection("publicProfiles").doc(TEST_UIDS.bob).delete();
+    });
+
+    const alice = contextFor(TEST_UIDS.alice);
+
+    await expectPermissionDenied(() =>
+      conversationRef(alice, "alice_bob").set({
+        ...conversationFixture(TEST_UIDS.alice, TEST_UIDS.bob),
+        lastMessage: { content: "Hi", senderId: "alice", createdAt: serverTimestamp() },
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      })
+    );
+  });
+
+  it("reject conversation deletion by participant or third party", async () => {
+    await seedConversation(TEST_UIDS.alice, TEST_UIDS.bob);
+
+    const alice = contextFor(TEST_UIDS.alice);
+    const bob = contextFor(TEST_UIDS.bob);
+    const carol = contextFor(TEST_UIDS.carol);
+
+    await expectPermissionDenied(() => conversationRef(alice, "alice_bob").delete());
+    await expectPermissionDenied(() => conversationRef(bob, "alice_bob").delete());
+    await expectPermissionDenied(() => conversationRef(carol, "alice_bob").delete());
+  });
+
+  it("allow valid message-send update transition", async () => {
+    await seedAcceptedConnection(TEST_UIDS.alice, TEST_UIDS.bob);
+    await seedConversation(TEST_UIDS.alice, TEST_UIDS.bob, {
+      unreadCount: { alice: 0, bob: 1 },
+    });
+
+    const bob = contextFor(TEST_UIDS.bob);
+    const db = bob.firestore();
+    const batch = db.batch();
+
+    const newMsgData = {
+      id: "msg-bob-reply",
+      conversationId: "alice_bob",
+      senderId: "bob",
+      content: "Bob's reply message",
+      createdAt: serverTimestamp(),
+    };
+
+    batch.update(conversationRef(bob, "alice_bob"), {
+      lastMessage: {
+        id: "msg-bob-reply",
+        content: "Bob's reply message",
+        senderId: "bob",
+        createdAt: serverTimestamp(),
+      },
+      updatedAt: serverTimestamp(),
+      "unreadCount.bob": 0,
+      "unreadCount.alice": 1, // alice had 0, now 0 + 1 = 1
+    });
+    batch.set(messageRef(bob, "alice_bob", "msg-bob-reply"), newMsgData);
+
+    await assertSucceeds(batch.commit());
+  });
+
+  it("reject existing-thread metadata update with no message", async () => {
+    await seedAcceptedConnection(TEST_UIDS.alice, TEST_UIDS.bob);
+    await seedConversation(TEST_UIDS.alice, TEST_UIDS.bob, {
+      unreadCount: { alice: 0, bob: 1 },
+    });
+
+    const bob = contextFor(TEST_UIDS.bob);
+
+    // Bob tries to update conversation metadata without writing a corresponding message document
+    await expectPermissionDenied(() =>
+      conversationRef(bob, "alice_bob").update({
+        lastMessage: {
+          id: "msg-orphan-update",
+          content: "Bob's forged message update",
+          senderId: "bob",
+          createdAt: serverTimestamp(),
+        },
+        updatedAt: serverTimestamp(),
+        "unreadCount.bob": 0,
+        "unreadCount.alice": 1,
+      })
+    );
+  });
+
+  it("reject existing-thread metadata update with mismatched message summary", async () => {
+    await seedAcceptedConnection(TEST_UIDS.alice, TEST_UIDS.bob);
+    await seedConversation(TEST_UIDS.alice, TEST_UIDS.bob, {
+      unreadCount: { alice: 0, bob: 1 },
+    });
+
+    const bob = contextFor(TEST_UIDS.bob);
+    const db = bob.firestore();
+    const batch = db.batch();
+
+    batch.update(conversationRef(bob, "alice_bob"), {
+      lastMessage: {
+        id: "msg-mismatched-summary",
+        content: "Summary in conversation says this",
+        senderId: "bob",
+        createdAt: serverTimestamp(),
+      },
+      updatedAt: serverTimestamp(),
+      "unreadCount.bob": 0,
+      "unreadCount.alice": 1,
+    });
+    batch.set(messageRef(bob, "alice_bob", "msg-mismatched-summary"), {
+      id: "msg-mismatched-summary",
+      conversationId: "alice_bob",
+      senderId: "bob",
+      content: "Actual message document content is completely different",
+      createdAt: serverTimestamp(),
+    });
+
+    await expectPermissionDenied(() => batch.commit());
+  });
+
+  it("allow valid atomic message and conversation update", async () => {
+    await seedAcceptedConnection(TEST_UIDS.alice, TEST_UIDS.bob);
+    await seedConversation(TEST_UIDS.alice, TEST_UIDS.bob, {
+      unreadCount: { alice: 0, bob: 2 },
+    });
+
+    const alice = contextFor(TEST_UIDS.alice);
+    const db = alice.firestore();
+    const batch = db.batch();
+
+    const msgId = "msg-alice-atomic-update";
+    const content = "Alice replies back atomically";
+
+    batch.update(conversationRef(alice, "alice_bob"), {
+      lastMessage: {
+        id: msgId,
+        content,
+        senderId: "alice",
+        createdAt: serverTimestamp(),
+      },
+      updatedAt: serverTimestamp(),
+      "unreadCount.alice": 0,
+      "unreadCount.bob": 3, // 2 + 1 = 3
+    });
+    batch.set(messageRef(alice, "alice_bob", msgId), {
+      id: msgId,
+      conversationId: "alice_bob",
+      senderId: "alice",
+      content,
+      createdAt: serverTimestamp(),
+    });
+
+    await assertSucceeds(batch.commit());
+  });
+
+  it("reject message-send update attempting to forge sender unread count", async () => {
+    await seedAcceptedConnection(TEST_UIDS.alice, TEST_UIDS.bob);
+    await seedConversation(TEST_UIDS.alice, TEST_UIDS.bob, {
+      unreadCount: { alice: 0, bob: 1 },
+    });
+
+    const bob = contextFor(TEST_UIDS.bob);
+
+    // Bob tries to set his own unread count to 2 instead of 0
+    await expectPermissionDenied(() =>
+      conversationRef(bob, "alice_bob").update({
+        lastMessage: {
+          content: "Bob's reply",
+          senderId: "bob",
+          createdAt: serverTimestamp(),
+        },
+        updatedAt: serverTimestamp(),
+        "unreadCount.bob": 2,
+        "unreadCount.alice": 1,
+      })
+    );
+  });
+
+  it("reject message-send update attempting to forge peer unread count", async () => {
+    await seedAcceptedConnection(TEST_UIDS.alice, TEST_UIDS.bob);
+    await seedConversation(TEST_UIDS.alice, TEST_UIDS.bob, {
+      unreadCount: { alice: 0, bob: 1 },
+    });
+
+    const bob = contextFor(TEST_UIDS.bob);
+
+    // Bob tries to reset Alice's unread count to 0 while sending
+    await expectPermissionDenied(() =>
+      conversationRef(bob, "alice_bob").update({
+        lastMessage: {
+          content: "Bob's reply",
+          senderId: "bob",
+          createdAt: serverTimestamp(),
+        },
+        updatedAt: serverTimestamp(),
+        "unreadCount.bob": 0,
+        "unreadCount.alice": 0,
+      })
+    );
+
+    // Bob tries to arbitrarily increment Alice's unread count by 5 instead of 1
+    await expectPermissionDenied(() =>
+      conversationRef(bob, "alice_bob").update({
+        lastMessage: {
+          content: "Bob's reply",
+          senderId: "bob",
+          createdAt: serverTimestamp(),
+        },
+        updatedAt: serverTimestamp(),
+        "unreadCount.bob": 0,
+        "unreadCount.alice": 5,
+      })
+    );
+  });
+
+  it("reject message-send update with forged lastMessage.senderId", async () => {
+    await seedAcceptedConnection(TEST_UIDS.alice, TEST_UIDS.bob);
+    await seedConversation(TEST_UIDS.alice, TEST_UIDS.bob);
+
+    const alice = contextFor(TEST_UIDS.alice);
+
+    // Alice tries to update with senderId "bob" (impersonation)
+    await expectPermissionDenied(() =>
+      conversationRef(alice, "alice_bob").update({
+        lastMessage: {
+          content: "Forged message as Bob",
+          senderId: "bob",
+          createdAt: serverTimestamp(),
+        },
+        updatedAt: serverTimestamp(),
+        "unreadCount.alice": 0,
+        "unreadCount.bob": 2,
+      })
+    );
+  });
+
+  it("reject message-send update with non-server timestamp", async () => {
+    await seedAcceptedConnection(TEST_UIDS.alice, TEST_UIDS.bob);
+    await seedConversation(TEST_UIDS.alice, TEST_UIDS.bob);
+
+    const alice = contextFor(TEST_UIDS.alice);
+
+    await expectPermissionDenied(() =>
+      conversationRef(alice, "alice_bob").update({
+        lastMessage: {
+          content: "Message with fake time",
+          senderId: "alice",
+          createdAt: laterTimestamp,
+        },
+        updatedAt: serverTimestamp(),
+        "unreadCount.alice": 0,
+        "unreadCount.bob": 2,
+      })
+    );
+  });
+
+  it("reject message-send update when connection is deleted/removed (archive check)", async () => {
+    // Seed conversation, but NO connection
+    await seedConversation(TEST_UIDS.alice, TEST_UIDS.bob);
+
+    const alice = contextFor(TEST_UIDS.alice);
+
+    await expectPermissionDenied(() =>
+      conversationRef(alice, "alice_bob").update({
+        lastMessage: {
+          content: "Message after disconnect",
+          senderId: "alice",
+          createdAt: serverTimestamp(),
+        },
+        updatedAt: serverTimestamp(),
+        "unreadCount.alice": 0,
+        "unreadCount.bob": 2,
+      })
+    );
+  });
+
+  it("reject message-send update attempting to modify immutable fields", async () => {
+    await seedAcceptedConnection(TEST_UIDS.alice, TEST_UIDS.bob);
+    await seedConversation(TEST_UIDS.alice, TEST_UIDS.bob);
+
+    const alice = contextFor(TEST_UIDS.alice);
+
+    // Attempting to change participants
+    await expectPermissionDenied(() =>
+      conversationRef(alice, "alice_bob").update({
+        participants: ["alice", "carol"],
+      })
+    );
+
+    // Attempting to change createdAt
+    await expectPermissionDenied(() =>
+      conversationRef(alice, "alice_bob").update({
+        createdAt: serverTimestamp(),
+      })
+    );
+  });
+
+  it("allow valid own-unread reset transition (mark-as-read)", async () => {
+    await seedConversation(TEST_UIDS.alice, TEST_UIDS.bob, {
+      unreadCount: { alice: 0, bob: 3 },
+    });
+
+    const bob = contextFor(TEST_UIDS.bob);
+
+    await assertSucceeds(
+      conversationRef(bob, "alice_bob").update({
+        "unreadCount.bob": 0,
+      })
+    );
+  });
+
+  it("reject own-unread reset attempting to alter peer unread count or lastMessage", async () => {
+    await seedConversation(TEST_UIDS.alice, TEST_UIDS.bob, {
+      unreadCount: { alice: 2, bob: 3 },
+    });
+
+    const bob = contextFor(TEST_UIDS.bob);
+
+    // Bob attempts to reset Alice's unread count
+    await expectPermissionDenied(() =>
+      conversationRef(bob, "alice_bob").update({
+        "unreadCount.alice": 0,
+      })
+    );
+
+    // Bob attempts to modify lastMessage during unread reset
+    await expectPermissionDenied(() =>
+      conversationRef(bob, "alice_bob").update({
+        "unreadCount.bob": 0,
+        "lastMessage.content": "Tampered content",
+      })
+    );
+  });
+});
+
+describe("messages rules", () => {
+  it("allow participants to read messages in existing conversation", async () => {
+    await seedConversation(TEST_UIDS.alice, TEST_UIDS.bob);
+    await seedMessage("alice_bob", "msg-1", TEST_UIDS.alice);
+
+    const alice = contextFor(TEST_UIDS.alice);
+    const bob = contextFor(TEST_UIDS.bob);
+
+    await assertSucceeds(messageRef(alice, "alice_bob", "msg-1").get());
+    await assertSucceeds(messageRef(bob, "alice_bob", "msg-1").get());
+
+    // Collection query
+    await assertSucceeds(
+      alice
+        .firestore()
+        .collection("conversations")
+        .doc("alice_bob")
+        .collection("messages")
+        .get()
+    );
+  });
+
+  it("allow participants to read messages after connection is removed (archive behavior)", async () => {
+    // Seed conversation and message, but NO connection
+    await seedConversation(TEST_UIDS.alice, TEST_UIDS.bob);
+    await seedMessage("alice_bob", "msg-1", TEST_UIDS.alice);
+
+    const alice = contextFor(TEST_UIDS.alice);
+    const bob = contextFor(TEST_UIDS.bob);
+
+    // Existing messages remain readable
+    await assertSucceeds(messageRef(alice, "alice_bob", "msg-1").get());
+    await assertSucceeds(messageRef(bob, "alice_bob", "msg-1").get());
+  });
+
+  it("reject unauthenticated message read", async () => {
+    await seedConversation(TEST_UIDS.alice, TEST_UIDS.bob);
+    await seedMessage("alice_bob", "msg-1", TEST_UIDS.alice);
+
+    const unauth = unauthenticated();
+    await expectPermissionDenied(() =>
+      messageRef(unauth, "alice_bob", "msg-1").get()
+    );
+  });
+
+  it("reject non-participant message read", async () => {
+    await seedConversation(TEST_UIDS.alice, TEST_UIDS.bob);
+    await seedMessage("alice_bob", "msg-1", TEST_UIDS.alice);
+
+    const carol = contextFor(TEST_UIDS.carol);
+    await expectPermissionDenied(() =>
+      messageRef(carol, "alice_bob", "msg-1").get()
+    );
+
+    // Non-participant collection query
+    await expectPermissionDenied(() =>
+      carol
+        .firestore()
+        .collection("conversations")
+        .doc("alice_bob")
+        .collection("messages")
+        .get()
+    );
+  });
+
+  it("allow valid message creation when connection is accepted", async () => {
+    await seedAcceptedConnection(TEST_UIDS.alice, TEST_UIDS.bob);
+    await seedConversation(TEST_UIDS.alice, TEST_UIDS.bob, {
+      unreadCount: { alice: 0, bob: 0 },
+    });
+
+    const alice = contextFor(TEST_UIDS.alice);
+    const db = alice.firestore();
+    const batch = db.batch();
+
+    const msgData = {
+      id: "msg-alice-2",
+      conversationId: "alice_bob",
+      senderId: "alice",
+      content: "Hello Bob from accepted connection!",
+      createdAt: serverTimestamp(),
+    };
+
+    batch.update(conversationRef(alice, "alice_bob"), {
+      lastMessage: {
+        id: "msg-alice-2",
+        content: "Hello Bob from accepted connection!",
+        senderId: "alice",
+        createdAt: serverTimestamp(),
+      },
+      updatedAt: serverTimestamp(),
+      "unreadCount.alice": 0,
+      "unreadCount.bob": 1,
+    });
+    batch.set(messageRef(alice, "alice_bob", "msg-alice-2"), msgData);
+
+    await assertSucceeds(batch.commit());
+  });
+
+  it("allow atomic first-message transaction creating conversation and first message together", async () => {
+    await seedAcceptedConnection(TEST_UIDS.alice, TEST_UIDS.bob);
+
+    const alice = contextFor(TEST_UIDS.alice);
+    const db = alice.firestore();
+
+    const conversationData = {
+      id: "alice_bob",
+      participants: ["alice", "bob"],
+      participantProfiles: {
+        alice: { displayName: "Alice Test", photoURL: null },
+        bob: { displayName: "Bob Test", photoURL: null },
+      },
+      lastMessage: {
+        id: "msg-first",
+        content: "First message in thread",
+        senderId: "alice",
+        createdAt: serverTimestamp(),
+      },
+      unreadCount: {
+        alice: 0,
+        bob: 1,
+      },
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    };
+
+    const messageData = {
+      id: "msg-first",
+      conversationId: "alice_bob",
+      senderId: "alice",
+      content: "First message in thread",
+      createdAt: serverTimestamp(),
+    };
+
+    await assertSucceeds(
+      db.runTransaction(async (transaction) => {
+        transaction.set(conversationRef(alice, "alice_bob"), conversationData);
+        transaction.set(messageRef(alice, "alice_bob", "msg-first"), messageData);
+      })
+    );
+  });
+
+  it("reject child message whose data does not match lastMessage in parent conversation", async () => {
+    await seedAcceptedConnection(TEST_UIDS.alice, TEST_UIDS.bob);
+    await seedConversation(TEST_UIDS.alice, TEST_UIDS.bob);
+
+    const alice = contextFor(TEST_UIDS.alice);
+    const db = alice.firestore();
+    const batch = db.batch();
+
+    batch.update(conversationRef(alice, "alice_bob"), {
+      lastMessage: {
+        id: "msg-child-mismatch",
+        content: "Summary text in parent",
+        senderId: "alice",
+        createdAt: serverTimestamp(),
+      },
+      updatedAt: serverTimestamp(),
+      "unreadCount.alice": 0,
+      "unreadCount.bob": 2,
+    });
+
+    batch.set(messageRef(alice, "alice_bob", "msg-child-mismatch"), {
+      id: "msg-child-mismatch",
+      conversationId: "alice_bob",
+      senderId: "alice",
+      content: "Different body text in message document",
+      createdAt: serverTimestamp(),
+    });
+
+    await expectPermissionDenied(() => batch.commit());
+  });
+
+  it("reject message creation when connection does not exist or was removed (archive enforcement)", async () => {
+    // Seed conversation, but NO connection
+    await seedConversation(TEST_UIDS.alice, TEST_UIDS.bob);
+
+    const alice = contextFor(TEST_UIDS.alice);
+    const msgData = {
+      id: "msg-new",
+      conversationId: "alice_bob",
+      senderId: "alice",
+      content: "Should fail because connection is missing",
+      createdAt: serverTimestamp(),
+    };
+
+    await expectPermissionDenied(() =>
+      messageRef(alice, "alice_bob", "msg-new").set(msgData)
+    );
+  });
+
+  it("reject message creation when connection is pending", async () => {
+    await seedPendingConnection(TEST_UIDS.alice, TEST_UIDS.bob);
+    await seedConversation(TEST_UIDS.alice, TEST_UIDS.bob);
+
+    const alice = contextFor(TEST_UIDS.alice);
+    const msgData = {
+      id: "msg-new",
+      conversationId: "alice_bob",
+      senderId: "alice",
+      content: "Should fail because connection is pending",
+      createdAt: serverTimestamp(),
+    };
+
+    await expectPermissionDenied(() =>
+      messageRef(alice, "alice_bob", "msg-new").set(msgData)
+    );
+  });
+
+  it("reject message creation by non-participant", async () => {
+    await seedAcceptedConnection(TEST_UIDS.alice, TEST_UIDS.bob);
+    await seedConversation(TEST_UIDS.alice, TEST_UIDS.bob);
+
+    const carol = contextFor(TEST_UIDS.carol);
+    const msgData = {
+      id: "msg-carol",
+      conversationId: "alice_bob",
+      senderId: "carol",
+      content: "Carol tries to send to alice_bob",
+      createdAt: serverTimestamp(),
+    };
+
+    await expectPermissionDenied(() =>
+      messageRef(carol, "alice_bob", "msg-carol").set(msgData)
+    );
+  });
+
+  it("reject message creation with forged senderId", async () => {
+    await seedAcceptedConnection(TEST_UIDS.alice, TEST_UIDS.bob);
+    await seedConversation(TEST_UIDS.alice, TEST_UIDS.bob);
+
+    const alice = contextFor(TEST_UIDS.alice);
+    const msgData = {
+      id: "msg-forged-sender",
+      conversationId: "alice_bob",
+      senderId: "bob", // forged senderId
+      content: "Alice impersonating Bob",
+      createdAt: serverTimestamp(),
+    };
+
+    await expectPermissionDenied(() =>
+      messageRef(alice, "alice_bob", "msg-forged-sender").set(msgData)
+    );
+  });
+
+  it("reject message creation with mismatched conversationId", async () => {
+    await seedAcceptedConnection(TEST_UIDS.alice, TEST_UIDS.bob);
+    await seedConversation(TEST_UIDS.alice, TEST_UIDS.bob);
+
+    const alice = contextFor(TEST_UIDS.alice);
+    const msgData = {
+      id: "msg-mismatched-conv",
+      conversationId: "other_conversation",
+      senderId: "alice",
+      content: "Mismatched conversationId",
+      createdAt: serverTimestamp(),
+    };
+
+    await expectPermissionDenied(() =>
+      messageRef(alice, "alice_bob", "msg-mismatched-conv").set(msgData)
+    );
+  });
+
+  it("reject message creation with mismatched messageId", async () => {
+    await seedAcceptedConnection(TEST_UIDS.alice, TEST_UIDS.bob);
+    await seedConversation(TEST_UIDS.alice, TEST_UIDS.bob);
+
+    const alice = contextFor(TEST_UIDS.alice);
+    const msgData = {
+      id: "different-id",
+      conversationId: "alice_bob",
+      senderId: "alice",
+      content: "Mismatched messageId",
+      createdAt: serverTimestamp(),
+    };
+
+    await expectPermissionDenied(() =>
+      messageRef(alice, "alice_bob", "target-doc-id").set(msgData)
+    );
+  });
+
+  it("reject message creation with empty or oversized content", async () => {
+    await seedAcceptedConnection(TEST_UIDS.alice, TEST_UIDS.bob);
+    await seedConversation(TEST_UIDS.alice, TEST_UIDS.bob);
+
+    const alice = contextFor(TEST_UIDS.alice);
+
+    // Empty content
+    await expectPermissionDenied(() =>
+      messageRef(alice, "alice_bob", "msg-empty").set({
+        id: "msg-empty",
+        conversationId: "alice_bob",
+        senderId: "alice",
+        content: "",
+        createdAt: serverTimestamp(),
+      })
+    );
+
+    // Oversized content (1001 chars)
+    await expectPermissionDenied(() =>
+      messageRef(alice, "alice_bob", "msg-oversized").set({
+        id: "msg-oversized",
+        conversationId: "alice_bob",
+        senderId: "alice",
+        content: "a".repeat(1001),
+        createdAt: serverTimestamp(),
+      })
+    );
+  });
+
+  it("reject message creation with non-server createdAt", async () => {
+    await seedAcceptedConnection(TEST_UIDS.alice, TEST_UIDS.bob);
+    await seedConversation(TEST_UIDS.alice, TEST_UIDS.bob);
+
+    const alice = contextFor(TEST_UIDS.alice);
+
+    await expectPermissionDenied(() =>
+      messageRef(alice, "alice_bob", "msg-fake-time").set({
+        id: "msg-fake-time",
+        conversationId: "alice_bob",
+        senderId: "alice",
+        content: "Fake time message",
+        createdAt: laterTimestamp,
+      })
+    );
+  });
+
+  it("reject message updates (immutable)", async () => {
+    await seedConversation(TEST_UIDS.alice, TEST_UIDS.bob);
+    await seedMessage("alice_bob", "msg-1", TEST_UIDS.alice);
+
+    const alice = contextFor(TEST_UIDS.alice);
+
+    await expectPermissionDenied(() =>
+      messageRef(alice, "alice_bob", "msg-1").update({
+        content: "Edited message content",
+      })
+    );
+  });
+
+  it("reject message deletions", async () => {
+    await seedConversation(TEST_UIDS.alice, TEST_UIDS.bob);
+    await seedMessage("alice_bob", "msg-1", TEST_UIDS.alice);
+
+    const alice = contextFor(TEST_UIDS.alice);
+    const bob = contextFor(TEST_UIDS.bob);
+
+    await expectPermissionDenied(() =>
+      messageRef(alice, "alice_bob", "msg-1").delete()
+    );
+    await expectPermissionDenied(() =>
+      messageRef(bob, "alice_bob", "msg-1").delete()
     );
   });
 });

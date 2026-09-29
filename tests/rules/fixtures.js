@@ -99,6 +99,60 @@ export function notificationFixture(recipientId, actorId, overrides = {}) {
   };
 }
 
+export function conversationFixture(uidA, uidB, overrides = {}) {
+  const participants = [uidA, uidB].sort();
+  const id = participants.join("_");
+  const names = {
+    alice: "Alice Test",
+    bob: "Bob Test",
+    carol: "Carol Test",
+  };
+
+  const senderId = overrides.senderId || uidA;
+  const recipientId = participants[0] === senderId ? participants[1] : participants[0];
+  const lastMessageId = overrides.lastMessageId || "msg-test-1";
+
+  return {
+    id,
+    participants,
+    participantProfiles: {
+      [participants[0]]: {
+        displayName: names[participants[0]] || "Test Student",
+        photoURL: null,
+      },
+      [participants[1]]: {
+        displayName: names[participants[1]] || "Test Student",
+        photoURL: null,
+      },
+    },
+    lastMessage: {
+      id: lastMessageId,
+      content: "Hello from test conversation!",
+      senderId,
+      createdAt: timestamp,
+    },
+    unreadCount: {
+      [senderId]: 0,
+      [recipientId]: 1,
+    },
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    ...overrides,
+  };
+}
+
+export function messageFixture(conversationId, senderId, overrides = {}) {
+  const id = overrides.id || "msg-test-1";
+  return {
+    id,
+    conversationId,
+    senderId,
+    content: "Deterministic message fixture content.",
+    createdAt: timestamp,
+    ...overrides,
+  };
+}
+
 export function publicProfileFixture(uid, overrides = {}) {
   const names = {
     alice: "Alice Test",

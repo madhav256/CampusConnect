@@ -1,6 +1,6 @@
 # CampusConnect Roadmap
 
-**Status:** Status-aware roadmap (Milestone 14B / Milestone 15)
+**Status:** Status-aware roadmap (Milestone 15 Delivered / Milestone 16 Active)
 
 Checked items describe work that exists in the current repository. Unchecked items are proposed or deferred; they are not implemented merely because they appear here.
 
@@ -30,7 +30,7 @@ Checked items describe work that exists in the current repository. Unchecked ite
 - [x] Milestone 13C Firestore Rules hardening and emulator regression expansion.
 - [x] Milestone 14: Cursor-based feed pagination (`startAfter`) merged with real-time newer-posts listener and deduplicated feed state.
 - [x] Milestone 14B: Strict public/private profile separation across three collections (`users` private authority, `publicProfiles` public-profile authority, `directoryIndex` discoverability projection).
-- [x] Automated test suites: 53 Vitest unit tests and 97 Firestore Emulator security rules tests passing.
+- [x] Automated test suites: 204 Vitest unit tests and 154 Firestore Emulator security rules tests passing.
 
 ## Current maintenance contract
 
@@ -39,16 +39,29 @@ Checked items describe work that exists in the current repository. Unchecked ite
 - [x] Keep documentation terminology aligned with the code: connections, not friends; Campus Atelier, not the obsolete indigo palette; current routes and components only.
 - [x] Re-run this documentation audit whenever a route, service, collection, or security invariant changes (Milestone 15 Unit 15.1).
 
+## Delivered engineering milestones
+
+### Milestone 15 — Post-14B Hardening, Performance & Architecture Reconciliation (Delivered)
+
+- [x] **15.1 Documentation & Roadmap Reconciliation:** Align all project documentation with locked 14B architecture, document 3-collection model, test suites (120 unit / 107 rules), and remove stale claims.
+- [x] **15.2 Seeder & Security Test Runner Alignment:** Update `seedDemoData.mjs` to project into all three 14B collections; align `securityTestRunner.js` and `SecurityTestPanel.jsx` to initialize against strict rules without prohibited client-side deletions.
+- [x] **15.3 Dead Code Removal & Search Error Recovery:** Remove confirmed dead functions (`normalizeProfile`, `updateCommentsCount`, `subscribeToBootstrapPosts`); wire active retry in `useUserSearch.js` and `Discover.jsx`.
+- [x] **15.4 Firestore Rules Hardening:** Enforce strict `isValidPostCreate()` (exact 8 keys, bounds, timestamps); remove obsolete `users` fallback in `isValidCommentSchema` and `isValidActorProfile`; add comprehensive rules tests.
+- [x] **15.5 Frontend Performance & UX:** Route-level `React.lazy` and `Suspense`; top-level `ErrorBoundary`; memoize `PostCard` and derived hook states; mitigate `Connections.jsx` tab-switch read storm; add confirmation for destructive connection actions.
+- [x] **15.6 Test Expansion & Hygiene:** Add meaningful behavioral unit coverage for all six domain services; consolidate cutover test files; update test fixtures to strict private schema.
+
 ## Active engineering milestone
 
-### Milestone 15 — Post-14B Hardening, Performance & Architecture Reconciliation
+### Milestone 16 — Minimal 1-to-1 Private Messaging
 
-- [ ] **15.1 Documentation & Roadmap Reconciliation:** Align all project documentation with locked 14B architecture, document 3-collection model, test suites (53 unit / 97 rules), and remove stale claims.
-- [ ] **15.2 Seeder & Security Test Runner Alignment:** Update `seedDemoData.mjs` to project into all three 14B collections; align `securityTestRunner.js` and `SecurityTestPanel.jsx` to initialize against strict rules without prohibited client-side deletions.
-- [ ] **15.3 Dead Code Removal & Search Error Recovery:** Remove confirmed dead functions (`normalizeProfile`, `updateCommentsCount`, `subscribeToBootstrapPosts`); wire active retry in `useUserSearch.js` and `Discover.jsx`.
-- [ ] **15.4 Firestore Rules Hardening:** Enforce strict `isValidPostCreate()` (exact 8 keys, bounds, timestamps); remove obsolete `users` fallback in `isValidCommentSchema` and `isValidActorProfile`; add comprehensive rules tests.
-- [ ] **15.5 Frontend Performance & UX:** Route-level `React.lazy` and `Suspense`; top-level `ErrorBoundary`; memoize `PostCard` and derived hook states; mitigate `Connections.jsx` tab-switch read storm; add confirmation for destructive connection actions.
-- [ ] **15.6 Test Expansion & Hygiene:** Add meaningful behavioral unit coverage for all six domain services; consolidate cutover test files; update test fixtures to strict private schema.
+Provides direct communication between connected students. Architectural constraints include: exactly one conversation per connected student pair; canonical conversation ID identical to the connection ID (`min_max`); messaging strictly gated by `connections/{id}.status == "accepted"`; append-only message documents; past messages remain readable after disconnection while new messages are blocked; conversation-level unread tracking; cursor pagination with real-time active thread updates; and no group chat or media attachments in this milestone.
+
+- [x] **16.1 Documentation & Test Count Reconciliation:** Reconcile stale test counts across all documentation, mark Milestone 15 complete, and establish the Milestone 16 roadmap.
+- [x] **16.2 Core Messaging Service & Unit Tests:** Implement `src/services/messageService.js` supporting canonical conversation IDs (`min_max`), conversation metadata, append-only message creation, cursor pagination, and mark-as-read; add pure unit test suite in `tests/unit/messageService.test.js`.
+- [x] **16.3 Firestore Security Rules & Emulator Tests:** Enforce connection-gated authorization (`connections/{id}.status == "accepted"` required to send), participant-only access, immutable messages, self-only unread resets, 4-key `lastMessage` schema (`id`, `content`, `senderId`, `createdAt`), and bidirectional transactional coupling (`getAfter()` / `existsAfter()`); expand emulator tests in `tests/rules/firestore.rules.test.js`.
+- [x] **16.4 Messaging Hooks & State Management:** Implement `useConversations.js` (conversation list with unread counters) and `useConversationMessages.js` (active thread listener, older message cursor pagination, error recovery).
+- [x] **16.5 UI Implementation & Integration:** Implement responsive split-pane `/messages` view (`Messages.jsx`, `ConversationList`, `MessageThread`, `MessageBubble`, `MessageComposer`), add Navbar Messages item with unread badge, and wire "Message" CTAs from `PublicProfile.jsx` and `Connections.jsx`.
+- [x] **16.6 Demo Data, Verification & Final Reconciliation:** Update seed script with deterministic demo conversations, verify browser smoke flow, confirm full test suites passing, and reconcile final documentation.
 
 ## Proposed next engineering milestones
 
@@ -64,14 +77,7 @@ Checked items describe work that exists in the current repository. Unchecked ite
 - [ ] Keep client-side `directoryIndex` projection search for the present application scale.
 - [ ] Revisit external search indexing (e.g., Algolia or Typesense) only when actual directory size or observed query latency demonstrates a concrete need.
 
-### 3. Minimal private messaging
-
-- [ ] Design a connection-gated one-to-one conversation model.
-- [ ] Add participant-only Rules and cursor-paginated messages.
-- [ ] Add unread/read behavior and carefully scoped real-time listeners.
-- [ ] Defer attachments, typing indicators, presence, group chat, and moderation tooling until the text MVP is stable.
-
-### 4. Continuous Integration & End-to-End Testing
+### 3. Continuous Integration & End-to-End Testing
 
 - [ ] Configure CI pipeline for lint, build, unit tests, and emulator rules tests.
 - [ ] Add browser-level end-to-end smoke tests.

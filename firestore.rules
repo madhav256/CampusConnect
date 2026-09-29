@@ -492,5 +492,203 @@ service cloud.firestore {
         (resource.data.status == 'accepted' && request.auth.uid in resource.data.users)
       );
     }
+
+    // 5. Conversations collection
+    match /conversations/{conversationId} {
+      function isValidConversationParticipants(participants) {
+        return participants is list &&
+               participants.size() == 2 &&
+               participants[0] is string &&
+               participants[1] is string &&
+               participants[0] < participants[1];
+      }
+
+      function isValidConversationId(convId, p0, p1) {
+        return convId == (p0 < p1 ? p0 + '_' + p1 : p1 + '_' + p0);
+      }
+
+      function isValidParticipantProfiles(p0, p1, profiles) {
+        let pubPath0 = /databases/$(database)/documents/publicProfiles/$(p0);
+        let pubPath1 = /databases/$(database)/documents/publicProfiles/$(p1);
+        let pubDoc0 = exists(pubPath0) ? get(pubPath0) : null;
+        let pubDoc1 = exists(pubPath1) ? get(pubPath1) : null;
+
+        return pubDoc0 != null && pubDoc1 != null &&
+               profiles is map &&
+               profiles.keys().hasOnly([p0, p1]) &&
+               profiles.keys().hasAll([p0, p1]) &&
+               profiles[p0] is map &&
+               profiles[p0].keys().hasOnly(['displayName', 'photoURL']) &&
+               profiles[p0].displayName == pubDoc0.data.get('displayName', 'CampusConnect Student') &&
+               profiles[p0].photoURL == pubDoc0.data.get('photoURL', null) &&
+               profiles[p1] is map &&
+               profiles[p1].keys().hasOnly(['displayName', 'photoURL']) &&
+               profiles[p1].displayName == pubDoc1.data.get('displayName', 'CampusConnect Student') &&
+               profiles[p1].photoURL == pubDoc1.data.get('photoURL', null);
+      }
+
+      function isValidConversationCreate(convId) {
+        let d = request.resource.data;
+        let p = d.participants;
+        let connPath = /databases/$(database)/documents/connections/$(convId);
+        let msgPath = /databases/$(database)/documents/conversations/$(convId)/messages/$(d.lastMessage.id);
+        let msgDoc = existsAfter(msgPath) ? getAfter(msgPath) : null;
+
+        return d.keys().hasOnly([
+                 'id', 'participants', 'participantProfiles',
+                 'lastMessage', 'unreadCount', 'createdAt', 'updatedAt'
+               ]) &&
+               d.keys().hasAll([
+                 'id', 'participants', 'participantProfiles',
+                 'lastMessage', 'unreadCount', 'createdAt', 'updatedAt'
+               ]) &&
+               d.id == convId &&
+               isValidConversationParticipants(p) &&
+               isValidConversationId(convId, p[0], p[1]) &&
+               request.auth.uid in p &&
+               exists(connPath) &&
+               get(connPath).data.status == 'accepted' &&
+               isValidParticipantProfiles(p[0], p[1], d.participantProfiles) &&
+               d.lastMessage is map &&
+               d.lastMessage.keys().hasOnly(['id', 'content', 'senderId', 'createdAt']) &&
+               d.lastMessage.keys().hasAll(['id', 'content', 'senderId', 'createdAt']) &&
+               d.lastMessage.id is string &&
+               d.lastMessage.senderId == request.auth.uid &&
+               d.lastMessage.content is string &&
+               d.lastMessage.content.size() > 0 &&
+               d.lastMessage.content.size() <= 1000 &&
+               d.lastMessage.createdAt == request.time &&
+               msgDoc != null &&
+               msgDoc.data.id == d.lastMessage.id &&
+               msgDoc.data.conversationId == convId &&
+               msgDoc.data.senderId == request.auth.uid &&
+               msgDoc.data.content == d.lastMessage.content &&
+               msgDoc.data.createdAt == request.time &&
+               d.unreadCount is map &&
+               d.unreadCount.keys().hasOnly([p[0], p[1]]) &&
+               d.unreadCount.keys().hasAll([p[0], p[1]]) &&
+               d.unreadCount[request.auth.uid] == 0 &&
+               d.unreadCount[p[0] == request.auth.uid ? p[1] : p[0]] == 1 &&
+               d.createdAt == request.time &&
+               d.updatedAt == request.time;
+      }
+
+      function isValidConversationMessageSendUpdate(convId) {
+        let d = request.resource.data;
+        let r = resource.data;
+        let p = r.participants;
+        let p0 = p[0];
+        let p1 = p[1];
+        let senderId = request.auth.uid;
+        let recipientId = (p0 == senderId ? p1 : p0);
+        let connPath = /databases/$(database)/documents/connections/$(convId);
+        let msgPath = /databases/$(database)/documents/conversations/$(convId)/messages/$(d.lastMessage.id);
+        let msgDoc = existsAfter(msgPath) ? getAfter(msgPath) : null;
+
+        return senderId in p &&
+               exists(connPath) &&
+               get(connPath).data.status == 'accepted' &&
+               d.diff(r).affectedKeys().hasOnly(['lastMessage', 'unreadCount', 'updatedAt']) &&
+               d.id == r.id &&
+               d.participants == r.participants &&
+               d.participantProfiles == r.participantProfiles &&
+               d.createdAt == r.createdAt &&
+               d.updatedAt == request.time &&
+               d.lastMessage is map &&
+               d.lastMessage.keys().hasOnly(['id', 'content', 'senderId', 'createdAt']) &&
+               d.lastMessage.keys().hasAll(['id', 'content', 'senderId', 'createdAt']) &&
+               d.lastMessage.id is string &&
+               d.lastMessage.senderId == senderId &&
+               d.lastMessage.content is string &&
+               d.lastMessage.content.size() > 0 &&
+               d.lastMessage.content.size() <= 1000 &&
+               d.lastMessage.createdAt == request.time &&
+               msgDoc != null &&
+               msgDoc.data.id == d.lastMessage.id &&
+               msgDoc.data.conversationId == convId &&
+               msgDoc.data.senderId == senderId &&
+               msgDoc.data.content == d.lastMessage.content &&
+               msgDoc.data.createdAt == request.time &&
+               d.unreadCount is map &&
+               d.unreadCount.keys().hasOnly([p0, p1]) &&
+               d.unreadCount.keys().hasAll([p0, p1]) &&
+               d.unreadCount[senderId] == 0 &&
+               d.unreadCount[recipientId] == r.unreadCount[recipientId] + 1;
+      }
+
+      function isValidConversationReadResetUpdate() {
+        let d = request.resource.data;
+        let r = resource.data;
+        let p = r.participants;
+        let p0 = p[0];
+        let p1 = p[1];
+        let myId = request.auth.uid;
+        let peerId = (p0 == myId ? p1 : p0);
+
+        return myId in p &&
+               d.diff(r).affectedKeys().hasOnly(['unreadCount']) &&
+               d.id == r.id &&
+               d.participants == r.participants &&
+               d.participantProfiles == r.participantProfiles &&
+               d.lastMessage == r.lastMessage &&
+               d.createdAt == r.createdAt &&
+               d.updatedAt == r.updatedAt &&
+               d.unreadCount is map &&
+               d.unreadCount.keys().hasOnly([p0, p1]) &&
+               d.unreadCount.keys().hasAll([p0, p1]) &&
+               d.unreadCount[myId] == 0 &&
+               d.unreadCount[peerId] == r.unreadCount[peerId];
+      }
+
+      allow get: if isAuthenticated() && (resource == null || request.auth.uid in resource.data.participants);
+      allow list: if isAuthenticated() && request.auth.uid in resource.data.participants;
+
+      allow create: if isAuthenticated() && isValidConversationCreate(conversationId);
+
+      allow update: if isAuthenticated() && (
+        isValidConversationMessageSendUpdate(conversationId) ||
+        isValidConversationReadResetUpdate()
+      );
+
+      allow delete: if false;
+
+      // 6. Messages subcollection
+      match /messages/{messageId} {
+        function isValidMessageCreate(convId, msgId) {
+          let d = request.resource.data;
+          let convPath = /databases/$(database)/documents/conversations/$(convId);
+          let connPath = /databases/$(database)/documents/connections/$(convId);
+          let convDoc = existsAfter(convPath) ? getAfter(convPath) : null;
+
+          return d.keys().hasOnly(['id', 'conversationId', 'senderId', 'content', 'createdAt']) &&
+                 d.keys().hasAll(['id', 'conversationId', 'senderId', 'content', 'createdAt']) &&
+                 d.id == msgId &&
+                 d.conversationId == convId &&
+                 d.senderId == request.auth.uid &&
+                 d.content is string &&
+                 d.content.size() > 0 &&
+                 d.content.size() <= 1000 &&
+                 d.createdAt == request.time &&
+                 convDoc != null &&
+                 request.auth.uid in convDoc.data.participants &&
+                 convDoc.data.lastMessage is map &&
+                 convDoc.data.lastMessage.id == msgId &&
+                 convDoc.data.lastMessage.content == d.content &&
+                 convDoc.data.lastMessage.senderId == request.auth.uid &&
+                 convDoc.data.lastMessage.createdAt == request.time &&
+                 exists(connPath) &&
+                 get(connPath).data.status == 'accepted';
+        }
+
+        allow read: if isAuthenticated() && (
+          exists(/databases/$(database)/documents/conversations/$(conversationId)) &&
+          request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants
+        );
+
+        allow create: if isAuthenticated() && isValidMessageCreate(conversationId, messageId);
+        allow update: if false;
+        allow delete: if false;
+      }
+    }
   }
 }

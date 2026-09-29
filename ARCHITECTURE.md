@@ -1,6 +1,6 @@
 # CampusConnect Architecture
 
-**Status:** Current implementation reference (Milestone 14B / Milestone 15)
+**Status:** Current implementation reference (Milestone 15 Delivered / Milestone 16 Planned)
 
 This document describes the architecture that exists in the repository today. It does not describe proposed messaging, media storage, search infrastructure, or other deferred work.
 
@@ -37,7 +37,7 @@ The UI does not use a custom HTTP API or server-rendered backend. Firebase Admin
 | Database | Cloud Firestore |
 | Hosting | Firebase Hosting serving the Vite `dist` output |
 | Admin tooling | Firebase Admin SDK seeding script |
-| Quality checks | ESLint; production Vite build; 53 Vitest unit tests (`npm run test:unit`); 97 Firestore Emulator security rules tests (`npm run test:rules`); development-only Firestore security audit panel |
+| Quality checks | ESLint; production Vite build; 204 Vitest unit tests (`npm run test:unit`); 154 Firestore Emulator security rules tests (`npm run test:rules`); development-only Firestore security audit panel |
 
 Firebase Storage is not part of the active client architecture. The Firebase configuration contains a storage-bucket value because it is part of the standard web configuration shape, but the application does not initialize the Storage SDK or upload files.
 
@@ -48,7 +48,7 @@ Firebase Storage is not part of the active client architecture. The Firebase con
 `src/App.jsx` owns the route table:
 
 | Route | Access | Page |
-| --- | --- | ---
+| --- | --- | --- |
 | `/` | Public | Login and optional demo login |
 | `/register` | Public | Account registration |
 | `/dashboard` | Authenticated | Real-time campus feed |
@@ -56,13 +56,15 @@ Firebase Storage is not part of the active client architecture. The Firebase con
 | `/discover` | Authenticated | Bounded student search |
 | `/users/:uid` | Authenticated | Public profile and connection CTA |
 | `/connections` | Authenticated | Accepted connections and pending requests |
+| `/messages` | Authenticated | 1-to-1 private messaging overview |
+| `/messages/:conversationId` | Authenticated | Active 1-to-1 private message thread |
 | `/notifications` | Authenticated | Scoped notification inbox |
 | `/settings` | Authenticated | Privacy, notification preferences, and sign out |
 | `*` | Public/auth-aware | Not-found page |
 
 `ProtectedRoute` waits for authentication initialization and redirects unauthenticated users to `/`, preserving the attempted location for the login flow.
 
-There is no separate route configuration folder, layout router, sidebar system, messaging route, events route, marketplace route, or admin route in the active application.
+There is no separate route configuration folder, layout router, sidebar system, events route, marketplace route, or admin route in the active application.
 
 ## Source tree
 
@@ -75,15 +77,16 @@ src/
 │   ├── dev/              # Development-only security audit panel
 │   ├── feed/             # Feed, posts, comments, composers
 │   ├── layout/           # Navbar, PageContainer, Section
+│   ├── messages/         # ConversationList, ConversationItem, MessageThread, MessageBubble, MessageComposer, DisconnectedNotice
 │   ├── notifications/    # NotificationItem
 │   ├── search/           # StudentCard
 │   └── ui/               # Button, Card, Avatar, Input, Textarea, EmptyState
 ├── contexts/             # AuthContext and its context value
 ├── data/                 # Deterministic demo data and ID whitelists
 ├── firebase/             # Firebase client initialization
-├── hooks/                # Auth and domain hooks
-├── pages/                # Route-level screens
-├── services/             # Firebase Auth/Firestore operations
+├── hooks/                # Auth and domain hooks (including useConversations, useConversationMessages)
+├── pages/                # Route-level screens (including Messages.jsx)
+├── services/             # Firebase Auth/Firestore operations (including messageService.js)
 └── utils/                # Development security test runner
 ```
 
@@ -107,6 +110,7 @@ The main page responsibilities are:
 - `PublicProfile`: point-read profile display (from `publicProfiles/{uid}`) and relationship CTA.
 - `Discover`: debounced student search against `directoryIndex` and result grid.
 - `Connections`: relationship tabs and page-local person cards.
+- `Messages`: authenticated 1-to-1 messaging overview and active thread interaction with responsive split-pane desktop (≥1024px) and single-view mobile (<1024px) layouts.
 - `Notifications`: all/unread filters and notification actions.
 - `Settings`: discoverability, notification preferences, sign out, and development audit panel.
 - `NotFound`: route fallback.
@@ -133,6 +137,8 @@ Active hooks include:
 - `useConnectionState`
 - `useUserRelationships`
 - `useNotifications`
+- `useConversations`
+- `useConversationMessages`
 
 ### Services
 
@@ -145,6 +151,7 @@ The service modules are the Firebase boundary:
 - `likeService.js`: atomic like/unlike transactions and the current user's like subscription.
 - `connectionService.js`: canonical relationship IDs, relationship transactions, notifications associated with connection transitions, and relationship subscriptions.
 - `notificationService.js`: recipient-scoped notification subscription, normalization, read updates, batch mark-as-read, and dismissal.
+- `messageService.js`: canonical conversation IDs, connection-gated message send transactions, conversation subscriptions, active thread listeners, cursor pagination, and mark-as-read updates.
 
 ## State and data-flow patterns
 
@@ -157,6 +164,8 @@ The application selectively uses Firestore `onSnapshot` for:
 - the current user's like document for a post;
 - the current user's connection relationships;
 - a single relationship between two users;
+- the current user's active conversations;
+- the active thread's newest messages;
 - the current user's profile/settings;
 - the current user's notifications.
 
@@ -167,6 +176,7 @@ Each subscription is owned by a hook or service caller and is cleaned up on unmo
 The current read limits are deliberate MVP safeguards:
 
 - feed: newest 10 posts loaded initially with a real-time listener for newer posts, plus cursor-based pagination for older posts;
+- messaging: newest 25 messages loaded initially for an active thread with real-time updates, plus cursor pagination for older messages; conversations list bounded to newest 50 active conversations ordered by updatedAt;
 - directory: newest 100 discoverable users fetched from `directoryIndex` ordered by `updatedAt`;
 - notifications: newest 30 notifications ordered by `createdAt`;
 - search: 300 ms input debounce, followed by client-side filtering across display name, department, year, and skills over discoverable directory documents;
@@ -180,6 +190,7 @@ The current read limits are deliberate MVP safeguards:
 - Comments: `writeBatch` creating/deleting a comment and updating `posts.commentsCount` together.
 - Connection requests, acceptance, rejection, cancellation, and removal use transactions.
 - Connection transactions may create or delete deterministic notification documents in the same transaction.
+- Messaging: `runTransaction` in `sendMessage()` atomically creating or updating `conversations/{canonicalConnectionId}` alongside creating the corresponding child message document in `conversations/{canonicalConnectionId}/messages/{messageId}`.
 
 The client uses these atomic paths, while Firestore Rules remain the final authorization boundary.
 
@@ -194,9 +205,29 @@ The active collections are:
 - `posts/{postId}/comments/{commentId}`: comments;
 - `posts/{postId}/likes/{uid}`: individual likes;
 - `connections/{canonicalConnectionId}`: one relationship document per pair;
-- `users/{uid}/notifications/{notificationId}`: recipient-scoped connection notifications.
+- `users/{uid}/notifications/{notificationId}`: recipient-scoped connection notifications;
+- `conversations/{canonicalConnectionId}`: 1-to-1 conversation metadata between connected peers;
+- `conversations/{canonicalConnectionId}/messages/{messageId}`: append-only immutable message subcollection.
 
 The full field-level schema and current rule behavior are documented in [FIRESTORE_SCHEMA.md](FIRESTORE_SCHEMA.md).
+
+### Messaging Architecture & Contracts
+
+1. **The `updatedAt` Contract:**
+   > `updatedAt` represents the timestamp of the latest message activity and changes only when a message is sent.
+
+   - `sendMessage()` updates `updatedAt` with `serverTimestamp()`;
+   - `markConversationAsRead()` modifies only the authenticated user's unread counter (`unreadCount.${userId} = 0`);
+   - `markConversationAsRead()` must NOT modify `updatedAt`;
+   - Conversation list ordering remains based on message activity (`orderBy("updatedAt", "desc")`), preventing read events from reordering the user's inbox.
+
+2. **Bidirectional Transactional Coupling:**
+   - Enforced strictly in Firestore Security Rules via `getAfter()` and `existsAfter()`.
+   - `conversation.lastMessage` contains strictly four keys: `id`, `content`, `senderId`, and `createdAt`.
+   - Creating a conversation requires the atomic creation of the child message matching `lastMessage.id`, `conversationId`, `senderId`, `content`, and `createdAt`.
+   - Updating conversation metadata on message-send requires the atomic creation of the child message document with matching fields.
+   - Creating a child message document requires `conversation.lastMessage` in `getAfter()` to match the message's `id`, `content`, `senderId`, and `createdAt`.
+   - Neither standalone message creation nor standalone conversation metadata forging can occur.
 
 ## Security model
 
@@ -213,7 +244,10 @@ The browser is treated as untrusted. Firestore Rules enforce the active authoriz
 - canonical connection IDs and participant arrays;
 - recipient-only notification list and point reads;
 - recipient-only routine notification read-state updates, with narrowly validated acceptance refreshes and sender-side cancellation cleanup;
-- connection state transitions and notification transaction relationships.
+- connection state transitions and notification transaction relationships;
+- connection gate (`status == 'accepted'`) for starting threads and sending messages;
+- immutable conversation participants, creation time, and message history;
+- bidirectional transactional coupling preventing message or conversation summary forgery.
 
 The development-only `SecurityTestPanel` exercises selected notification and user/settings rejection scenarios. It is not a production test runner and is not a replacement for automated emulator tests.
 
@@ -227,12 +261,12 @@ The recruiter demo uses a normal Firebase Auth account configured through `VITE_
 
 ## Current limitations
 
-- 53 unit tests and 97 Firestore Emulator rules tests are active; service integration tests, end-to-end tests, and a CI pipeline are deferred.
+- 204 unit tests and 154 Firestore Emulator rules tests are active; service integration tests, end-to-end tests, and a CI pipeline are deferred.
 - Email verification is not required after sign-up.
 - Non-discoverable students are excluded from `directoryIndex` search queries; authenticated direct public profile reads (`/users/:uid`) remain accessible by design.
 - Notifications are bounded to the newest 30 items rather than cursor-paginated.
 - No media upload or Firebase Storage integration exists.
-- No post editing, post sharing, post search, bookmarks, private messaging, clubs, events, marketplace, or direct account deletion exists.
+- No post editing, post sharing, post search, bookmarks, clubs, events, marketplace, or direct account deletion exists.
 - Notification generation currently originates in client connection transactions rather than a trusted background event processor.
 - The parent-only exact comment-counter limitation remains; a future ledger or server-side event model would be needed to prove arbitrary child causality.
 
@@ -242,5 +276,4 @@ The following are possible later milestones and should not be treated as active 
 
 - service integration, end-to-end, and CI verification beyond the current unit and emulator Rules suites;
 - trusted server-side event processing for notifications;
-- a minimal connection-gated one-to-one messaging model;
 - media storage with separate Storage Rules and lifecycle cleanup.

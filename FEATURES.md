@@ -1,6 +1,6 @@
 # CampusConnect Features
 
-**Status:** Current implementation inventory (Milestone 14B / Milestone 15)
+**Status:** Current implementation inventory (Milestone 15 Delivered / Milestone 16 Planned)
 
 This document distinguishes shipped behavior from deferred ideas. A feature is marked implemented only when it exists in the current application source and active Firebase model.
 
@@ -119,6 +119,22 @@ Like, comment, message, event, and generic social notifications are not implemen
 
 The discoverability toggle updates `users/{uid}` and atomically adds or removes the student's projection in `directoryIndex/{uid}`. Email is stored exclusively in `users/{uid}` under owner-only rules (`allow read: if isOwner(userId);`), guaranteeing true field-level data privacy. Direct authenticated public profile reads (`/users/:uid`) remain accessible for campus networking.
 
+### Direct 1-to-1 Private Messaging
+
+- Protected routes at `/messages` (conversation list) and `/messages/:conversationId` (mobile thread view).
+- Split-pane desktop view with conversation sidebar and active thread pane.
+- Canonical conversation ID matching canonical connection ID (`min_max` sorted UIDs).
+- One conversation per accepted connection pair.
+- Real-time conversation list limited to the latest 50 conversations, sorted by latest message activity (`updatedAt`).
+- Real-time message thread loaded with initial 25 messages, with cursor-based pagination for older messages.
+- Preserved scroll position when prepending older message batches.
+- Strict 4-key `lastMessage` summary (`id`, `content`, `senderId`, `createdAt`).
+- `updatedAt` updates exclusively on message sends; `markConversationAsRead()` modifies caller unread count without mutating `updatedAt`.
+- Bidirectional transactional coupling in Firestore Rules preventing metadata or child message forgery.
+- Read-only archive mode for disconnected conversations (existing history readable; new message sends blocked).
+- Unread message counters per conversation and aggregated badge in desktop Navbar and mobile drawer.
+- Direct Message CTAs on connected student Public Profiles and Connections page.
+
 ### Interface and accessibility behavior
 
 - Campus Atelier paper/ink/terracotta visual language.
@@ -141,8 +157,8 @@ Settings and Notifications render a development-only `SecurityTestPanel`. The av
 
 Automated verification includes:
 
-- 53 Vitest unit tests covering cutover, services, normalization, and helper logic;
-- 97 Firestore Emulator security rules tests in the fixed synthetic project `demo-campusconnect-rules-test`, covering users, publicProfiles, directoryIndex, posts, comments, likes, connections, and notifications.
+- 204 Vitest unit tests covering cutover, services, messaging, normalization, and helper logic;
+- 154 Firestore Emulator security rules tests in the fixed synthetic project `demo-campusconnect-rules-test` across 11 suites, covering users, publicProfiles, directoryIndex, discoverability transitions, posts, comments, likes, connections, notifications, conversations, and messages.
 
 Service integration, end-to-end tests, and CI remain deferred.
 
@@ -164,7 +180,7 @@ The following ideas are intentionally outside the current MVP:
 - Bookmarks or saved posts.
 - Image, file, or rich-media uploads.
 - Firebase Storage integration.
-- Private messaging, conversations, read receipts, typing indicators, or presence.
+- Group messaging, read receipts, typing indicators, or presence (minimal 1-to-1 private messaging is implemented).
 - Like and comment notifications.
 - Email verification enforcement.
 - Password-change UI.

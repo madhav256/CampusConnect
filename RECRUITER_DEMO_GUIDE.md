@@ -57,11 +57,22 @@ This sequence demonstrates the seeded workflow without intentionally changing it
 - **Technical points:** transactions coordinate connection state and deterministic connection notifications; Rules restrict participant actions and receiver-only acceptance.
 - **Precaution:** Do not accept, decline, or remove a relationship during a standard demo. Those actions mutate the live seeded state. The Admin seeder is merge-only and does not provide a reset-by-deletion routine.
 
+### 1:35–1:50 — Direct 1-to-1 Private Messaging
+
+- **Route:** `/messages`
+- **Show:**
+  - The conversation list with peer profiles, timestamp, and unread indicator;
+  - Active conversation thread rendering chronological message history;
+  - Real-time message composition and sending;
+  - Dynamic scroll management that preserves viewport position when loading older messages;
+  - Direct Message CTAs from connected profiles on `/connections` and `/users/:uid`.
+- **Explain:** Messaging is 1:1 and strictly connection-gated. A canonical conversation ID matches the connection ID (`min_max`). If two students disconnect, their existing conversation is preserved as a read-only archive while new sends are blocked.
+
 ### 1:50–2:00 — Notifications and settings
 
 - **Routes:** `/notifications` or `/settings`
 - **Show:** The unread notification badge, notification filters, or discoverability/connection-notification settings.
-- **Explain:** Notifications are recipient-scoped and currently cover connection requests and accepted connections. The development-only SecurityTestPanel exercises selected Rule rejection scenarios; automated validation is provided by the 97-test emulator Rules suite and 53 unit tests.
+- **Explain:** Notifications are recipient-scoped and currently cover connection requests and accepted connections. The development-only SecurityTestPanel exercises selected Rule rejection scenarios; automated validation is provided by the 154-test emulator Rules suite and 204 unit tests.
 
 ---
 
@@ -79,19 +90,25 @@ A relationship is stored at `connections/{minUid_maxUid}`. Sorting both particip
 
 **Sources:** `src/services/connectionService.js`, `src/hooks/useConnectionState.js`, `firestore.rules`.
 
+### Canonical 1-to-1 messaging and transactional message coupling
+
+Conversations exist at `conversations/{minUid_maxUid}`, sharing the exact canonical pair ID with accepted connections. Firestore Rules strictly enforce bidirectional transactional coupling: creating a conversation or advancing its `lastMessage` (strictly 4 keys: `id`, `content`, `senderId`, `createdAt`), `updatedAt`, and recipient `unreadCount` requires an atomic write to the corresponding immutable message document at `conversations/{id}/messages/{messageId}`. Disconnected pairs preserve conversation history as a read-only archive while blocking new message creation.
+
+**Sources:** `src/services/messageService.js`, `src/hooks/useConversations.js`, `src/hooks/useConversationMessages.js`, `firestore.rules`.
+
 ### Service-layer architecture
 
-Firebase SDK calls are kept in `src/services/`; reusable UI components do not query Firestore directly. Hooks such as `usePosts`, `useComments`, `useUserRelationships`, and `useNotifications` own subscription lifecycles and local loading/error state. `AuthContext` is reserved for authentication session state rather than acting as a general domain store.
+Firebase SDK calls are kept in `src/services/`; reusable UI components do not query Firestore directly. Hooks such as `usePosts`, `useComments`, `useUserRelationships`, `useNotifications`, `useConversations`, and `useConversationMessages` own subscription lifecycles and local loading/error state. `AuthContext` is reserved for authentication session state rather than acting as a general domain store.
 
 **Sources:** `src/services/`, `src/hooks/`, `src/contexts/AuthContext.jsx`.
 
 ### Selective real-time listeners
 
-`onSnapshot` is used for the bounded post feed, expanded comments, selected post-like state, user profile/settings views, relationships, and recipient notifications. Effects return unsubscribe callbacks. Directory search is intentionally a bounded fetch plus a two-minute module-level cache rather than a live listener.
+`onSnapshot` is used for the bounded post feed, expanded comments, selected post-like state, user profile/settings views, relationships, recipient notifications, active conversation lists (up to 50), and open conversation threads (initial 25 messages with cursor pagination for older batches). Effects return unsubscribe callbacks. Directory search is intentionally a bounded fetch plus a two-minute module-level cache rather than a live listener.
 
 ### Client-untrusted authorization
 
-UI checks improve usability but are not the security boundary. `firestore.rules` authenticates reads/writes, checks ownership and participant identity, validates canonical connection IDs and selected schemas, scopes notification reads to their recipient, and ties connection notification writes to transaction state. The development security panel covers selected rejection scenarios only; it is not a replacement for an emulator Rules suite.
+UI checks improve usability but are not the security boundary. `firestore.rules` authenticates reads/writes, checks ownership and participant identity, validates canonical connection IDs and selected schemas, scopes notification reads to their recipient, ties connection notification writes to transaction state, and prevents conversation/message forgery through atomic `getAfter()` couplings. The development security panel covers selected rejection scenarios only; it is not a replacement for an emulator Rules suite.
 
 **Sources:** `firestore.rules`, `src/components/dev/SecurityTestPanel.jsx`, `src/utils/securityTestRunner.js`.
 
@@ -115,13 +132,13 @@ Firebase provides managed email/password authentication, Firestore real-time lis
 
 The browser is treated as untrusted. Rules compare the authenticated UID with owner or participant fields, restrict notification access to `recipientId`, protect immutable identity fields, and validate relationship transitions. Hidden or disabled UI controls are not relied on for authorization.
 
-### How do likes, comments, and connections work?
+### How do likes, comments, connections, and messaging work?
 
-Likes use a subcollection and transaction. Comments use a subcollection and a batch that writes the comment and parent counter together. Connections use one canonical pair document with a small state machine. Notifications are nested under each recipient's user document and use deterministic IDs for request/acceptance events.
+Likes use a subcollection and transaction. Comments use a subcollection and a batch that writes the comment and parent counter together. Connections use one canonical pair document with a small state machine. Notifications are nested under each recipient's user document and use deterministic IDs for request/acceptance events. Messaging uses canonical pair conversation documents transactionally coupled to an immutable message subcollection, maintaining participant unread counters and a strict 4-key lastMessage summary.
 
 ### What would change at much larger scale?
 
-The current limits are deliberate MVP boundaries. Cursor-based feed pagination and strict three-collection public/private profile separation have already been designed, implemented, and verified. Larger deployments could consider an external indexed search service (e.g. Algolia or Typesense) when directory size or query latency warrants it, counter-sharding if like/comment write contention emerges, and trusted background Cloud Functions for notification generation.
+The current limits are deliberate MVP boundaries. Cursor-based feed pagination, cursor-based message pagination, and strict three-collection public/private profile separation have already been designed, implemented, and verified. Larger deployments could consider an external indexed search service (e.g. Algolia or Typesense) when directory size or query latency warrants it, counter-sharding if like/comment write contention emerges, and trusted background Cloud Functions for notification generation.
 
 ---
 
@@ -129,12 +146,12 @@ The current limits are deliberate MVP boundaries. Cursor-based feed pagination a
 
 Current limitations include:
 
-- 53 unit tests and an isolated 97-test Firestore Emulator Rules suite exist; service integration, end-to-end, and CI tests remain deferred;
+- 204 unit tests and an isolated 154-test Firestore Emulator Rules suite exist; service integration, end-to-end, and CI tests remain deferred;
 - directory and notifications are bounded rather than cursor-paginated (feed uses cursor pagination);
 - directory search filters client-side over the `directoryIndex` projection rather than an external full-text index;
 - no Firebase Storage integration, media uploads, or image posts;
 - no post editing, sharing, search, or bookmarks;
-- no private messaging, presence, or read receipts;
+- no presence, read receipts, or group chat (1-to-1 connection-gated private messaging is active in Milestone 16);
 - no email-verification enforcement, password-change UI, or account-deletion cascade;
 - only connection request and acceptance notifications;
 - notification creation currently occurs in client connection transactions rather than a trusted background processor;

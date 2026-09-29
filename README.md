@@ -85,6 +85,7 @@ src/
 │   ├── dev/
 │   ├── feed/
 │   ├── layout/
+│   ├── messages/
 │   ├── notifications/
 │   ├── search/
 │   └── ui/
@@ -109,6 +110,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the runtime flow and [FIRESTORE_SCHEM
 - Comment create/delete operations update the parent counter in a write batch.
 - `connections/{minUid_maxUid}` stores one canonical relationship document for each pair.
 - Connection Rules restrict pending creation, receiver-only acceptance, and participant deletion.
+- `conversations/{minUid_maxUid}` stores 1-to-1 conversation metadata with bidirectional transactional coupling to immutable message documents, strictly bounded to accepted connections, with 4-key `lastMessage` summaries and read-only archive retention upon disconnection.
 - Notifications live under `users/{recipientUid}/notifications` and list reads are recipient-scoped.
 - Notification creation is tied by Rules to the corresponding connection transaction.
 - User identity fields, setting types, and exact post schemas are strictly validated by Rules.
@@ -117,12 +119,12 @@ Private account settings (`users/{uid}`) and public profile fields (`publicProfi
 
 ## Current limitations
 
-- Automated test suites include 53 Vitest unit tests and 97 Firestore Emulator rules tests; service integration, end-to-end, and a CI pipeline remain deferred.
+- Automated test suites include 204 Vitest unit tests and 154 Firestore Emulator rules tests; service integration, end-to-end, and a CI pipeline remain deferred.
 - Directory and notification reads are bounded rather than cursor-paginated (the campus feed supports cursor pagination).
 - Discovery uses client-side filtering over the `directoryIndex` projection rather than an external search index.
 - No Firebase Storage integration or media uploads.
 - No post editing, sharing, search, or bookmarks.
-- No private messaging, presence, read receipts, clubs, events, marketplace, or internship board.
+- No presence, read receipts, clubs, events, marketplace, or internship board.
 - No email-verification enforcement, password-change UI, or account-deletion cascade.
 - Notification generation currently occurs in client connection transactions rather than a background event processor.
 
@@ -181,19 +183,19 @@ The seeder uses explicit demo ID whitelists, merge-only writes, and no bulk dele
 
 ## Verification commands
 
-Unit tests run via Vitest (53 passing tests):
+Unit tests run via Vitest (204 passing tests):
 
 ```bash
 npm run test:unit
 ```
 
-Firestore Rules tests run inside the fixed synthetic emulator project `demo-campusconnect-rules-test` (97 passing tests):
+Firestore Rules tests run inside the fixed synthetic emulator project `demo-campusconnect-rules-test` (154 passing tests):
 
 ```bash
 npm run test:rules
 ```
 
-The Rules command starts and stops the Firestore Emulator automatically. It does not read `.env.local`, use service-account credentials, invoke the demo seeder, or connect to the recruiter project. The Rules suite runs 97 passing security regression tests verifying strict schemas, permissions, immutability, and state transitions.
+The Rules command starts and stops the Firestore Emulator automatically. It does not read `.env.local`, use service-account credentials, invoke the demo seeder, or connect to the recruiter project. The Rules suite runs 154 passing security regression tests across 11 suites, verifying strict schemas, permissions, immutability, state transitions, and bidirectional transactional message coupling.
 
 The broader local checks are:
 

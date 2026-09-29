@@ -1,6 +1,6 @@
 # CampusConnect Firestore Schema
 
-**Status:** Active client schema and Rule reference (Milestone 14B / Milestone 15)
+**Status:** Active client schema and Rule reference (Milestone 15 Delivered / Milestone 16 Planned)
 
 This document describes the collections used by the current browser application. Firebase Admin SDK demo seeding can add deterministic metadata outside the client write path; those seeder-only details are called out explicitly.
 
@@ -30,9 +30,12 @@ posts/{postId}
 connections/{canonicalConnectionId}
 
 users/{uid}/notifications/{notificationId}
+
+conversations/{canonicalConversationId}
+└── messages/{messageId}
 ```
 
-The active client does not use separate `friendRequests`, `friendships`, `conversations`, `messages`, or `bookmarks` collections.
+The active client does not use separate `friendRequests`, `friendships`, or `bookmarks` collections.
 
 ## 1. `users/{uid}` (Private Account Authority)
 
@@ -286,6 +289,88 @@ Notification preferences are read before the connection transaction and determin
 
 The Admin SDK demo seeder writes two deterministic notifications directly and may include `isDemo`; Admin credentials bypass client Rules. `isDemo` is not part of the normal client notification schema.
 
+## 9. `conversations/{conversationId}`
+
+Stores 1-to-1 conversation metadata between two connected students.
+
+### Document IDs
+
+Canonical sorted pair UID string: `min(uidA, uidB) + "_" + max(uidA, uidB)`, identical to `connections/{connectionId}`.
+
+### Fields
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `id` | string | Must equal canonical conversation document ID |
+| `participants` | array<string> | Exactly 2 UIDs, sorted lexicographically: `[p0, p1]` where `p0 < p1` |
+| `participantProfiles` | map | Snapshot of public profile data: `{ [uid]: { displayName: string, photoURL: string \| null } }` matching `publicProfiles` authority |
+| `lastMessage` | map | Most recent message summary; strictly 4 keys: `{ id: string, content: string, senderId: string, createdAt: timestamp }` |
+| `unreadCount` | map | Map of `{ [uid]: number }` tracking unread message count for each participant |
+| `createdAt` | timestamp | Creation time of conversation thread; immutable |
+| `updatedAt` | timestamp | Timestamp of the latest message activity |
+
+### The `updatedAt` Contract
+
+> `updatedAt` represents the timestamp of the latest message activity and changes only when a message is sent.
+
+Therefore:
+- `sendMessage()` updates `updatedAt` with `serverTimestamp()`;
+- `markConversationAsRead()` modifies only the authenticated user's unread counter (`unreadCount.${userId} = 0`);
+- `markConversationAsRead()` must NOT modify `updatedAt`;
+- Conversation list ordering remains based on message activity (`orderBy("updatedAt", "desc")`), not reading activity.
+
+### Rule behavior & Bidirectional Coupling
+
+- Read (`get`, `list`) restricted to authenticated participants (`request.auth.uid in resource.data.participants`).
+- Deletions are forbidden (`allow delete: if false`).
+- Document creation requires:
+  - Active accepted connection in `connections/{conversationId}` (`status == 'accepted'`);
+  - Deterministic canonical ID and lexicographically sorted 2-element participant array;
+  - Authenticated sender is a participant;
+  - `participantProfiles` matches `publicProfiles` authority;
+  - Initial `unreadCount` has sender at `0` and recipient at `1`;
+  - `createdAt` and `updatedAt` set to `request.time`;
+  - **Bidirectional Transactional Coupling:** `lastMessage` must have strictly the 4 keys (`id`, `content`, `senderId`, `createdAt`). The child message at `/conversations/{conversationId}/messages/{lastMessage.id}` must exist in `existsAfter()` with exact matching `id`, `conversationId`, `senderId`, `content`, and `createdAt == request.time`. A conversation document cannot be created without its first message document in the same atomic write.
+- Updates allow two distinct transitions:
+  1. **Message-Send Transition:** Active accepted connection required. Immutable fields (`id`, `participants`, `participantProfiles`, `createdAt`) preserved. `updatedAt` set to `request.time`. Sender `unreadCount` set to `0`, recipient incremented by `1`. **Bidirectional Coupling:** `lastMessage` has strictly 4 keys, and the corresponding child message document must exist in `existsAfter()` with exact matching `id`, `conversationId`, `senderId`, `content`, and `createdAt == request.time`.
+  2. **Read-Reset Transition:** Only `unreadCount` modified (`unreadCount.${myId} = 0`). Peer unread count, `lastMessage`, and `updatedAt` are strictly immutable during read reset.
+
+## 10. `conversations/{conversationId}/messages/{messageId}`
+
+Append-only message subcollection under a conversation thread.
+
+### Document IDs
+
+Generated auto-IDs (e.g. `doc(collection(db, "conversations", convId, "messages")).id`), kept stable across transaction retries.
+
+### Fields
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `id` | string | Must equal message document ID |
+| `conversationId` | string | Must equal parent conversation ID |
+| `senderId` | string | Authenticated UID of sender |
+| `content` | string | Message content (1 to 1000 characters) |
+| `createdAt` | timestamp | Server timestamp of creation; immutable |
+
+### Rule behavior & Bidirectional Coupling
+
+- Read restricted to authenticated participants of the parent conversation.
+- Updates and deletions are completely disallowed (`allow update: if false; allow delete: if false;`).
+- Message creation requires:
+  - Exact 5 keys (`id`, `conversationId`, `senderId`, `content`, `createdAt`);
+  - `id == messageId` and `conversationId == conversationId`;
+  - `senderId == request.auth.uid`;
+  - Valid content length (1–1000 characters);
+  - `createdAt == request.time`;
+  - Existing accepted connection in `connections/{conversationId}`;
+  - **Bidirectional Transactional Coupling:** Parent conversation evaluated with `getAfter(/conversations/{conversationId})`. The parent's `lastMessage` must match:
+    - `lastMessage.id == messageId`
+    - `lastMessage.content == request.resource.data.content`
+    - `lastMessage.senderId == request.auth.uid`
+    - `lastMessage.createdAt == request.time`
+  - Neither a standalone message nor a standalone conversation summary can be created or updated independently.
+
 ## Demo-only metadata
 
 `scripts/seedDemoData.mjs` uses Firebase Admin SDK and writes `isDemo: true` on selected seeded profiles, posts, comments, likes, connections, and notifications. It also uses deterministic IDs for demo peers, posts, and relationships.
@@ -297,7 +382,6 @@ This metadata is a seeding concern, not a client feature. It is not required by 
 The following schemas are not active and must not be used as if they already exist:
 
 - `friendRequests` and `friendships`: the active relationship collection is `connections`.
-- `conversations` and `messages`: private messaging is not implemented.
 - `bookmarks`: saved posts are not implemented.
 - external search indexes: discovery currently uses a bounded `directoryIndex` projection read and client-side filtering; external search services (e.g. Algolia/Typesense) will be evaluated only when directory size or observed performance demonstrates a concrete need.
 

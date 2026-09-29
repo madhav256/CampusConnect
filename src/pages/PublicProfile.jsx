@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
+import { MessageSquare } from "lucide-react";
 import { fetchUserById } from "../services/userService";
 import { useAuth } from "../hooks/useAuth";
 import { useConnectionState } from "../hooks/useConnectionState";
+import { getCanonicalConversationId } from "../services/messageService";
 import Navbar from "../components/layout/Navbar";
 import PageContainer from "../components/layout/PageContainer";
 import Section from "../components/layout/Section";
@@ -276,6 +278,14 @@ export default function PublicProfile() {
 
                       {connectionState === "connected" && (
                         <>
+                          <Link
+                            to={`/messages/${getCanonicalConversationId(authUser?.uid, uid)}`}
+                            id="btn-message-student"
+                            className="inline-flex items-center gap-1.5 justify-center rounded-xl bg-terracotta-600 px-3.5 py-1.5 text-sm font-medium text-white transition hover:bg-terracotta-700 shadow-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-terracotta-500"
+                          >
+                            <MessageSquare className="h-4 w-4" />
+                            <span>Message</span>
+                          </Link>
                           <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-800 border border-emerald-200">
                             Connected
                           </span>

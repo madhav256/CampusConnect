@@ -12,6 +12,7 @@ const Discover = lazy(() => import("./pages/Discover"));
 const PublicProfile = lazy(() => import("./pages/PublicProfile"));
 const Connections = lazy(() => import("./pages/Connections"));
 const Notifications = lazy(() => import("./pages/Notifications"));
+const Messages = lazy(() => import("./pages/Messages"));
 const Settings = lazy(() => import("./pages/Settings"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
@@ -80,6 +81,22 @@ function App() {
               element={
                 <ProtectedRoute>
                   <Notifications />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/messages"
+              element={
+                <ProtectedRoute>
+                  <Messages />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/messages/:conversationId"
+              element={
+                <ProtectedRoute>
+                  <Messages />
                 </ProtectedRoute>
               }
             />

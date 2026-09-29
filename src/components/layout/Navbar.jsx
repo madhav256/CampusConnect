@@ -1,14 +1,16 @@
 import { useState } from "react";
 import { Link, NavLink } from "react-router-dom";
-import { Menu, X, Bell } from "lucide-react";
+import { Menu, X, Bell, MessageSquare } from "lucide-react";
 import { useAuth } from "../../hooks/useAuth";
 import { useNotifications } from "../../hooks/useNotifications";
+import { useConversations } from "../../hooks/useConversations";
 import Avatar from "../ui/Avatar";
 
 const navItems = [
   { to: "/dashboard", label: "Dashboard" },
   { to: "/discover", label: "Discover" },
   { to: "/connections", label: "Connections" },
+  { to: "/messages", label: "Messages", hasMessageBadge: true },
   { to: "/notifications", label: "Notifications", hasBadge: true },
   { to: "/settings", label: "Settings" },
   { to: "/profile", label: "Profile" },
@@ -17,6 +19,7 @@ const navItems = [
 export default function Navbar() {
   const { user } = useAuth();
   const { unreadCount } = useNotifications();
+  const { totalUnread: messageUnreadCount } = useConversations();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const getLinkClasses = ({ isActive }) =>
@@ -72,6 +75,14 @@ export default function Navbar() {
                   {unreadCount > 99 ? "99+" : unreadCount}
                 </span>
               )}
+              {item.hasMessageBadge && messageUnreadCount > 0 && (
+                <span
+                  className="inline-flex min-w-[1.25rem] items-center justify-center rounded-full bg-terracotta-600 px-1.5 py-0.5 text-xs font-semibold text-white"
+                  aria-label={`${messageUnreadCount} unread messages`}
+                >
+                  {messageUnreadCount > 99 ? "99+" : messageUnreadCount}
+                </span>
+              )}
             </NavLink>
           ))}
         </nav>
@@ -91,8 +102,22 @@ export default function Navbar() {
           </Link>
         </div>
 
-        {/* Mobile Hamburger & Badge Toggle */}
-        <div className="flex items-center gap-2 md:hidden">
+        {/* Mobile Message & Notification Badges + Hamburger */}
+        <div className="flex items-center gap-1 md:hidden">
+          {messageUnreadCount > 0 && (
+            <Link
+              to="/messages"
+              className="relative p-2 text-stone-600 hover:text-terracotta-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-terracotta-500 rounded-lg"
+              aria-label={`${messageUnreadCount} unread messages`}
+            >
+              <MessageSquare className="h-5 w-5" />
+              <span className="absolute top-1.5 right-1.5 flex h-2.5 w-2.5">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-terracotta-400 opacity-75"></span>
+                <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-terracotta-600"></span>
+              </span>
+            </Link>
+          )}
+
           {unreadCount > 0 && (
             <Link
               to="/notifications"
@@ -152,6 +177,11 @@ export default function Navbar() {
                 {item.hasBadge && unreadCount > 0 && (
                   <span className="inline-flex min-w-[1.25rem] items-center justify-center rounded-full bg-terracotta-600 px-2 py-0.5 text-xs font-semibold text-white">
                     {unreadCount > 99 ? "99+" : unreadCount}
+                  </span>
+                )}
+                {item.hasMessageBadge && messageUnreadCount > 0 && (
+                  <span className="inline-flex min-w-[1.25rem] items-center justify-center rounded-full bg-terracotta-600 px-2 py-0.5 text-xs font-semibold text-white">
+                    {messageUnreadCount > 99 ? "99+" : messageUnreadCount}
                   </span>
                 )}
               </NavLink>

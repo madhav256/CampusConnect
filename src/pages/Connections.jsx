@@ -11,6 +11,7 @@ import {
   cancelConnectionRequest,
   removeConnection,
 } from "../services/connectionService";
+import { getCanonicalConversationId } from "../services/messageService";
 import { fetchUserById } from "../services/userService";
 import Avatar from "../components/ui/Avatar";
 import Button from "../components/ui/Button";
@@ -144,6 +145,16 @@ function PersonCardInner({ doc, currentUid, otherUid, isBusy, err, act }) {
         >
           View Profile
         </Link>
+
+        {isConnected && (
+          <Link
+            to={`/messages/${getCanonicalConversationId(currentUid, otherUid)}`}
+            id={`btn-message-${otherUid}`}
+            className="inline-flex items-center justify-center rounded-xl bg-terracotta-600 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-terracotta-700 shadow-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-terracotta-500"
+          >
+            Message
+          </Link>
+        )}
 
         {isConnected && (
           isConfirmingRemove ? (

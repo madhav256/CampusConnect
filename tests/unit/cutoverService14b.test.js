@@ -286,7 +286,11 @@ describe("Milestone 14B - Cutover Service Implementation", () => {
       expect(mocks.limit).toHaveBeenCalledWith(50);
       expect(results).toHaveLength(2);
       expect(results[0].displayName).toBe("Alice Index");
-      expect(results[0].isDiscoverable).toBe(true);
+      expect(results[0].department).toBe("Computer Science");
+      expect(results[0].year).toBe("Junior");
+      expect(results[0].skills).toEqual(["React"]);
+      expect(results[0].isDiscoverable).toBeUndefined();
+      expect(results[0].email).toBeUndefined();
       expect(results[1].displayName).toBe("Bob Index");
     });
   });
@@ -377,8 +381,8 @@ describe("Milestone 14B - Cutover Service Implementation", () => {
     });
   });
 
-  describe("E. updateUserProfile — Atomic Dual-Write & Field Parity", () => {
-    it("mirrors legacy public fields and updates directoryIndex when discoverable", async () => {
+  describe("E. updateUserProfile — Strict Public Profile Authority & Directory Parity", () => {
+    it("writes public profile data to publicProfiles and synchronizes directoryIndex when discoverable without writing to users", async () => {
       mocks.getDoc.mockImplementation(async (ref) => {
         if (ref.path === "publicProfiles/edit-user-1") {
           return {
@@ -425,21 +429,15 @@ describe("Milestone 14B - Cutover Service Implementation", () => {
       expect(pubSetCall[1].bio).toBe("Updated bio");
       expect(pubSetCall[1].skills).toEqual(["JS", "TypeScript"]);
 
-      // 2. users legacy mirror update
+      // 2. users collection MUST NOT be written to during profile update (Strict Boundary)
       const userUpdateCall = mockBatch.update.mock.calls.find(
         (c) => c[0].path === "users/edit-user-1",
       );
-      expect(userUpdateCall).toBeDefined();
-      expect(userUpdateCall[1].displayName).toBe("Alice Updated");
-      expect(userUpdateCall[1].bio).toBe("Updated bio");
-      expect(userUpdateCall[1].skills).toEqual(["JS", "TypeScript"]);
-      // Forbidden fields MUST NOT be present in update payload:
-      expect(userUpdateCall[1]).not.toHaveProperty("uid");
-      expect(userUpdateCall[1]).not.toHaveProperty("email");
-      expect(userUpdateCall[1]).not.toHaveProperty("isDiscoverable");
-      expect(userUpdateCall[1]).not.toHaveProperty("notificationPreferences");
-      expect(userUpdateCall[1]).not.toHaveProperty("isDemo");
-      expect(userUpdateCall[1]).not.toHaveProperty("createdAt");
+      expect(userUpdateCall).toBeUndefined();
+      const userSetCall = mockBatch.set.mock.calls.find(
+        (c) => c[0].path === "users/edit-user-1",
+      );
+      expect(userSetCall).toBeUndefined();
 
       // 3. directoryIndex update
       const indexSetCall = mockBatch.set.mock.calls.find(
@@ -450,7 +448,7 @@ describe("Milestone 14B - Cutover Service Implementation", () => {
       expect(indexSetCall[1].skills).toEqual(["JS", "TypeScript"]);
     });
 
-    it("omits directoryIndex update when user is undiscoverable", async () => {
+    it("omits directoryIndex update when user is undiscoverable and writes only to publicProfiles", async () => {
       mocks.getDoc.mockImplementation(async (ref) => {
         if (ref.path === "publicProfiles/edit-user-2") {
           return {
@@ -471,11 +469,23 @@ describe("Milestone 14B - Cutover Service Implementation", () => {
         displayName: "Bob Updated",
       });
 
-      expect(mockBatch.commit).toHaveBeenCalledTimes(1);
-      const indexSetCall = mockBatch.set.mock.calls.find(
-        (c) => c[0].path === "directoryIndex/edit-user-2",
+      // When undiscoverable, single-document write to publicProfiles via setDoc
+      expect(mocks.setDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: "publicProfiles/edit-user-2" }),
+        expect.objectContaining({
+          uid: "edit-user-2",
+          displayName: "Bob Updated",
+        }),
+        { merge: true },
       );
-      expect(indexSetCall).toBeUndefined();
+      expect(mockBatch.commit).not.toHaveBeenCalled();
+
+      // Verify no writes occurred to users collection
+      expect(mocks.updateDoc).not.toHaveBeenCalled();
+      const userSetCall = mockBatch.set.mock.calls.find(
+        (c) => c[0].path === "users/edit-user-2",
+      );
+      expect(userSetCall).toBeUndefined();
     });
   });
 

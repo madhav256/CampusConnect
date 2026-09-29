@@ -1,6 +1,6 @@
 # CampusConnect Architecture
 
-**Status:** Current implementation reference (Milestone 14)
+**Status:** Current implementation reference (Milestone 14B / Milestone 15)
 
 This document describes the architecture that exists in the repository today. It does not describe proposed messaging, media storage, search infrastructure, or other deferred work.
 
@@ -37,7 +37,7 @@ The UI does not use a custom HTTP API or server-rendered backend. Firebase Admin
 | Database | Cloud Firestore |
 | Hosting | Firebase Hosting serving the Vite `dist` output |
 | Admin tooling | Firebase Admin SDK seeding script |
-| Quality checks | ESLint; production Vite build; development-only Firestore security audit panel |
+| Quality checks | ESLint; production Vite build; 53 Vitest unit tests (`npm run test:unit`); 97 Firestore Emulator security rules tests (`npm run test:rules`); development-only Firestore security audit panel |
 
 Firebase Storage is not part of the active client architecture. The Firebase configuration contains a storage-bucket value because it is part of the standard web configuration shape, but the application does not initialize the Storage SDK or upload files.
 
@@ -93,7 +93,7 @@ src/
 
 `AuthContext` owns the current authenticated user, authentication loading state, authentication errors, and the login, signup, logout, and password-reset commands. It configures browser-local Firebase Auth persistence and subscribes to `onAuthStateChanged`.
 
-When an authenticated user is observed, the context ensures a corresponding Firestore profile exists. Authentication identity and Firestore profile data are related but are not currently represented by separate public/private Firestore documents.
+When an authenticated user is observed, the context ensures corresponding Firestore documents exist across the locked three-collection architecture (`users/{uid}`, `publicProfiles/{uid}`, and `directoryIndex/{uid}`). Private account settings and public profile data are strictly decoupled at the Firestore document and security rule layer.
 
 ### Pages
 
@@ -104,8 +104,8 @@ The main page responsibilities are:
 - `Login` and `Register`: form validation and Auth commands.
 - `Dashboard`: authenticated shell around `Feed`.
 - `Profile`: profile display/edit form.
-- `PublicProfile`: point-read profile display and relationship CTA.
-- `Discover`: debounced student search and result grid.
+- `PublicProfile`: point-read profile display (from `publicProfiles/{uid}`) and relationship CTA.
+- `Discover`: debounced student search against `directoryIndex` and result grid.
 - `Connections`: relationship tabs and page-local person cards.
 - `Notifications`: all/unread filters and notification actions.
 - `Settings`: discoverability, notification preferences, sign out, and development audit panel.
@@ -139,9 +139,9 @@ Active hooks include:
 The service modules are the Firebase boundary:
 
 - `authService.js`: Firebase Auth persistence, subscriptions, login, signup, logout, reset, and Auth error normalization.
-- `userService.js`: profile creation, profile subscriptions, profile/settings updates, point reads, normalization, and bounded user-directory caching.
+- `userService.js`: cutover management, private profile and settings operations (`users/{uid}`), public profile operations (`publicProfiles/{uid}`), directory index queries (`directoryIndex`), normalization, self-healing projection logic, and bounded user-directory caching.
 - `postService.js`: post creation, newest-post subscription, deletion, and comment-counter updates.
-- `commentService.js`: authoritative profile lookup, canonical comment snapshots, comment subscriptions, plus batched comment create/delete and parent counter updates.
+- `commentService.js`: authoritative profile lookup from `publicProfiles/{uid}`, canonical comment snapshots, comment subscriptions, plus batched comment create/delete and parent counter updates.
 - `likeService.js`: atomic like/unlike transactions and the current user's like subscription.
 - `connectionService.js`: canonical relationship IDs, relationship transactions, notifications associated with connection transitions, and relationship subscriptions.
 - `notificationService.js`: recipient-scoped notification subscription, normalization, read updates, batch mark-as-read, and dismissal.
@@ -166,18 +166,18 @@ Each subscription is owned by a hook or service caller and is cleaned up on unmo
 
 The current read limits are deliberate MVP safeguards:
 
-- feed: newest 10 posts loaded initially, with pagination for older posts;
-- directory: newest 100 users ordered by `updatedAt`;
+- feed: newest 10 posts loaded initially with a real-time listener for newer posts, plus cursor-based pagination for older posts;
+- directory: newest 100 discoverable users fetched from `directoryIndex` ordered by `updatedAt`;
 - notifications: newest 30 notifications ordered by `createdAt`;
-- search: 300 ms input debounce, followed by client-side filtering across display name, department, year, and skills;
-- directory result cache: two-minute module-level cache in `userService.js`.
-
-The feed now uses cursor-based pagination for improved scalability while maintaining realtime updates for new posts.
+- search: 300 ms input debounce, followed by client-side filtering across display name, department, year, and skills over discoverable directory documents;
+- directory result cache: two-minute module-level cache in `userService.js`. External search infrastructure will be considered only when actual directory growth or observed query latency demonstrates a concrete need.
 
 ### Atomic writes
 
-- Likes use `runTransaction` to create/delete `posts/{postId}/likes/{uid}` and update `posts.likesCount` together.
-- Comments use `writeBatch` to create/delete a comment and update `posts.commentsCount` together.
+- Registration and self-heal: atomic write batch across `users/{uid}`, `publicProfiles/{uid}`, and `directoryIndex/{uid}` (when discoverable).
+- Settings updates: atomic batch syncing `isDiscoverable` in `users/{uid}` with creation or deletion of `directoryIndex/{uid}`.
+- Likes: `runTransaction` creating/deleting `posts/{postId}/likes/{uid}` and updating `posts.likesCount` together.
+- Comments: `writeBatch` creating/deleting a comment and updating `posts.commentsCount` together.
 - Connection requests, acceptance, rejection, cancellation, and removal use transactions.
 - Connection transactions may create or delete deterministic notification documents in the same transaction.
 
@@ -187,12 +187,14 @@ The client uses these atomic paths, while Firestore Rules remain the final autho
 
 The active collections are:
 
-- `users/{uid}` profiles, settings, and account metadata;
-- `posts/{postId}` text feed posts;
-- `posts/{postId}/comments/{commentId}` comments;
-- `posts/{postId}/likes/{uid}` individual likes;
-- `connections/{canonicalConnectionId}` one relationship document per pair;
-- `users/{uid}/notifications/{notificationId}` recipient-scoped connection notifications.
+- `users/{uid}`: private authority (exact 6 fields: `uid`, `email`, `isDiscoverable`, `notificationPreferences`, `createdAt`, `updatedAt`), owner-only read and write;
+- `publicProfiles/{uid}`: public profile authority (exact 8 fields: `uid`, `displayName`, `photoURL`, `bio`, `department`, `year`, `skills`, `socialLinks`), authenticated read, owner update;
+- `directoryIndex/{uid}`: search and discoverability projection (exact 7 fields: `uid`, `displayName`, `photoURL`, `department`, `year`, `skills`, `updatedAt`), authenticated read, maintained atomically when `isDiscoverable == true`;
+- `posts/{postId}`: text feed posts;
+- `posts/{postId}/comments/{commentId}`: comments;
+- `posts/{postId}/likes/{uid}`: individual likes;
+- `connections/{canonicalConnectionId}`: one relationship document per pair;
+- `users/{uid}/notifications/{notificationId}`: recipient-scoped connection notifications.
 
 The full field-level schema and current rule behavior are documented in [FIRESTORE_SCHEMA.md](FIRESTORE_SCHEMA.md).
 
@@ -201,7 +203,9 @@ The full field-level schema and current rule behavior are documented in [FIRESTO
 The browser is treated as untrusted. Firestore Rules enforce the active authorization model, including:
 
 - authenticated access to application data where permitted;
-- strict user creation/resulting-document schemas, owner-only updates, and immutable identity fields;
+- strict private user document schema (6 fields), owner-only access, immutable identity fields (`uid`, `email`, `createdAt`), and strict update constraints;
+- strict public profile schema (8 fields), authenticated reads, and owner-only updates;
+- directory index projection synced atomically to `isDiscoverable`;
 - author-restricted post deletion and no generic post editing;
 - exact like document schemas and transaction-coupled like counters;
 - canonical comment snapshots, denied comment updates, and child/parent counter coupling;
@@ -223,12 +227,10 @@ The recruiter demo uses a normal Firebase Auth account configured through `VITE_
 
 ## Current limitations
 
-- Pure helper tests and an isolated Firestore Emulator Rules suite are configured for the current domains.
-- Service integration tests, end-to-end tests, and a CI pipeline are not configured.
+- 53 unit tests and 97 Firestore Emulator rules tests are active; service integration tests, end-to-end tests, and a CI pipeline are deferred.
 - Email verification is not required after sign-up.
-- Public/private profile data share the `users/{uid}` document, and authenticated profile reads currently include the email field even though public UI components do not render it.
-- Search discoverability is filtered in the client; direct authenticated profile reads remain available by product policy.
-- The feed, directory, and notification reads are bounded rather than paginated (except feed which now uses cursor-based pagination).
+- Non-discoverable students are excluded from `directoryIndex` search queries; authenticated direct public profile reads (`/users/:uid`) remain accessible by design.
+- Notifications are bounded to the newest 30 items rather than cursor-paginated.
 - No media upload or Firebase Storage integration exists.
 - No post editing, post sharing, post search, bookmarks, private messaging, clubs, events, marketplace, or direct account deletion exists.
 - Notification generation currently originates in client connection transactions rather than a trusted background event processor.
@@ -238,8 +240,7 @@ The recruiter demo uses a normal Firebase Auth account configured through `VITE_
 
 The following are possible later milestones and should not be treated as active architecture:
 
-- service integration, end-to-end, and CI verification beyond the current emulator Rules suite;
-- separate public profile and private account/settings documents;
+- service integration, end-to-end, and CI verification beyond the current unit and emulator Rules suites;
 - trusted server-side event processing for notifications;
 - a minimal connection-gated one-to-one messaging model;
 - media storage with separate Storage Rules and lifecycle cleanup.

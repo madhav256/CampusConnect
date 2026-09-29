@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { subscribeToNewerPosts, fetchOlderPosts, createPost, deletePost, subscribeToEmptyFeed, subscribeToPostUpdatesInRange } from "../services/postService";
 import { useAuth } from "./useAuth";
 import { POSTS_PER_PAGE } from "../constants";
@@ -40,15 +40,17 @@ export function usePosts() {
 
 
   // Derive posts array from genuine DocumentSnapshots and local updates
-  const posts = (postsDocs || []).map(doc => {
-    const docData = doc.data();
-    const updates = postUpdates.get(doc.id) || {};
-    return {
-      id: doc.id,
-      ...docData,
-      ...updates,
-    };
-  });
+  const posts = useMemo(() => {
+    return (postsDocs || []).map(doc => {
+      const docData = doc.data();
+      const updates = postUpdates.get(doc.id) || {};
+      return {
+        id: doc.id,
+        ...docData,
+        ...updates,
+      };
+    });
+  }, [postsDocs, postUpdates]);
 
   // Function to update a specific post's data (for like/comment count updates)
   const updatePost = useCallback((postId, updates) => {

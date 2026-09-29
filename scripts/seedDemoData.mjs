@@ -75,11 +75,20 @@ function initializeAdminApp() {
 
   const serviceAccountKeyPath = path.join(__dirname, "credentials", "serviceAccountKey.json");
   const projectId =
+    process.env.GCLOUD_PROJECT ||
     process.env.VITE_FIREBASE_PROJECT_ID ||
     process.env.FIREBASE_PROJECT_ID ||
     "campusconnect-cf191";
 
-  // Option 1: Local git-ignored service account key
+  // Option 1: Local Firebase Emulator (if running)
+  if (process.env.FIRESTORE_EMULATOR_HOST) {
+    console.log(`[seed] Using Firestore Emulator at ${process.env.FIRESTORE_EMULATOR_HOST}`);
+    return initializeApp({
+      projectId: projectId || "demo-campusconnect",
+    });
+  }
+
+  // Option 2: Local git-ignored service account key
   if (fs.existsSync(serviceAccountKeyPath)) {
     console.log(`[seed] Using local service account file at scripts/credentials/serviceAccountKey.json`);
     const serviceAccount = JSON.parse(fs.readFileSync(serviceAccountKeyPath, "utf-8"));
@@ -89,20 +98,12 @@ function initializeAdminApp() {
     });
   }
 
-  // Option 2: GOOGLE_APPLICATION_CREDENTIALS
+  // Option 3: GOOGLE_APPLICATION_CREDENTIALS
   if (process.env.GOOGLE_APPLICATION_CREDENTIALS && fs.existsSync(process.env.GOOGLE_APPLICATION_CREDENTIALS)) {
     console.log(`[seed] Using GOOGLE_APPLICATION_CREDENTIALS at ${process.env.GOOGLE_APPLICATION_CREDENTIALS}`);
     return initializeApp({
       credential: applicationDefault(),
       projectId,
-    });
-  }
-
-  // Option 3: Local Firebase Emulator (if running)
-  if (process.env.FIRESTORE_EMULATOR_HOST) {
-    console.log(`[seed] Using Firestore Emulator at ${process.env.FIRESTORE_EMULATOR_HOST}`);
-    return initializeApp({
-      projectId: projectId || "demo-campusconnect",
     });
   }
 
@@ -124,9 +125,54 @@ function initializeAdminApp() {
   }
 }
 
+// 14B Projection Helpers
+function toPrivateUserDoc(student, uid, timestamp) {
+  return {
+    uid,
+    email: student.email,
+    isDiscoverable: student.isDiscoverable !== false,
+    notificationPreferences: {
+      connectionRequests: student.notificationPreferences?.connectionRequests !== false,
+      connectionAccepted: student.notificationPreferences?.connectionAccepted !== false,
+    },
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+}
+
+function toPublicProfileDoc(student, uid) {
+  return {
+    uid,
+    displayName: student.displayName,
+    photoURL: student.photoURL || null,
+    bio: student.bio || "",
+    department: student.department || "",
+    year: student.year || "",
+    skills: Array.isArray(student.skills) ? student.skills : [],
+    socialLinks: {
+      github: student.socialLinks?.github || "",
+      linkedin: student.socialLinks?.linkedin || "",
+      portfolio: student.socialLinks?.portfolio || "",
+      website: student.socialLinks?.website || "",
+    },
+  };
+}
+
+function toDirectoryIndexDoc(student, uid, timestamp) {
+  return {
+    uid,
+    displayName: student.displayName,
+    photoURL: student.photoURL || null,
+    department: student.department || "",
+    year: student.year || "",
+    skills: Array.isArray(student.skills) ? student.skills : [],
+    updatedAt: timestamp,
+  };
+}
+
 async function seedDemoEnvironment() {
   console.log("=================================================");
-  console.log("  CampusConnect — Milestone 12A Demo Seeding     ");
+  console.log("  CampusConnect — Milestone 14B Demo Seeding     ");
   console.log("=================================================");
 
   let app;
@@ -195,37 +241,56 @@ async function seedDemoEnvironment() {
 
   const now = Timestamp.now();
 
-  // 2. Seed Primary Student Profile (Alex Rivera)
-  console.log(`\n[firestore] Seeding primary student profile at users/${demoAuthUid}...`);
-  const primaryDocRef = db.collection("users").doc(demoAuthUid);
-  await primaryDocRef.set(
-    {
-      ...DEMO_PRIMARY_STUDENT,
-      uid: demoAuthUid,
-      createdAt: now,
-      updatedAt: now,
-    },
+  // 2. Seed Primary Student Profile (Alex Rivera) across 14B collections
+  console.log(`\n[firestore] Seeding primary student profile across 14B collections for UID ${demoAuthUid}...`);
+  const primaryPrivateRef = db.collection("users").doc(demoAuthUid);
+  const primaryPublicRef = db.collection("publicProfiles").doc(demoAuthUid);
+  const primaryDirRef = db.collection("directoryIndex").doc(demoAuthUid);
+
+  await primaryPrivateRef.set(
+    toPrivateUserDoc(DEMO_PRIMARY_STUDENT, demoAuthUid, now),
     { merge: true }
   );
-  console.log(`[firestore] Primary student profile seeded.`);
+  await primaryPublicRef.set(
+    toPublicProfileDoc(DEMO_PRIMARY_STUDENT, demoAuthUid),
+    { merge: true }
+  );
+  if (DEMO_PRIMARY_STUDENT.isDiscoverable !== false) {
+    await primaryDirRef.set(
+      toDirectoryIndexDoc(DEMO_PRIMARY_STUDENT, demoAuthUid, now),
+      { merge: true }
+    );
+  }
+  console.log(`[firestore] Primary student profile seeded (users, publicProfiles, directoryIndex).`);
 
-  // 3. Seed 7 Peer Profiles (Firestore-only peer documents, verified whitelist)
-  console.log(`\n[firestore] Seeding 7 peer student profiles...`);
+  // 3. Seed 7 Peer Profiles (Firestore-only peer documents, verified whitelist) across 14B collections
+  console.log(`\n[firestore] Seeding 7 peer student profiles across 14B collections...`);
   for (const peer of DEMO_PEER_PROFILES) {
     if (!DEMO_PEER_IDS.has(peer.uid)) {
       throw new Error(`Safety whitelist violation: ${peer.uid} is not in DEMO_PEER_IDS!`);
     }
 
-    const peerDocRef = db.collection("users").doc(peer.uid);
-    await peerDocRef.set(
-      {
-        ...peer,
-        createdAt: now,
-        updatedAt: now,
-      },
+    const peerPrivateRef = db.collection("users").doc(peer.uid);
+    const peerPublicRef = db.collection("publicProfiles").doc(peer.uid);
+    const peerDirRef = db.collection("directoryIndex").doc(peer.uid);
+
+    await peerPrivateRef.set(
+      toPrivateUserDoc(peer, peer.uid, now),
       { merge: true }
     );
-    console.log(`  ✓ Seeded peer: ${peer.displayName} (${peer.uid})`);
+    await peerPublicRef.set(
+      toPublicProfileDoc(peer, peer.uid),
+      { merge: true }
+    );
+    if (peer.isDiscoverable !== false) {
+      await peerDirRef.set(
+        toDirectoryIndexDoc(peer, peer.uid, now),
+        { merge: true }
+      );
+    } else {
+      await peerDirRef.delete().catch(() => {});
+    }
+    console.log(`  ✓ Seeded peer: ${peer.displayName} (${peer.uid}) [users, publicProfiles, directoryIndex]`);
   }
 
   // 4. Seed 10 Feed Posts with Comments and Likes (verified whitelist)

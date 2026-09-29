@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, memo } from "react";
 import { Heart, MessageSquare } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import Card from "../ui/Card";
@@ -21,7 +21,7 @@ function formatTimestamp(timestamp) {
   }).format(date);
 }
 
-export default function PostCard({ post, currentUserId, onDelete, updatePost }) {
+function PostCard({ post, currentUserId, onDelete, updatePost }) {
   const [showComments, setShowComments] = useState(false);
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -160,3 +160,5 @@ export default function PostCard({ post, currentUserId, onDelete, updatePost }) 
     </Card>
   );
 }
+
+export default memo(PostCard);

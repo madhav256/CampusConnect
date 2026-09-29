@@ -43,9 +43,185 @@ import {
   updateUserProfile,
   updateUserSettings,
   subscribeToUserProfile,
+  normalizePublicProfile,
+  normalizeUserSettings,
 } from "../../src/services/userService.js";
 
-describe("Milestone 14B - Cutover Service Implementation", () => {
+describe("userService — Pure Normalizers & Projections", () => {
+  describe("normalizePublicProfile", () => {
+    it("strictly produces the 8 frozen public profile fields", () => {
+      const rawData = {
+        uid: "student-1",
+        displayName: "Jane Doe",
+        photoURL: "https://example.test/avatar.jpg",
+        bio: "CS Sophomore passionate about AI",
+        department: "Computer Science",
+        year: "Sophomore",
+        skills: ["React", "Python"],
+        socialLinks: {
+          github: "https://github.com/janedoe",
+          linkedin: "https://linkedin.com/in/janedoe",
+          portfolio: "https://janedoe.me",
+          website: "https://janedoe.com",
+        },
+        // Private/forbidden fields that MUST NOT leak:
+        email: "jane@university.edu",
+        isDiscoverable: true,
+        notificationPreferences: { connectionRequests: true, connectionAccepted: true },
+        isDemo: true,
+        createdAt: { seconds: 1700000000 },
+        updatedAt: { seconds: 1700000000 },
+        extraSecretField: "secret",
+      };
+
+      const publicProfile = normalizePublicProfile("student-1", rawData);
+
+      // Exactly 8 keys allowed
+      expect(Object.keys(publicProfile).sort()).toEqual([
+        "bio",
+        "department",
+        "displayName",
+        "photoURL",
+        "skills",
+        "socialLinks",
+        "uid",
+        "year",
+      ]);
+
+      expect(publicProfile).toEqual({
+        uid: "student-1",
+        displayName: "Jane Doe",
+        photoURL: "https://example.test/avatar.jpg",
+        bio: "CS Sophomore passionate about AI",
+        department: "Computer Science",
+        year: "Sophomore",
+        skills: ["React", "Python"],
+        socialLinks: {
+          github: "https://github.com/janedoe",
+          linkedin: "https://linkedin.com/in/janedoe",
+          portfolio: "https://janedoe.me",
+          website: "https://janedoe.com",
+        },
+      });
+
+      // Explicitly verify forbidden fields are absent
+      expect(publicProfile).not.toHaveProperty("email");
+      expect(publicProfile).not.toHaveProperty("isDiscoverable");
+      expect(publicProfile).not.toHaveProperty("notificationPreferences");
+      expect(publicProfile).not.toHaveProperty("isDemo");
+      expect(publicProfile).not.toHaveProperty("createdAt");
+      expect(publicProfile).not.toHaveProperty("updatedAt");
+    });
+
+    it("handles null/missing raw data with safe defaults", () => {
+      const publicProfile = normalizePublicProfile("student-2", null);
+
+      expect(publicProfile).toEqual({
+        uid: "student-2",
+        displayName: "CampusConnect Student",
+        photoURL: null,
+        bio: "",
+        department: "Department not added",
+        year: "Academic year not added",
+        skills: [],
+        socialLinks: {
+          github: "",
+          linkedin: "",
+          portfolio: "",
+          website: "",
+        },
+      });
+    });
+  });
+
+  describe("normalizeUserSettings", () => {
+    it("normalizes settings while preserving explicit false values", () => {
+      const rawData = {
+        email: "alice@example.test",
+        isDiscoverable: false,
+        notificationPreferences: {
+          connectionRequests: false,
+          connectionAccepted: true,
+        },
+        // Public fields that must not be in settings
+        displayName: "Should Not Be Here",
+        bio: "Should Not Be Here",
+      };
+
+      const settings = normalizeUserSettings("student-1", rawData);
+
+      expect(settings).toEqual({
+        uid: "student-1",
+        email: "alice@example.test",
+        isDiscoverable: false,
+        notificationPreferences: {
+          connectionRequests: false,
+          connectionAccepted: true,
+        },
+        createdAt: null,
+        updatedAt: null,
+      });
+
+      expect(settings).not.toHaveProperty("displayName");
+      expect(settings).not.toHaveProperty("bio");
+    });
+
+    it("uses default settings when raw data is absent", () => {
+      const settings = normalizeUserSettings("student-2", null);
+
+      expect(settings).toEqual({
+        uid: "student-2",
+        email: "",
+        isDiscoverable: true,
+        notificationPreferences: {
+          connectionRequests: true,
+          connectionAccepted: true,
+        },
+        createdAt: null,
+        updatedAt: null,
+      });
+    });
+  });
+
+  describe("directoryIndex projection derivation", () => {
+    it("derives directoryIndex fields directly from publicProfiles", () => {
+      const publicProfile = normalizePublicProfile("student-3", {
+        displayName: "Alex Smith",
+        photoURL: null,
+        bio: "Electrical engineering student",
+        department: "Electrical Engineering",
+        year: "Junior",
+        skills: ["Embedded", "C++"],
+        socialLinks: { github: "https://github.com/alex", linkedin: "", portfolio: "", website: "" },
+      });
+
+      // Derive directoryIndex projection
+      const directoryDoc = {
+        uid: publicProfile.uid,
+        displayName: publicProfile.displayName,
+        photoURL: publicProfile.photoURL,
+        department: publicProfile.department,
+        year: publicProfile.year,
+        skills: publicProfile.skills,
+      };
+
+      expect(directoryDoc).toEqual({
+        uid: "student-3",
+        displayName: "Alex Smith",
+        photoURL: null,
+        department: "Electrical Engineering",
+        year: "Junior",
+        skills: ["Embedded", "C++"],
+      });
+
+      // Ensure directoryIndex does not include bio or socialLinks
+      expect(directoryDoc).not.toHaveProperty("bio");
+      expect(directoryDoc).not.toHaveProperty("socialLinks");
+    });
+  });
+});
+
+describe("userService — Firestore Service Methods", () => {
   let mockBatch;
 
   beforeEach(() => {
@@ -59,11 +235,11 @@ describe("Milestone 14B - Cutover Service Implementation", () => {
     mocks.writeBatch.mockReturnValue(mockBatch);
   });
 
-  describe("A. fetchUserById — Exclusive publicProfiles Read Path", () => {
+  describe("fetchUserById — Exclusive publicProfiles Read Path", () => {
     it("returns public profile when publicProfiles document exists", async () => {
       const publicData = {
         uid: "user-1",
-        displayName: "Cutover Alice",
+        displayName: "Alice Student",
         photoURL: "https://avatar.test/alice.jpg",
         bio: "Alice bio",
         department: "Computer Science",
@@ -82,7 +258,7 @@ describe("Milestone 14B - Cutover Service Implementation", () => {
       const profile = await fetchUserById("user-1");
 
       expect(profile).not.toBeNull();
-      expect(profile.displayName).toBe("Cutover Alice");
+      expect(profile.displayName).toBe("Alice Student");
       expect(profile.department).toBe("Computer Science");
       expect(profile.skills).toEqual(["React", "Firebase"]);
       expect(profile.uid).toBe("user-1");
@@ -94,12 +270,12 @@ describe("Milestone 14B - Cutover Service Implementation", () => {
     it("returns null when publicProfiles document is missing (no fallback to users)", async () => {
       mocks.getDoc.mockResolvedValue({ exists: () => false, data: () => null });
 
-      const profile = await fetchUserById("unmigrated-uid");
+      const profile = await fetchUserById("missing-uid");
 
       expect(profile).toBeNull();
       expect(mocks.getDoc).toHaveBeenCalledTimes(1);
-      expect(mocks.doc).toHaveBeenCalledWith(mocks.mockDb, "publicProfiles", "unmigrated-uid");
-      expect(mocks.doc).not.toHaveBeenCalledWith(mocks.mockDb, "users", "unmigrated-uid");
+      expect(mocks.doc).toHaveBeenCalledWith(mocks.mockDb, "publicProfiles", "missing-uid");
+      expect(mocks.doc).not.toHaveBeenCalledWith(mocks.mockDb, "users", "missing-uid");
     });
 
     it("propagates read error from publicProfiles without catching or falling back to users", async () => {
@@ -120,7 +296,7 @@ describe("Milestone 14B - Cutover Service Implementation", () => {
     });
   });
 
-  describe("B. subscribeToUserProfile — Exclusive Split Subscriptions", () => {
+  describe("subscribeToUserProfile — Exclusive Split Subscriptions", () => {
     it("sources public profile from publicProfiles and private settings from users", () => {
       let userCb, publicCb;
       mocks.onSnapshot.mockImplementation((ref, onNext) => {
@@ -206,7 +382,7 @@ describe("Milestone 14B - Cutover Service Implementation", () => {
 
       expect(callback).toHaveBeenCalledTimes(1);
       const emitted = callback.mock.calls[0][0];
-      // Under Cutover, missing publicProfiles returns default public values, NOT users legacy data
+      // Missing publicProfiles returns default public values, NOT users legacy data
       expect(emitted.displayName).toBe("CampusConnect Student");
       expect(emitted.bio).toBe("");
       expect(emitted.department).toBe("Department not added");
@@ -251,7 +427,7 @@ describe("Milestone 14B - Cutover Service Implementation", () => {
     });
   });
 
-  describe("C. fetchAllUsers — directoryIndex Exclusive Query Path", () => {
+  describe("fetchAllUsers — directoryIndex Exclusive Query Path", () => {
     it("queries directoryIndex exclusively and never queries users", async () => {
       const mockDocs = [
         {
@@ -295,7 +471,7 @@ describe("Milestone 14B - Cutover Service Implementation", () => {
     });
   });
 
-  describe("D. createUserProfile — Tri-Collection Write Parity", () => {
+  describe("createUserProfile — Tri-Collection Write Parity", () => {
     it("atomically establishes users, publicProfiles, and directoryIndex when discoverable", async () => {
       mocks.getDoc.mockResolvedValue({ exists: () => false, data: () => null });
 
@@ -310,7 +486,7 @@ describe("Milestone 14B - Cutover Service Implementation", () => {
       expect(mocks.writeBatch).toHaveBeenCalled();
       expect(mockBatch.commit).toHaveBeenCalledTimes(1);
 
-      // 1. users/{uid} set call: contains full legacy shape + private fields
+      // 1. users/{uid} set call: private schema fields
       const userSetCall = mockBatch.set.mock.calls.find(
         (c) => c[0].path === "users/new-user-1",
       );
@@ -381,7 +557,7 @@ describe("Milestone 14B - Cutover Service Implementation", () => {
     });
   });
 
-  describe("E. updateUserProfile — Strict Public Profile Authority & Directory Parity", () => {
+  describe("updateUserProfile — Strict Public Profile Authority & Directory Parity", () => {
     it("writes public profile data to publicProfiles and synchronizes directoryIndex when discoverable without writing to users", async () => {
       mocks.getDoc.mockImplementation(async (ref) => {
         if (ref.path === "publicProfiles/edit-user-1") {
@@ -489,7 +665,7 @@ describe("Milestone 14B - Cutover Service Implementation", () => {
     });
   });
 
-  describe("F. Discoverability Transitions", () => {
+  describe("Discoverability Transitions", () => {
     it("creates directoryIndex projection when toggling isDiscoverable false -> true", async () => {
       mocks.getDoc.mockImplementation(async (ref) => {
         if (ref.path === "publicProfiles/toggle-user") {
@@ -545,7 +721,7 @@ describe("Milestone 14B - Cutover Service Implementation", () => {
     });
   });
 
-  describe("G. Notifications & Privacy Boundary", () => {
+  describe("Notifications & Privacy Boundary", () => {
     it("stores notificationPreferences strictly in users collection without leaking to publicProfiles or directoryIndex", async () => {
       await updateUserSettings("notif-user", {
         notificationPreferences: {

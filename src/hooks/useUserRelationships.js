@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useAuth } from "./useAuth";
 import { subscribeToUserRelationships } from "../services/connectionService";
 
@@ -44,12 +44,17 @@ export function useUserRelationships() {
     return () => unsubscribe();
   }, [currentUid]);
 
-  const connections = docs.filter((d) => d.status === "accepted");
-  const incomingRequests = docs.filter(
-    (d) => d.status === "pending" && d.receiverId === currentUid
+  const connections = useMemo(
+    () => docs.filter((d) => d.status === "accepted"),
+    [docs]
   );
-  const outgoingRequests = docs.filter(
-    (d) => d.status === "pending" && d.senderId === currentUid
+  const incomingRequests = useMemo(
+    () => docs.filter((d) => d.status === "pending" && d.receiverId === currentUid),
+    [docs, currentUid]
+  );
+  const outgoingRequests = useMemo(
+    () => docs.filter((d) => d.status === "pending" && d.senderId === currentUid),
+    [docs, currentUid]
   );
 
   return { connections, incomingRequests, outgoingRequests, isLoading, error };

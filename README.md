@@ -38,7 +38,7 @@ The demo login is a normal unprivileged Firebase Auth account. The seeding scrip
 ### Feed and interactions
 
 - Real-time text feed at `/dashboard`.
-- Feed subscription limited to the newest 50 posts.
+- Real-time subscription to newer posts merged with cursor-based pagination for older posts.
 - Post creation and author-only deletion.
 - Real-time comments with author-only deletion.
 - Atomic like/unlike transactions with a denormalized `likesCount`.
@@ -46,8 +46,8 @@ The demo login is a normal unprivileged Firebase Auth account. The seeding scrip
 
 ### Discovery and connections
 
-- `/discover` searches a bounded set of up to 100 users across name, department, year, and skills.
-- Search is debounced and filters non-discoverable profiles on the client.
+- `/discover` searches the `directoryIndex` projection of discoverable students across name, department, year, and skills.
+- Search is debounced (300 ms) and operates over discoverable profiles.
 - `/connections` shows accepted connections and incoming/outgoing pending requests.
 - Connection IDs use a lexicographically sorted pair of UIDs, ensuring one relationship document per student pair.
 - Supported lifecycle: send, cancel, accept, decline, and remove.
@@ -103,6 +103,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the runtime flow and [FIRESTORE_SCHEM
 
 ## Security and data model highlights
 
+- Strict three-collection boundary: `users/{uid}` (private authority, owner-only), `publicProfiles/{uid}` (public-profile authority, authenticated read), and `directoryIndex/{uid}` (discoverability search projection).
 - `posts/{postId}/likes/{uid}` stores individual likes instead of an unbounded user-ID array.
 - Like and post-counter updates run in a Firestore transaction.
 - Comment create/delete operations update the parent counter in a write batch.
@@ -110,15 +111,15 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the runtime flow and [FIRESTORE_SCHEM
 - Connection Rules restrict pending creation, receiver-only acceptance, and participant deletion.
 - Notifications live under `users/{recipientUid}/notifications` and list reads are recipient-scoped.
 - Notification creation is tied by Rules to the corresponding connection transaction.
-- User identity fields and selected settings types are validated by Rules.
+- User identity fields, setting types, and exact post schemas are strictly validated by Rules.
 
-The current `users/{uid}` document contains both profile and account/settings fields. Public UI components do not render email, but authenticated profile reads currently return the full document; a stronger public/private data split is future work.
+Private account settings (`users/{uid}`) and public profile fields (`publicProfiles/{uid}`) are strictly decoupled at the Firestore document and security rule layer, ensuring private data like email cannot be accessed by other clients.
 
 ## Current limitations
 
-- No automated unit, integration, emulator, end-to-end, or CI test suite.
-- Feed, directory, and notification reads are bounded rather than cursor-paginated.
-- Discovery uses client-side filtering rather than full-text/fuzzy indexing.
+- Automated test suites include 53 Vitest unit tests and 97 Firestore Emulator rules tests; service integration, end-to-end, and a CI pipeline remain deferred.
+- Directory and notification reads are bounded rather than cursor-paginated (the campus feed supports cursor pagination).
+- Discovery uses client-side filtering over the `directoryIndex` projection rather than an external search index.
 - No Firebase Storage integration or media uploads.
 - No post editing, sharing, search, or bookmarks.
 - No private messaging, presence, read receipts, clubs, events, marketplace, or internship board.
@@ -180,19 +181,19 @@ The seeder uses explicit demo ID whitelists, merge-only writes, and no bulk dele
 
 ## Verification commands
 
-Pure helper tests run without Firebase:
+Unit tests run via Vitest (53 passing tests):
 
 ```bash
 npm run test:unit
 ```
 
-Firestore Rules tests run only inside the fixed synthetic emulator project `demo-campusconnect-rules-test`:
+Firestore Rules tests run inside the fixed synthetic emulator project `demo-campusconnect-rules-test` (97 passing tests):
 
 ```bash
 npm run test:rules
 ```
 
-The Rules command starts and stops the Firestore Emulator automatically. It does not read `.env.local`, use service-account credentials, invoke the demo seeder, or connect to the recruiter project. The Rules suite contains green regression tests plus explicitly labeled tests documenting current 13C Rules gaps.
+The Rules command starts and stops the Firestore Emulator automatically. It does not read `.env.local`, use service-account credentials, invoke the demo seeder, or connect to the recruiter project. The Rules suite runs 97 passing security regression tests verifying strict schemas, permissions, immutability, and state transitions.
 
 The broader local checks are:
 

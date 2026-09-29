@@ -10,7 +10,7 @@ import EmptyState from "../components/ui/EmptyState";
 
 export default function Discover() {
   const [searchTerm, setSearchTerm] = useState("");
-  const { results, isLoading, error, debouncedTerm } = useUserSearch(searchTerm);
+  const { results, isLoading, error, debouncedTerm, retry } = useUserSearch(searchTerm);
 
   const trimmedTerm = debouncedTerm.trim();
   const isQueryTooShort = trimmedTerm.length < 2;
@@ -102,7 +102,7 @@ export default function Discover() {
             <p className="mt-1 text-sm text-ink-muted">{error}</p>
             <button
               type="button"
-              onClick={() => setSearchTerm((prev) => prev)}
+              onClick={retry}
               className="mt-4 inline-flex items-center justify-center rounded-xl bg-terracotta-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-terracotta-700"
             >
               Try Again

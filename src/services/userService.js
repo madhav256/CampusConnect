@@ -14,24 +14,7 @@ import {
 } from "firebase/firestore";
 import { db, isFirebaseConfigured } from "../firebase/config";
 
-const defaultProfile = {
-  photoURL: null,
-  bio: "",
-  department: "",
-  year: "",
-  skills: [],
-  socialLinks: {
-    github: "",
-    linkedin: "",
-    portfolio: "",
-    website: "",
-  },
-  isDiscoverable: true,
-  notificationPreferences: {
-    connectionRequests: true,
-    connectionAccepted: true,
-  },
-};
+
 
 function requireDb() {
   if (!isFirebaseConfigured || !db) {
@@ -89,31 +72,6 @@ export function normalizeUserSettings(uid, data) {
   };
 }
 
-export function normalizeProfile(uid, data) {
-  return {
-    uid,
-    displayName: data?.displayName || "CampusConnect Student",
-    email: data?.email || "",
-    photoURL: data?.photoURL || null,
-    bio: data?.bio || "",
-    department: data?.department || "Department not added",
-    year: data?.year || "Academic year not added",
-    skills: Array.isArray(data?.skills) ? data.skills : [],
-    socialLinks: {
-      ...defaultProfile.socialLinks,
-      ...(data?.socialLinks || {}),
-    },
-    isDiscoverable: data?.isDiscoverable !== false,
-    notificationPreferences: {
-      connectionRequests:
-        data?.notificationPreferences?.connectionRequests !== false,
-      connectionAccepted:
-        data?.notificationPreferences?.connectionAccepted !== false,
-    },
-    createdAt: data?.createdAt || null,
-    updatedAt: data?.updatedAt || null,
-  };
-}
 
 export async function createUserProfile({ uid, displayName, email, photoURL, isDiscoverable = true }) {
   const uRef = userDocRef(uid);

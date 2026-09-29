@@ -1,11 +1,9 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { fetchAllUsers } from "../services/userService";
-import { useAuth } from "./useAuth";
 
 export function useUserSearch(searchTerm = "") {
-  const { user: authUser } = useAuth();
-  const currentUid = authUser?.uid;
   const [debouncedTerm, setDebouncedTerm] = useState(searchTerm);
+  const [retryTrigger, setRetryTrigger] = useState(0);
   const [searchResults, setSearchResults] = useState({
     term: "",
     users: [],
@@ -26,6 +24,16 @@ export function useUserSearch(searchTerm = "") {
 
   const trimmed = debouncedTerm.trim();
   const isQueryValid = trimmed.length >= 2;
+
+  const retry = useCallback(() => {
+    setSearchResults({
+      term: "",
+      users: [],
+      loading: true,
+      error: null,
+    });
+    setRetryTrigger((prev) => prev + 1);
+  }, []);
 
   useEffect(() => {
     if (!isQueryValid) {
@@ -71,12 +79,12 @@ export function useUserSearch(searchTerm = "") {
     return () => {
       isMounted = false;
     };
-  }, [trimmed, isQueryValid, currentUid]);
+  }, [trimmed, isQueryValid, retryTrigger]);
 
   const isCurrentTerm = searchResults.term === trimmed;
   const results = isQueryValid && isCurrentTerm ? searchResults.users : [];
   const isLoading = isQueryValid && (!isCurrentTerm || searchResults.loading);
   const error = isQueryValid && isCurrentTerm ? searchResults.error : null;
 
-  return { results, isLoading, error, debouncedTerm };
+  return { results, isLoading, error, debouncedTerm, retry };
 }

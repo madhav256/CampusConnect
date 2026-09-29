@@ -3,7 +3,6 @@ import {
   addDoc,
   deleteDoc,
   doc,
-  increment,
   limit,
   onSnapshot,
   orderBy,
@@ -13,12 +12,10 @@ import {
   startAt,
   endBefore,
   endAt,
-  updateDoc,
   getDocs
 } from "firebase/firestore";
 
 import { db, isFirebaseConfigured } from "../firebase/config";
-import { POSTS_PER_PAGE } from "../constants";
 
 function requireDb() {
   if (!isFirebaseConfigured || !db) {
@@ -106,26 +103,6 @@ export function subscribeToEmptyFeed(callback, onError) {
   );
 }
 
-export function subscribeToBootstrapPosts(callback, onError) {
-  const postsRef = collection(requireDb(), "posts");
-  const BOOTSTRAP_LIMIT = POSTS_PER_PAGE * 3;
-  const q = query(
-    postsRef,
-    orderBy("createdAt", "desc"),
-    limit(BOOTSTRAP_LIMIT)
-  );
-
-  // Returns DocumentSnapshots in the callback
-  return onSnapshot(
-    q,
-    (snapshot) => {
-      // snapshot.docs is an array of DocumentSnapshot, newest first due to desc sort
-      callback(snapshot.docs);
-    },
-    onError
-  );
-}
-
 export function subscribeToPostUpdatesInRange(newestDoc, oldestDoc, callback, onError) {
   if (!newestDoc || !oldestDoc) {
     return () => {};
@@ -150,12 +127,4 @@ export function subscribeToPostUpdatesInRange(newestDoc, oldestDoc, callback, on
     },
     onError
   );
-}
-
-export async function updateCommentsCount(postId, amount) {
-  const postRef = doc(requireDb(), "posts", postId);
-  await updateDoc(postRef, {
-    commentsCount: increment(amount),
-    updatedAt: serverTimestamp(),
-  });
 }

@@ -16,27 +16,9 @@ export const TEST_IDS = {
 const timestamp = firebase.firestore.Timestamp.fromMillis(1_700_000_000_000);
 
 export function userFixture(uid, overrides = {}) {
-  const names = {
-    alice: "Alice Test",
-    bob: "Bob Test",
-    carol: "Carol Test",
-  };
-
   return {
     uid,
-    displayName: names[uid] || "Test Student",
     email: `${uid}@example.test`,
-    photoURL: null,
-    bio: "Rules test profile",
-    department: "Computer Science",
-    year: "Senior",
-    skills: ["Testing"],
-    socialLinks: {
-      github: "",
-      linkedin: "",
-      portfolio: "",
-      website: "",
-    },
     isDiscoverable: true,
     notificationPreferences: {
       connectionRequests: true,

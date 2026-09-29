@@ -1,6 +1,6 @@
 # CampusConnect Roadmap
 
-**Status:** Status-aware roadmap (Milestone 13C)
+**Status:** Status-aware roadmap (Milestone 14B / Milestone 15)
 
 Checked items describe work that exists in the current repository. Unchecked items are proposed or deferred; they are not implemented merely because they appear here.
 
@@ -12,7 +12,7 @@ Checked items describe work that exists in the current repository. Unchecked ite
 - [x] Firebase Authentication with persistent sessions.
 - [x] Protected routing.
 - [x] Student profile creation and editing.
-- [x] Real-time bounded campus feed.
+- [x] Real-time campus feed.
 - [x] Text post creation and author-only deletion.
 - [x] Transactional likes and denormalized like counter.
 - [x] Real-time comments and batched comment counter updates.
@@ -28,71 +28,53 @@ Checked items describe work that exists in the current repository. Unchecked ite
 - [x] Public README and recruiter demo documentation.
 - [x] Milestone 13A documentation and architecture reconciliation.
 - [x] Milestone 13C Firestore Rules hardening and emulator regression expansion.
+- [x] Milestone 14: Cursor-based feed pagination (`startAfter`) merged with real-time newer-posts listener and deduplicated feed state.
+- [x] Milestone 14B: Strict public/private profile separation across three collections (`users` private authority, `publicProfiles` public-profile authority, `directoryIndex` discoverability projection).
+- [x] Automated test suites: 53 Vitest unit tests and 97 Firestore Emulator security rules tests passing.
 
 ## Current maintenance contract
 
 - [x] Treat active source, `firestore.rules`, current schema, README, and recruiter guide as the source of truth.
 - [x] Label planned features and schemas explicitly instead of listing them as implemented.
 - [x] Keep documentation terminology aligned with the code: connections, not friends; Campus Atelier, not the obsolete indigo palette; current routes and components only.
-- [ ] Re-run this documentation audit whenever a route, service, collection, or security invariant changes.
+- [x] Re-run this documentation audit whenever a route, service, collection, or security invariant changes (Milestone 15 Unit 15.1).
+
+## Active engineering milestone
+
+### Milestone 15 — Post-14B Hardening, Performance & Architecture Reconciliation
+
+- [ ] **15.1 Documentation & Roadmap Reconciliation:** Align all project documentation with locked 14B architecture, document 3-collection model, test suites (53 unit / 97 rules), and remove stale claims.
+- [ ] **15.2 Seeder & Security Test Runner Alignment:** Update `seedDemoData.mjs` to project into all three 14B collections; align `securityTestRunner.js` and `SecurityTestPanel.jsx` to initialize against strict rules without prohibited client-side deletions.
+- [ ] **15.3 Dead Code Removal & Search Error Recovery:** Remove confirmed dead functions (`normalizeProfile`, `updateCommentsCount`, `subscribeToBootstrapPosts`); wire active retry in `useUserSearch.js` and `Discover.jsx`.
+- [ ] **15.4 Firestore Rules Hardening:** Enforce strict `isValidPostCreate()` (exact 8 keys, bounds, timestamps); remove obsolete `users` fallback in `isValidCommentSchema` and `isValidActorProfile`; add comprehensive rules tests.
+- [ ] **15.5 Frontend Performance & UX:** Route-level `React.lazy` and `Suspense`; top-level `ErrorBoundary`; memoize `PostCard` and derived hook states; mitigate `Connections.jsx` tab-switch read storm; add confirmation for destructive connection actions.
+- [ ] **15.6 Test Expansion & Hygiene:** Add meaningful behavioral unit coverage for all six domain services; consolidate cutover test files; update test fixtures to strict private schema.
 
 ## Proposed next engineering milestones
 
-### 1. Automated verification and Rules hardening
-
-#### Milestone 13B Phase 1 — delivered
-
-- [x] Add Vitest and `@firebase/rules-unit-testing`.
-- [x] Add fixed Firestore Emulator configuration for `demo-campusconnect-rules-test`.
-- [x] Add emulator-only safety checks, deterministic fixtures, and Rules bootstrap.
-- [x] Add green regression coverage for users, posts, comments, likes, connections, and notifications.
-- [x] Add pure helper tests for profile/notification normalization and canonical connection IDs.
-- [x] Add safe local `test:unit`, `test:rules`, and aggregate `test` scripts.
-
-#### Milestone 13C — delivered
-
-- [x] Enforce strict user creation and resulting-document update schemas, including identity, nested maps, types, and server timestamps.
-- [x] Remove generic post editing and validate like/counter mutation shapes and deltas.
-- [x] Enforce canonical comment snapshots, exact comment schemas, child/parent counter coupling, and denied comment updates.
-- [x] Enforce exact like document schemas and retain atomic like/unlike coupling.
-- [x] Restrict notification point reads to recipients and make sender cancellation cleanup idempotent without an actor pre-read.
-- [x] Expand emulator Rules regressions and retain one clearly labeled parent-only counter limitation test.
-
-#### Remaining 13B/13C work
-
-- [ ] Add service integration tests against Auth and Firestore emulators.
-- [ ] Add CI checks for lint, build, and automated tests.
-- [ ] Resolve the broader public/private profile data boundary.
-- [ ] Replace the residual parent-only comment-counter limitation with a causality-proving data model or trusted server-side event path.
-- [ ] Add an application error boundary if the product requires a visible runtime recovery path.
-
-### 2. Public/private data boundary
-
-- [ ] Define the product policy for direct profile access when search discoverability is disabled.
-- [ ] Separate public profile fields from private account/settings fields.
-- [ ] Update user services, search reads, seed fixtures, and Rules through an additive migration.
-- [ ] Verify that private fields are not returned to unrelated authenticated clients.
-
-### 3. Scalable read paths
-
-- [ ] Add cursor-based “load older posts” behavior while keeping the newest feed page real-time.
-- [ ] Merge and deduplicate live and paginated post results.
-- [ ] Measure directory growth before introducing an external search index.
-- [ ] Define a threshold for replacing bounded client-side search with indexed search.
-
-### 4. Trusted event processing
+### 1. Trusted event processing
 
 - [ ] Evaluate whether notification volume and event types justify Cloud Functions.
 - [ ] If justified, move connection notification generation into idempotent server-side triggers.
 - [ ] Preserve recipient-only notification reads and read-state updates.
 - [ ] Add emulator coverage for trigger retries and duplicate delivery.
 
-### 5. Minimal private messaging
+### 2. Search infrastructure scaling
+
+- [ ] Keep client-side `directoryIndex` projection search for the present application scale.
+- [ ] Revisit external search indexing (e.g., Algolia or Typesense) only when actual directory size or observed query latency demonstrates a concrete need.
+
+### 3. Minimal private messaging
 
 - [ ] Design a connection-gated one-to-one conversation model.
 - [ ] Add participant-only Rules and cursor-paginated messages.
 - [ ] Add unread/read behavior and carefully scoped real-time listeners.
 - [ ] Defer attachments, typing indicators, presence, group chat, and moderation tooling until the text MVP is stable.
+
+### 4. Continuous Integration & End-to-End Testing
+
+- [ ] Configure CI pipeline for lint, build, unit tests, and emulator rules tests.
+- [ ] Add browser-level end-to-end smoke tests.
 
 ## Explicitly deferred product ideas
 

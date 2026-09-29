@@ -50,8 +50,8 @@ export default function SecurityTestPanel({
             </span>
             <h3 className="text-sm font-bold text-amber-950">
               {isM9
-                ? "Milestone 9 Security Rules Test Suite (Settings & Users)"
-                : "Milestone 8 Security Rules Test Suite (Notifications)"}
+                ? "Settings & Private Data Security Audit"
+                : "Connection Notifications Security Audit"}
             </h3>
           </div>
           <p className="mt-0.5 text-xs text-amber-800">
@@ -73,7 +73,7 @@ export default function SecurityTestPanel({
                   : "bg-amber-100 text-amber-900 hover:bg-amber-200"
               }`}
             >
-              Milestone 9: Settings (5 tests)
+              Settings & Private Account (5 tests)
             </button>
             <button
               type="button"
@@ -87,7 +87,7 @@ export default function SecurityTestPanel({
                   : "bg-amber-100 text-amber-900 hover:bg-amber-200"
               }`}
             >
-              Milestone 8: Notifications (4 tests)
+              Connection Notifications (4 tests)
             </button>
           </div>
         </div>

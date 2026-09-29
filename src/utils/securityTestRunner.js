@@ -1,13 +1,15 @@
 import { initializeApp, deleteApp } from "firebase/app";
 import {
+  connectAuthEmulator,
   createUserWithEmailAndPassword,
   deleteUser,
   getAuth,
 } from "firebase/auth";
 import {
   collection,
-  deleteDoc,
+  connectFirestoreEmulator,
   doc,
+  getDoc,
   getDocs,
   getFirestore,
   limit,
@@ -16,9 +18,10 @@ import {
   serverTimestamp,
   setDoc,
   updateDoc,
+  writeBatch,
 } from "firebase/firestore";
-import { db, firebaseConfig } from "../firebase/config";
-import { fetchAllUsers, fetchUserById } from "../services/userService";
+import { db, firebaseConfig } from "../firebase/config.js";
+import { fetchAllUsers, fetchUserById } from "../services/userService.js";
 
 
 /**
@@ -320,9 +323,7 @@ export async function runMilestone9SecurityTests(currentUid) {
   const ephemeralPassword = `AuditPass!_${runTimestamp}_${runRandom}`;
 
   let ephemeralApp = null;
-  let ephemeralDb = null;
   let ephemeralUser = null;
-  let ephemeralUid = null;
 
   console.group(`🛡️ Running Milestone 9 Firestore Security Rules Audit (Disposable Isolated Target: ${appName})`);
   console.log("Primary Auth UID (Active User, NEVER MUTATED):", currentUid);
@@ -332,7 +333,20 @@ export async function runMilestone9SecurityTests(currentUid) {
     // 1. Initialize secondary isolated Firebase App
     ephemeralApp = initializeApp(firebaseConfig, appName);
     const ephemeralAuth = getAuth(ephemeralApp);
-    ephemeralDb = getFirestore(ephemeralApp);
+    const ephemeralDb = getFirestore(ephemeralApp);
+
+    if (import.meta.env.VITE_USE_FIREBASE_EMULATOR === "true") {
+      try {
+        connectFirestoreEmulator(ephemeralDb, "localhost", 8080);
+      } catch {
+        // Ignore if already connected
+      }
+      try {
+        connectAuthEmulator(ephemeralAuth, "http://localhost:9099", { disableWarnings: true });
+      } catch {
+        // Ignore if already connected
+      }
+    }
 
     // 2. Create isolated disposable auth user
     const cred = await createUserWithEmailAndPassword(
@@ -341,43 +355,66 @@ export async function runMilestone9SecurityTests(currentUid) {
       ephemeralPassword
     );
     ephemeralUser = cred.user;
-    ephemeralUid = ephemeralUser.uid;
+    const ephemeralUid = ephemeralUser.uid;
     console.log("Disposable User Created with UID:", ephemeralUid);
 
-    // Helper to ensure the disposable document is deleted and re-seeded with a fresh baseline
-    const resetBaseline = async () => {
-      const disposableDocRef = doc(ephemeralDb, "users", ephemeralUid);
-      try {
-        await deleteDoc(disposableDocRef);
-      } catch {
-        // Document might not exist prior to the first test seed
-      }
+    // 3. Atomically initialize the strict-14B disposable baseline in Firestore
+    const baselineBatch = writeBatch(ephemeralDb);
+    const disposableUserRef = doc(ephemeralDb, "users", ephemeralUid);
+    const disposablePubRef = doc(ephemeralDb, "publicProfiles", ephemeralUid);
+    const disposableDirRef = doc(ephemeralDb, "directoryIndex", ephemeralUid);
 
-      await setDoc(disposableDocRef, {
-        uid: ephemeralUid,
-        email: ephemeralEmail,
-        displayName: "Disposable Test Student",
-        photoURL: null,
-        bio: "Ephemeral test bio",
-        department: "Computer Science",
-        year: "3rd",
-        skills: ["Testing"],
-        socialLinks: {},
-        isDiscoverable: true,
-        notificationPreferences: {
-          connectionRequests: true,
-          connectionAccepted: true,
-        },
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
-    };
+    baselineBatch.set(disposableUserRef, {
+      uid: ephemeralUid,
+      email: ephemeralEmail,
+      isDiscoverable: true,
+      notificationPreferences: {
+        connectionRequests: true,
+        connectionAccepted: true,
+      },
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+
+    baselineBatch.set(disposablePubRef, {
+      uid: ephemeralUid,
+      displayName: "Disposable Test Student",
+      photoURL: null,
+      bio: "Ephemeral test bio",
+      department: "Computer Science",
+      year: "3rd",
+      skills: ["Testing"],
+      socialLinks: {
+        github: "",
+        linkedin: "",
+        portfolio: "",
+        website: "",
+      },
+    });
+
+    baselineBatch.set(disposableDirRef, {
+      uid: ephemeralUid,
+      displayName: "Disposable Test Student",
+      photoURL: null,
+      department: "Computer Science",
+      year: "3rd",
+      skills: ["Testing"],
+      updatedAt: serverTimestamp(),
+    });
+
+    await baselineBatch.commit();
+    console.log("Strict 14B disposable baseline initialized successfully.");
+
+    // 4. Verify baseline state before executing security assertions
+    const baselineSnap = await getDoc(disposableUserRef);
+    if (!baselineSnap.exists() || baselineSnap.data().uid !== ephemeralUid) {
+      throw new Error("Disposable baseline verification failed: document not found or invalid.");
+    }
 
     // ─────────────────────────────────────────────────────────────────────────
     // TEST 1: Primary user (A) attempting to update Disposable user (B)'s settings
     // ─────────────────────────────────────────────────────────────────────────
     try {
-      await resetBaseline();
       // Use primary app's db (currentUid auth context) attempting to write to disposable user's doc
       const targetDocRef = doc(db, "users", ephemeralUid);
       await updateDoc(targetDocRef, {
@@ -412,7 +449,6 @@ export async function runMilestone9SecurityTests(currentUid) {
     // TEST 2: Disposable user attempting to change their own email
     // ─────────────────────────────────────────────────────────────────────────
     try {
-      await resetBaseline();
       const disposableDocRef = doc(ephemeralDb, "users", ephemeralUid);
       await updateDoc(disposableDocRef, {
         email: `spoofed_email_${Date.now()}@attacker.com`,
@@ -446,7 +482,6 @@ export async function runMilestone9SecurityTests(currentUid) {
     // TEST 3: Disposable user attempting to change their own UID
     // ─────────────────────────────────────────────────────────────────────────
     try {
-      await resetBaseline();
       const disposableDocRef = doc(ephemeralDb, "users", ephemeralUid);
       await updateDoc(disposableDocRef, {
         uid: `spoofed_uid_${Date.now()}`,
@@ -480,7 +515,6 @@ export async function runMilestone9SecurityTests(currentUid) {
     // TEST 4: Disposable user attempting to change createdAt or inject role: "admin"
     // ─────────────────────────────────────────────────────────────────────────
     try {
-      await resetBaseline();
       const disposableDocRef = doc(ephemeralDb, "users", ephemeralUid);
       await updateDoc(disposableDocRef, {
         role: "admin",
@@ -515,7 +549,6 @@ export async function runMilestone9SecurityTests(currentUid) {
     // TEST 5: Disposable user attempting to submit invalid types such as isDiscoverable: "false"
     // ─────────────────────────────────────────────────────────────────────────
     try {
-      await resetBaseline();
       const disposableDocRef = doc(ephemeralDb, "users", ephemeralUid);
       await updateDoc(disposableDocRef, {
         isDiscoverable: "false", // String literal instead of boolean
@@ -561,30 +594,7 @@ export async function runMilestone9SecurityTests(currentUid) {
     // ─────────────────────────────────────────────────────────────────────────
     console.group("🧹 Disposable Environment Teardown");
 
-    // 1. Delete disposable Firestore document
-    if (ephemeralDb && ephemeralUid) {
-      try {
-        await deleteDoc(doc(ephemeralDb, "users", ephemeralUid));
-        cleanupReports.push({
-          resource: "Firestore Document",
-          target: `/users/${ephemeralUid}`,
-          success: true,
-          message: "Deleted successfully",
-        });
-        console.log(`✅ [CLEANUP] Deleted disposable Firestore document /users/${ephemeralUid}`);
-      } catch (docErr) {
-        const warnMsg = `CLEANUP WARNING: Failed to delete disposable Firestore document /users/${ephemeralUid}: ${docErr.message}`;
-        console.warn(`⚠️ ${warnMsg}`);
-        cleanupReports.push({
-          resource: "Firestore Document",
-          target: `/users/${ephemeralUid}`,
-          success: false,
-          message: warnMsg,
-        });
-      }
-    }
-
-    // 2. Delete disposable Firebase Auth user
+    // 1. Delete disposable Firebase Auth user
     if (ephemeralUser) {
       try {
         await deleteUser(ephemeralUser);
@@ -607,7 +617,7 @@ export async function runMilestone9SecurityTests(currentUid) {
       }
     }
 
-    // 3. Delete secondary Firebase App
+    // 2. Delete secondary Firebase App
     if (ephemeralApp) {
       try {
         await deleteApp(ephemeralApp);

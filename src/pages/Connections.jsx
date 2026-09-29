@@ -54,16 +54,27 @@ function PersonCard({ doc, currentUid, onAction }) {
   );
 }
 
-function PersonCardInner({ doc, currentUid, otherUid, isBusy, err, act }) {
-  const [profile, setProfile] = useState(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [loadErr, setLoadErr] = useState(null);
+const profileCache = new Map();
 
-  // Fetch the other user's profile once on mount or when otherUid changes
+function PersonCardInner({ doc, currentUid, otherUid, isBusy, err, act }) {
+  const [profile, setProfile] = useState(() => profileCache.get(otherUid) || null);
+  const [isLoading, setIsLoading] = useState(() => !profileCache.has(otherUid));
+  const [loadErr, setLoadErr] = useState(null);
+  const [isConfirmingRemove, setIsConfirmingRemove] = useState(false);
+  const [isConfirmingCancel, setIsConfirmingCancel] = useState(false);
+
+  // Fetch the other user's profile once or reuse cache
   useEffect(() => {
+    if (profileCache.has(otherUid)) {
+      return;
+    }
+
     let alive = true;
     fetchUserById(otherUid)
       .then((p) => {
+        if (p) {
+          profileCache.set(otherUid, p);
+        }
         if (alive) {
           setProfile(p);
           setIsLoading(false);
@@ -135,17 +146,41 @@ function PersonCardInner({ doc, currentUid, otherUid, isBusy, err, act }) {
         </Link>
 
         {isConnected && (
-          <Button
-            id={`btn-remove-${otherUid}`}
-            variant="danger"
-            size="sm"
-            disabled={isBusy}
-            loading={isBusy}
-            loadingText="Removing…"
-            onClick={() => act(removeConnection)}
-          >
-            Remove
-          </Button>
+          isConfirmingRemove ? (
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-ink-muted font-medium">Remove connection?</span>
+              <button
+                type="button"
+                id={`btn-confirm-remove-${otherUid}`}
+                disabled={isBusy}
+                onClick={async () => {
+                  await act(removeConnection);
+                  setIsConfirmingRemove(false);
+                }}
+                className="rounded-lg bg-rose-600 px-2.5 py-1 text-xs font-semibold text-white transition hover:bg-rose-700 disabled:opacity-50"
+              >
+                {isBusy ? "Removing…" : "Remove"}
+              </button>
+              <button
+                type="button"
+                disabled={isBusy}
+                onClick={() => setIsConfirmingRemove(false)}
+                className="rounded-lg border border-border-warm bg-surface px-2 py-1 text-xs font-medium text-stone-600 transition hover:bg-stone-50"
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <Button
+              id={`btn-remove-${otherUid}`}
+              variant="danger"
+              size="sm"
+              disabled={isBusy}
+              onClick={() => setIsConfirmingRemove(true)}
+            >
+              Remove
+            </Button>
+          )
         )}
 
         {isIncoming && (
@@ -176,17 +211,41 @@ function PersonCardInner({ doc, currentUid, otherUid, isBusy, err, act }) {
         )}
 
         {isOutgoing && (
-          <Button
-            id={`btn-cancel-${otherUid}`}
-            variant="outline"
-            size="sm"
-            disabled={isBusy}
-            loading={isBusy}
-            loadingText="Cancelling…"
-            onClick={() => act(cancelConnectionRequest)}
-          >
-            Cancel Request
-          </Button>
+          isConfirmingCancel ? (
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-ink-muted font-medium">Cancel request?</span>
+              <button
+                type="button"
+                id={`btn-confirm-cancel-${otherUid}`}
+                disabled={isBusy}
+                onClick={async () => {
+                  await act(cancelConnectionRequest);
+                  setIsConfirmingCancel(false);
+                }}
+                className="rounded-lg bg-rose-600 px-2.5 py-1 text-xs font-semibold text-white transition hover:bg-rose-700 disabled:opacity-50"
+              >
+                {isBusy ? "Cancelling…" : "Cancel"}
+              </button>
+              <button
+                type="button"
+                disabled={isBusy}
+                onClick={() => setIsConfirmingCancel(false)}
+                className="rounded-lg border border-border-warm bg-surface px-2 py-1 text-xs font-medium text-stone-600 transition hover:bg-stone-50"
+              >
+                Keep
+              </button>
+            </div>
+          ) : (
+            <Button
+              id={`btn-cancel-${otherUid}`}
+              variant="outline"
+              size="sm"
+              disabled={isBusy}
+              onClick={() => setIsConfirmingCancel(true)}
+            >
+              Cancel Request
+            </Button>
+          )
         )}
       </div>
 
@@ -308,8 +367,8 @@ export default function Connections() {
         )}
 
         {/* Connections Tab */}
-        {!isLoading && activeTab === "connections" && (
-          <>
+        {!isLoading && (
+          <div className={activeTab === "connections" ? "block" : "hidden"}>
             {connections.length === 0 ? (
               <EmptyState
                 icon={Users}
@@ -331,52 +390,54 @@ export default function Connections() {
                 ))}
               </div>
             )}
-          </>
+          </div>
         )}
 
         {/* Requests Tab */}
-        {!isLoading && activeTab === "requests" && (
-          <div className="space-y-8">
-            {/* Incoming */}
-            <div>
-              <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-ink-muted">
-                Incoming ({incomingRequests.length})
-              </h2>
-              {incomingRequests.length === 0 ? (
-                <EmptyState
-                  icon={Users}
-                  title="No incoming requests"
-                  description="When students send you a connection request, you'll see them here."
-                  compact
-                />
-              ) : (
-                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                  {incomingRequests.map((doc) => (
-                    <PersonCard key={doc.id} doc={doc} currentUid={currentUid} />
-                  ))}
-                </div>
-              )}
-            </div>
+        {!isLoading && (
+          <div className={activeTab === "requests" ? "block" : "hidden"}>
+            <div className="space-y-8">
+              {/* Incoming */}
+              <div>
+                <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-ink-muted">
+                  Incoming ({incomingRequests.length})
+                </h2>
+                {incomingRequests.length === 0 ? (
+                  <EmptyState
+                    icon={Users}
+                    title="No incoming requests"
+                    description="When students send you a connection request, you'll see them here."
+                    compact
+                  />
+                ) : (
+                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                    {incomingRequests.map((doc) => (
+                      <PersonCard key={doc.id} doc={doc} currentUid={currentUid} />
+                    ))}
+                  </div>
+                )}
+              </div>
 
-            {/* Outgoing */}
-            <div>
-              <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-ink-muted">
-                Sent ({outgoingRequests.length})
-              </h2>
-              {outgoingRequests.length === 0 ? (
-                <EmptyState
-                  icon={Users}
-                  title="No sent requests"
-                  description="You have not sent any pending connection requests."
-                  compact
-                />
-              ) : (
-                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                  {outgoingRequests.map((doc) => (
-                    <PersonCard key={doc.id} doc={doc} currentUid={currentUid} />
-                  ))}
-                </div>
-              )}
+              {/* Outgoing */}
+              <div>
+                <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-ink-muted">
+                  Sent ({outgoingRequests.length})
+                </h2>
+                {outgoingRequests.length === 0 ? (
+                  <EmptyState
+                    icon={Users}
+                    title="No sent requests"
+                    description="You have not sent any pending connection requests."
+                    compact
+                  />
+                ) : (
+                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                    {outgoingRequests.map((doc) => (
+                      <PersonCard key={doc.id} doc={doc} currentUid={currentUid} />
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         )}

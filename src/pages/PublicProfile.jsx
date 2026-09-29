@@ -37,6 +37,10 @@ export default function PublicProfile() {
     handleRemove,
   } = useConnectionState(isOwnProfile ? null : uid);
 
+  const [confirmingAction, setConfirmingAction] = useState(null);
+  const isConfirmingRemove = connectionState === "connected" && confirmingAction === "remove";
+  const isConfirmingCancel = connectionState === "outgoing_pending" && confirmingAction === "cancel";
+
   useEffect(() => {
     let isMounted = true;
 
@@ -212,14 +216,40 @@ export default function PublicProfile() {
                           <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-medium text-amber-800 border border-amber-200">
                             Request Sent
                           </span>
-                          <button
-                            id="btn-cancel-request"
-                            onClick={handleCancel}
-                            disabled={isPending}
-                            className="inline-flex items-center justify-center rounded-xl border border-border-warm bg-surface px-3 py-1.5 text-sm font-medium text-ink-muted transition hover:text-ink hover:bg-stone-50 disabled:opacity-50"
-                          >
-                            {isPending ? "Cancelling…" : "Cancel"}
-                          </button>
+                          {isConfirmingCancel ? (
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-xs text-ink-muted font-medium">Cancel request?</span>
+                              <button
+                                type="button"
+                                id="btn-confirm-cancel-request"
+                                disabled={isPending}
+                                onClick={async () => {
+                                  await handleCancel();
+                                  setConfirmingAction(null);
+                                }}
+                                className="rounded-lg bg-rose-600 px-2.5 py-1 text-xs font-semibold text-white transition hover:bg-rose-700 disabled:opacity-50"
+                              >
+                                {isPending ? "Cancelling…" : "Cancel"}
+                              </button>
+                              <button
+                                type="button"
+                                disabled={isPending}
+                                onClick={() => setConfirmingAction(null)}
+                                className="rounded-lg border border-border-warm bg-surface px-2 py-1 text-xs font-medium text-stone-600 transition hover:bg-stone-50"
+                              >
+                                Keep
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              id="btn-cancel-request"
+                              onClick={() => setConfirmingAction("cancel")}
+                              disabled={isPending}
+                              className="inline-flex items-center justify-center rounded-xl border border-border-warm bg-surface px-3 py-1.5 text-sm font-medium text-ink-muted transition hover:text-ink hover:bg-stone-50 disabled:opacity-50"
+                            >
+                              Cancel
+                            </button>
+                          )}
                         </>
                       )}
 
@@ -249,14 +279,40 @@ export default function PublicProfile() {
                           <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-800 border border-emerald-200">
                             Connected
                           </span>
-                          <button
-                            id="btn-remove-connection"
-                            onClick={handleRemove}
-                            disabled={isPending}
-                            className="inline-flex items-center justify-center rounded-xl border border-border-warm bg-surface px-3 py-1.5 text-sm font-medium text-ink-muted transition hover:border-rose-300 hover:text-rose-700 hover:bg-stone-50 disabled:opacity-50"
-                          >
-                            {isPending ? "Removing…" : "Remove"}
-                          </button>
+                          {isConfirmingRemove ? (
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-xs text-ink-muted font-medium">Remove connection?</span>
+                              <button
+                                type="button"
+                                id="btn-confirm-remove-connection"
+                                disabled={isPending}
+                                onClick={async () => {
+                                  await handleRemove();
+                                  setConfirmingAction(null);
+                                }}
+                                className="rounded-lg bg-rose-600 px-2.5 py-1 text-xs font-semibold text-white transition hover:bg-rose-700 disabled:opacity-50"
+                              >
+                                {isPending ? "Removing…" : "Remove"}
+                              </button>
+                              <button
+                                type="button"
+                                disabled={isPending}
+                                onClick={() => setConfirmingAction(null)}
+                                className="rounded-lg border border-border-warm bg-surface px-2 py-1 text-xs font-medium text-stone-600 transition hover:bg-stone-50"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              id="btn-remove-connection"
+                              onClick={() => setConfirmingAction("remove")}
+                              disabled={isPending}
+                              className="inline-flex items-center justify-center rounded-xl border border-border-warm bg-surface px-3 py-1.5 text-sm font-medium text-ink-muted transition hover:border-rose-300 hover:text-rose-700 hover:bg-stone-50 disabled:opacity-50"
+                            >
+                              Remove
+                            </button>
+                          )}
                         </>
                       )}
                     </div>

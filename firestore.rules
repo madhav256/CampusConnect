@@ -141,6 +141,28 @@ service cloud.firestore {
              request.resource.data.skills == pubDoc.data.skills;
     }
 
+    function isValidPostCreate() {
+      let d = request.resource.data;
+      return d.keys().hasOnly([
+               'authorId', 'authorName', 'authorAvatar', 'content',
+               'likesCount', 'commentsCount', 'createdAt', 'updatedAt'
+             ]) &&
+             d.keys().hasAll([
+               'authorId', 'authorName', 'authorAvatar', 'content',
+               'likesCount', 'commentsCount', 'createdAt', 'updatedAt'
+             ]) &&
+             d.authorId == request.auth.uid &&
+             d.authorName is string &&
+             (d.authorAvatar == null || d.authorAvatar is string) &&
+             d.content is string &&
+             d.content.size() > 0 &&
+             d.content.size() <= 2000 &&
+             d.likesCount == 0 &&
+             d.commentsCount == 0 &&
+             d.createdAt == request.time &&
+             d.updatedAt == request.time;
+    }
+
     // Validates atomic like/unlike transactions on posts.
     function isValidPostLikeUpdate(postId) {
       let likePath = /databases/$(database)/documents/posts/$(postId)/likes/$(request.auth.uid);
@@ -189,15 +211,13 @@ service cloud.firestore {
     function isValidCommentSchema() {
       let d = request.resource.data;
       let pubPath = /databases/$(database)/documents/publicProfiles/$(request.auth.uid);
-      let userPath = /databases/$(database)/documents/users/$(request.auth.uid);
-      let hasPub = exists(pubPath);
-      let actorDoc = hasPub ? get(pubPath) : get(userPath);
-      return (hasPub || exists(userPath)) &&
+      let pubDoc = exists(pubPath) ? get(pubPath) : null;
+      return pubDoc != null &&
              d.keys().hasOnly(['authorId', 'authorName', 'authorAvatar', 'content', 'createdAt', 'updatedAt']) &&
              d.keys().hasAll(['authorId', 'authorName', 'authorAvatar', 'content', 'createdAt', 'updatedAt']) &&
              d.authorId == request.auth.uid &&
-             d.authorName == actorDoc.data.get('displayName', 'CampusConnect Student') &&
-             d.authorAvatar == actorDoc.data.get('photoURL', null) &&
+             d.authorName == pubDoc.data.get('displayName', 'CampusConnect Student') &&
+             d.authorAvatar == pubDoc.data.get('photoURL', null) &&
              d.authorName is string &&
              (d.authorAvatar == null || d.authorAvatar is string) &&
              d.content is string &&
@@ -280,12 +300,10 @@ service cloud.firestore {
 
         function isValidActorProfile() {
           let pubPath = /databases/$(database)/documents/publicProfiles/$(request.auth.uid);
-          let userPath = /databases/$(database)/documents/users/$(request.auth.uid);
-          let hasPub = exists(pubPath);
-          let actorDoc = hasPub ? get(pubPath) : get(userPath);
-          return (hasPub || exists(userPath)) &&
-                 request.resource.data.actorName == actorDoc.data.get('displayName', 'CampusConnect Student') &&
-                 request.resource.data.actorAvatar == actorDoc.data.get('photoURL', null);
+          let pubDoc = exists(pubPath) ? get(pubPath) : null;
+          return pubDoc != null &&
+                 request.resource.data.actorName == pubDoc.data.get('displayName', 'CampusConnect Student') &&
+                 request.resource.data.actorAvatar == pubDoc.data.get('photoURL', null);
         }
 
         function isValidConnectionRequestNotification(uId, notifId) {
@@ -401,11 +419,7 @@ service cloud.firestore {
     // 3. Posts collection
     match /posts/{postId} {
       allow read: if isAuthenticated();
-      allow create: if isAuthenticated() &&
-        request.resource.data.authorId == request.auth.uid &&
-        request.resource.data.likesCount == 0 &&
-        request.resource.data.commentsCount == 0 &&
-        request.resource.data.createdAt == request.time;
+      allow create: if isAuthenticated() && isValidPostCreate();
 
       // Posts are not editable. Only the validated counter/like paths remain.
       allow update: if isAuthenticated() && (

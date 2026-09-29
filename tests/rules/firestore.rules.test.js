@@ -685,6 +685,211 @@ describe("posts rules", () => {
     );
   });
 
+  it("allow post creation with a string authorAvatar", async () => {
+    const context = contextFor(TEST_UIDS.alice);
+    await assertSucceeds(
+      context.firestore().collection("posts").doc("post-with-avatar").set({
+        authorId: TEST_UIDS.alice,
+        authorName: "Alice Test",
+        authorAvatar: "https://example.test/avatar.png",
+        content: "A post with an avatar string.",
+        likesCount: 0,
+        commentsCount: 0,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      })
+    );
+  });
+
+  it("allow post creation with maximum 2000-character content", async () => {
+    const context = contextFor(TEST_UIDS.alice);
+    await assertSucceeds(
+      context.firestore().collection("posts").doc("post-max-content").set({
+        authorId: TEST_UIDS.alice,
+        authorName: "Alice Test",
+        authorAvatar: null,
+        content: "A".repeat(2000),
+        likesCount: 0,
+        commentsCount: 0,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      })
+    );
+  });
+
+  it("reject post creation with extra or unknown fields", async () => {
+    const context = contextFor(TEST_UIDS.alice);
+    await expectPermissionDenied(() =>
+      context.firestore().collection("posts").doc("post-extra-field").set({
+        authorId: TEST_UIDS.alice,
+        authorName: "Alice Test",
+        authorAvatar: null,
+        content: "Extra field post",
+        likesCount: 0,
+        commentsCount: 0,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        extraField: "not-allowed",
+      })
+    );
+  });
+
+  it("reject post creation missing required fields", async () => {
+    const context = contextFor(TEST_UIDS.alice);
+    const validPost = {
+      authorId: TEST_UIDS.alice,
+      authorName: "Alice Test",
+      authorAvatar: null,
+      content: "Valid payload template",
+      likesCount: 0,
+      commentsCount: 0,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    };
+
+    const requiredKeys = Object.keys(validPost);
+    for (const key of requiredKeys) {
+      const payload = { ...validPost };
+      delete payload[key];
+      await expectPermissionDenied(() =>
+        context.firestore().collection("posts").doc(`post-missing-${key}`).set(payload)
+      );
+    }
+  });
+
+  it("reject post creation with invalid authorName, authorAvatar, or content types", async () => {
+    const context = contextFor(TEST_UIDS.alice);
+    const validPost = {
+      authorId: TEST_UIDS.alice,
+      authorName: "Alice Test",
+      authorAvatar: null,
+      content: "Valid payload template",
+      likesCount: 0,
+      commentsCount: 0,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    };
+
+    await expectPermissionDenied(() =>
+      context.firestore().collection("posts").doc("bad-name").set({
+        ...validPost,
+        authorName: 12345,
+      })
+    );
+    await expectPermissionDenied(() =>
+      context.firestore().collection("posts").doc("bad-avatar-number").set({
+        ...validPost,
+        authorAvatar: 42,
+      })
+    );
+    await expectPermissionDenied(() =>
+      context.firestore().collection("posts").doc("bad-avatar-bool").set({
+        ...validPost,
+        authorAvatar: false,
+      })
+    );
+    await expectPermissionDenied(() =>
+      context.firestore().collection("posts").doc("bad-content-number").set({
+        ...validPost,
+        content: 12345,
+      })
+    );
+    await expectPermissionDenied(() =>
+      context.firestore().collection("posts").doc("bad-content-array").set({
+        ...validPost,
+        content: ["hello"],
+      })
+    );
+  });
+
+  it("reject post creation with empty content or content exceeding 2000 characters", async () => {
+    const context = contextFor(TEST_UIDS.alice);
+    const validPost = {
+      authorId: TEST_UIDS.alice,
+      authorName: "Alice Test",
+      authorAvatar: null,
+      content: "Valid payload template",
+      likesCount: 0,
+      commentsCount: 0,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    };
+
+    await expectPermissionDenied(() =>
+      context.firestore().collection("posts").doc("empty-content").set({
+        ...validPost,
+        content: "",
+      })
+    );
+    await expectPermissionDenied(() =>
+      context.firestore().collection("posts").doc("too-long-content").set({
+        ...validPost,
+        content: "A".repeat(2001),
+      })
+    );
+  });
+
+  it("reject post creation with nonzero commentsCount", async () => {
+    const context = contextFor(TEST_UIDS.alice);
+    const validPost = {
+      authorId: TEST_UIDS.alice,
+      authorName: "Alice Test",
+      authorAvatar: null,
+      content: "Valid payload template",
+      likesCount: 0,
+      commentsCount: 0,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    };
+
+    await expectPermissionDenied(() =>
+      context.firestore().collection("posts").doc("nonzero-comments-1").set({
+        ...validPost,
+        commentsCount: 1,
+      })
+    );
+    await expectPermissionDenied(() =>
+      context.firestore().collection("posts").doc("nonzero-comments-neg").set({
+        ...validPost,
+        commentsCount: -1,
+      })
+    );
+  });
+
+  it("reject post creation with forged or client-controlled timestamps", async () => {
+    const context = contextFor(TEST_UIDS.alice);
+    const validPost = {
+      authorId: TEST_UIDS.alice,
+      authorName: "Alice Test",
+      authorAvatar: null,
+      content: "Valid payload template",
+      likesCount: 0,
+      commentsCount: 0,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    };
+
+    await expectPermissionDenied(() =>
+      context.firestore().collection("posts").doc("forged-created-at").set({
+        ...validPost,
+        createdAt: timestamp,
+      })
+    );
+    await expectPermissionDenied(() =>
+      context.firestore().collection("posts").doc("forged-updated-at").set({
+        ...validPost,
+        updatedAt: timestamp,
+      })
+    );
+    await expectPermissionDenied(() =>
+      context.firestore().collection("posts").doc("forged-both-times").set({
+        ...validPost,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      })
+    );
+  });
+
   it("allow only the post author to delete", async () => {
     await assertSucceeds(
       postRef(contextFor(TEST_UIDS.alice), TEST_IDS.alicePost).delete()
@@ -1034,6 +1239,25 @@ describe("comments rules", () => {
         contextFor(TEST_UIDS.bob),
         TEST_IDS.alicePost,
         TEST_IDS.existingComment
+      )
+    );
+  });
+
+  it("reject comment creation when actor is missing publicProfiles authority", async () => {
+    await testEnvironment.withSecurityRulesDisabled(async (context) => {
+      await context
+        .firestore()
+        .collection("publicProfiles")
+        .doc(TEST_UIDS.bob)
+        .delete();
+    });
+
+    await expectPermissionDenied(() =>
+      commitCommentCreate(
+        contextFor(TEST_UIDS.bob),
+        TEST_IDS.bobPost,
+        "comment-missing-pubprofile",
+        TEST_UIDS.bob
       )
     );
   });
@@ -1543,6 +1767,41 @@ describe("notifications rules", () => {
         await transaction.get(requestNotification);
         transaction.delete(connection);
         transaction.delete(requestNotification);
+      })
+    );
+  });
+
+  it("reject notification creation when actor is missing publicProfiles authority", async () => {
+    await seedPendingConnection();
+
+    await testEnvironment.withSecurityRulesDisabled(async (context) => {
+      await context
+        .firestore()
+        .collection("publicProfiles")
+        .doc(TEST_UIDS.alice)
+        .delete();
+    });
+
+    const alice = contextFor(TEST_UIDS.alice);
+    const db = alice.firestore();
+    const connection = db.collection("connections").doc("alice_bob");
+    const notification = db
+      .collection("users")
+      .doc("bob")
+      .collection("notifications")
+      .doc("req_alice_bob");
+
+    await expectPermissionDenied(() =>
+      db.runTransaction(async (transaction) => {
+        transaction.set(connection, {
+          ...connectionFixture(TEST_UIDS.alice, TEST_UIDS.bob),
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+        transaction.set(notification, {
+          ...notificationFixture(TEST_UIDS.bob, TEST_UIDS.alice),
+          createdAt: serverTimestamp(),
+        });
       })
     );
   });

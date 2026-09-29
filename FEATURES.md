@@ -1,6 +1,6 @@
 # CampusConnect Features
 
-**Status:** Current implementation inventory (Milestone 13A)
+**Status:** Current implementation inventory (Milestone 14B / Milestone 15)
 
 This document distinguishes shipped behavior from deferred ideas. A feature is marked implemented only when it exists in the current application source and active Firebase model.
 
@@ -24,6 +24,7 @@ Email verification enforcement, OAuth providers, and account deletion are not im
 - Current-user profile page at `/profile`.
 - Editable display name, bio, department, academic year, skills, and social links.
 - Public profile page at `/users/:uid`.
+- Strict public/private separation: public fields are served from `publicProfiles/{uid}`, while sensitive account fields and email are stored in owner-only `users/{uid}`.
 - Initials-based avatar fallback with optional `photoURL` rendering.
 - Public profile preview when viewing the current user's own profile.
 - Department and academic-year metadata.
@@ -36,7 +37,7 @@ There is no active image-upload flow, cover-image upload, or profile-photo manag
 - Dashboard at `/dashboard`.
 - Text post creation.
 - Feed ordered by newest `createdAt`.
-- Real-time subscription to newer posts with cursor-based pagination for older posts.
+- Real-time subscription to newer posts with cursor-based pagination (`startAfter`) for older posts.
 - Author-only post deletion, with inline confirmation.
 - Empty, loading, and error states.
 - Multiline post rendering.
@@ -64,12 +65,12 @@ Posts cannot currently be edited, shared, searched, bookmarked, or attached to m
 - Discover page at `/discover`.
 - Search by display name, department, academic year, or skills.
 - 300 ms search debounce.
-- Bounded fetch of up to 100 users ordered by `updatedAt`.
-- Client-side filtering for `isDiscoverable !== false`, while keeping the current user visible.
+- Queries the `directoryIndex` projection of discoverable students (up to 100 users ordered by `updatedAt`).
+- Client-side filtering across fields over discoverable profiles.
 - Student result cards with initials/avatar, academic metadata, skills, and profile link.
 - Loading, error, short-query, and no-result states.
 
-This is not full-text, fuzzy, indexed, or paginated search.
+This is not full-text, fuzzy, or indexed external search.
 
 ### Connections
 
@@ -110,13 +111,13 @@ Like, comment, message, event, and generic social notifications are not implemen
 
 - Settings page at `/settings`.
 - Read-only display of the authenticated email address.
-- Discoverability toggle for student search.
+- Discoverability toggle for student search, maintained in atomic parity with `directoryIndex/{uid}`.
 - Connection-request notification preference.
 - Accepted-connection notification preference.
 - Sign out.
 - Disabled account-deletion control explaining that backend cascade cleanup is deferred.
 
-The current discoverability setting hides a student from search results but does not block direct authenticated profile reads. Email is omitted from public UI components, but the current Firestore document is broadly readable to authenticated clients; this is a known data-boundary limitation.
+The discoverability toggle updates `users/{uid}` and atomically adds or removes the student's projection in `directoryIndex/{uid}`. Email is stored exclusively in `users/{uid}` under owner-only rules (`allow read: if isOwner(userId);`), guaranteeing true field-level data privacy. Direct authenticated public profile reads (`/users/:uid`) remain accessible for campus networking.
 
 ### Interface and accessibility behavior
 
@@ -131,14 +132,19 @@ The current discoverability setting hides a student from search results but does
 - `prefers-reduced-motion` handling in the global stylesheet.
 - Motion for the like and expandable-comment interactions.
 
-### Development security audits and automated Rules tests
+### Development security audits and automated tests
 
 Settings and Notifications render a development-only `SecurityTestPanel`. The available suites exercise selected Firestore Rule rejection scenarios for:
 
 - notification profile forgery, cross-user reads, immutable-field updates, and orphan writes;
 - cross-user settings writes, email/UID tampering, field injection, and invalid setting types.
 
-The repository also includes Vitest pure-helper tests and an isolated Firestore Emulator Rules suite covering users, posts, comments, likes, connections, and notifications. Rules tests use the fixed synthetic project `demo-campusconnect-rules-test`, deterministic fixtures, and synthetic authenticated contexts. Tests explicitly labeled as known gaps document current Rule behavior for Milestone 13C rather than changing the Rules. Service integration, end-to-end tests, and CI remain deferred.
+Automated verification includes:
+
+- 53 Vitest unit tests covering cutover, services, normalization, and helper logic;
+- 97 Firestore Emulator security rules tests in the fixed synthetic project `demo-campusconnect-rules-test`, covering users, publicProfiles, directoryIndex, posts, comments, likes, connections, and notifications.
+
+Service integration, end-to-end tests, and CI remain deferred.
 
 ### Recruiter demo and seeding
 
@@ -165,8 +171,7 @@ The following ideas are intentionally outside the current MVP:
 - Account deletion and cascading cleanup.
 - Clubs, events, marketplace, internship board, or admin dashboard.
 - Dark mode or theme switching.
-- Cursor pagination and infinite scrolling.
-- External full-text search.
+- External full-text search (e.g. Algolia/Typesense).
 - Background Cloud Functions for notification processing.
 - Service integration tests, end-to-end tests, and CI.
 

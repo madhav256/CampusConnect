@@ -28,23 +28,23 @@ This sequence demonstrates the seeded workflow without intentionally changing it
 
 - **Route:** `/dashboard`
 - **Show:** The text composer, a like, and an expanded comment list.
-- **Explain:** The feed uses a real-time Firestore listener limited to the newest 50 posts. A like transaction creates/deletes the current user's like document and adjusts the denormalized `likesCount` together.
-- **Technical points:** `onSnapshot`, `runTransaction`, Motion feedback, and author-only post/comment deletion.
+- **Explain:** The feed uses a real-time Firestore listener for newer posts merged with cursor-based pagination for older posts. A like transaction creates/deletes the current user's like document and adjusts the denormalized `likesCount` together.
+- **Technical points:** `onSnapshot`, `fetchOlderPosts` with `startAfter`, `runTransaction`, Motion feedback, and author-only post/comment deletion.
 - **Precaution:** Click a like once and allow the request to finish before demonstrating another action.
 
 ### 0:45–1:05 — Student discovery
 
 - **Route:** `/discover`
 - **Show:** Search for `design` or `robotics`.
-- **Explain:** The client fetches up to 100 users ordered by `updatedAt`, waits 300 ms after input changes, and filters name, department, year, and skills locally. Non-discoverable profiles are filtered from directory results except for the current user.
-- **Technical points:** bounded reads, a two-minute directory cache, client-side filtering, and explicit empty/error states.
+- **Explain:** The client queries the `directoryIndex` projection for up to 100 discoverable users ordered by `updatedAt`, waits 300 ms after input changes, and filters name, department, year, and skills locally. Non-discoverable students are excluded from the index at the Firestore rule level.
+- **Technical points:** `directoryIndex` projection, two-minute directory cache, client-side filtering, and explicit empty/error states.
 
 ### 1:05–1:30 — Public profile
 
 - **Route:** `/users/:uid`
 - **Show:** A seeded peer profile such as Marcus Vance or Devon Park.
-- **Explain:** The page point-reads the selected `users/{uid}` document and renders public-facing profile fields. The UI omits email, but the current Firestore document combines public and private fields, so this is not field-level privacy isolation.
-- **Technical points:** `fetchUserById`, profile normalization, and a connection CTA derived from the canonical relationship document.
+- **Explain:** The page point-reads the selected student's `publicProfiles/{uid}` document. Private account data (including email) lives strictly in `users/{uid}` under owner-only rules, providing true field-level data privacy.
+- **Technical points:** `fetchUserById` reading `publicProfiles/{uid}`, profile normalization, and a connection CTA derived from the canonical relationship document.
 
 ### 1:30–1:50 — Connection management
 
@@ -61,7 +61,7 @@ This sequence demonstrates the seeded workflow without intentionally changing it
 
 - **Routes:** `/notifications` or `/settings`
 - **Show:** The unread notification badge, notification filters, or discoverability/connection-notification settings.
-- **Explain:** Notifications are recipient-scoped and currently cover connection requests and accepted connections. The development-only SecurityTestPanel exercises selected Rule rejection scenarios; it is not a production test suite.
+- **Explain:** Notifications are recipient-scoped and currently cover connection requests and accepted connections. The development-only SecurityTestPanel exercises selected Rule rejection scenarios; automated validation is provided by the 97-test emulator Rules suite and 53 unit tests.
 
 ---
 
@@ -121,7 +121,7 @@ Likes use a subcollection and transaction. Comments use a subcollection and a ba
 
 ### What would change at much larger scale?
 
-The current limits are deliberate MVP boundaries. A larger deployment could add cursor-based feed pagination, an indexed search service, stronger public/private user data separation, trusted background notification processing, and counter-sharding where contention is measured. Each would require a reviewed data model and Rules design rather than simply adding infrastructure preemptively.
+The current limits are deliberate MVP boundaries. Cursor-based feed pagination and strict three-collection public/private profile separation have already been designed, implemented, and verified. Larger deployments could consider an external indexed search service (e.g. Algolia or Typesense) when directory size or query latency warrants it, counter-sharding if like/comment write contention emerges, and trusted background Cloud Functions for notification generation.
 
 ---
 
@@ -129,10 +129,9 @@ The current limits are deliberate MVP boundaries. A larger deployment could add 
 
 Current limitations include:
 
-- pure helper tests and an isolated Firestore Emulator Rules suite exist, but there are no service integration, end-to-end, or CI tests;
-- feed, directory, and notifications are bounded rather than cursor-paginated;
-- directory filtering is client-side rather than full-text indexed;
-- the current `users/{uid}` document mixes public profile, email, discoverability, and notification settings;
+- 53 unit tests and an isolated 97-test Firestore Emulator Rules suite exist; service integration, end-to-end, and CI tests remain deferred;
+- directory and notifications are bounded rather than cursor-paginated (feed uses cursor pagination);
+- directory search filters client-side over the `directoryIndex` projection rather than an external full-text index;
 - no Firebase Storage integration, media uploads, or image posts;
 - no post editing, sharing, search, or bookmarks;
 - no private messaging, presence, or read receipts;
@@ -149,11 +148,10 @@ These are known MVP boundaries, not hidden routes or missing components.
 
 The following are proposed, not implemented commitments:
 
-1. **Rules hardening and broader verification:** resolve the documented current Rule gaps, then add service integration checks and CI around the existing emulator Rules suite.
-2. **Public/private data boundary:** separate sensitive account/settings data from public profile reads and revisit discoverability enforcement at the data boundary.
-3. **Scalable read paths:** add cursor-based feed pagination and, if needed, an indexed discovery search.
-4. **Trusted event processing:** evaluate background processing for notification generation and retries.
-5. **Minimal connection-gated messaging:** only after privacy, abuse controls, and message data ownership are designed.
+1. **Rules hardening and broader verification:** resolve the documented current Rule gaps, then add service integration checks and CI around the existing emulator Rules and unit suites.
+2. **Search infrastructure scaling:** evaluate external indexed search services only if and when directory size or measured query latency demonstrates a concrete need.
+3. **Trusted event processing:** evaluate background processing for notification generation and retries.
+4. **Minimal connection-gated messaging:** only after privacy, abuse controls, and message data ownership are designed.
 
 Do not describe these as current capabilities during a demo.
 

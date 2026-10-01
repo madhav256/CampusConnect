@@ -37,3 +37,9 @@ scripts/credentials/
 # Milestone 14B production snapshots
 scripts/snapshots/
 *.snapshot.json
+
+# Playwright test artifacts
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/

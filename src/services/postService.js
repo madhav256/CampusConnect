@@ -108,23 +108,36 @@ export function subscribeToPostUpdatesInRange(newestDoc, oldestDoc, callback, on
     return () => {};
   }
 
-  const postsRef = collection(requireDb(), "posts");
-  const q = query(
-    postsRef,
-    orderBy("createdAt", "desc"),
-    startAt(newestDoc),
-    endAt(oldestDoc)
-  );
+  // A document with pending writes has an uncommitted server timestamp for createdAt,
+  // which Firestore forbids using in startAt/endAt query cursors.
+  if (newestDoc.metadata?.hasPendingWrites || oldestDoc.metadata?.hasPendingWrites) {
+    return () => {};
+  }
 
-  return onSnapshot(
-    q,
-    (snapshot) => {
-      snapshot.docChanges().forEach((change) => {
-        if (change.type === "added" || change.type === "modified") {
-          callback(change.doc);
-        }
-      });
-    },
-    onError
-  );
+  try {
+    const postsRef = collection(requireDb(), "posts");
+    const q = query(
+      postsRef,
+      orderBy("createdAt", "desc"),
+      startAt(newestDoc),
+      endAt(oldestDoc)
+    );
+
+    return onSnapshot(
+      q,
+      (snapshot) => {
+        snapshot.docChanges().forEach((change) => {
+          if (change.type === "added" || change.type === "modified") {
+            callback(change.doc);
+          }
+        });
+      },
+      onError
+    );
+  } catch (err) {
+    if (onError) {
+      onError(err);
+    }
+    return () => {};
+  }
 }

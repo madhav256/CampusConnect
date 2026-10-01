@@ -101,15 +101,26 @@ export function usePosts() {
         // Set up listener for newer posts (posts with timestamp greater than newestDoc)
         const unsubscribeNormal = subscribeToNewerPosts(
           (newerDocsSnapshot) => {
-            // Functional state update to handle multiple documents and deduplicate
+            // Functional state update to handle multiple documents, update pending snapshots, and deduplicate
             setPostsDocs(prev => {
-              const existingPostIds = new Set(prev.map(doc => doc.id));
-              const trulyNewerDocs = newerDocsSnapshot.filter(doc => !existingPostIds.has(doc.id));
+              const snapshotMap = new Map(newerDocsSnapshot.map(doc => [doc.id, doc]));
+              let hasReplacements = false;
+              const nextDocs = prev.map(doc => {
+                if (snapshotMap.has(doc.id)) {
+                  hasReplacements = true;
+                  const replacement = snapshotMap.get(doc.id);
+                  snapshotMap.delete(doc.id);
+                  return replacement;
+                }
+                return doc;
+              });
+
+              const trulyNewerDocs = Array.from(snapshotMap.values());
               if (trulyNewerDocs.length > 0) {
                 // Prepend genuinely new documents (they are newer than current newest)
-                return [...trulyNewerDocs, ...prev];
+                return [...trulyNewerDocs, ...nextDocs];
               }
-              return prev;
+              return hasReplacements ? nextDocs : prev;
             });
           },
           (err) => {
@@ -171,12 +182,23 @@ export function usePosts() {
                   const unsubscribeNormal = subscribeToNewerPosts(
                     (newerDocsSnapshot) => {
                       setPostsDocs(prev => {
-                        const existingPostIds = new Set(prev.map(doc => doc.id));
-                        const trulyNewerDocs = newerDocsSnapshot.filter(doc => !existingPostIds.has(doc.id));
+                        const snapshotMap = new Map(newerDocsSnapshot.map(doc => [doc.id, doc]));
+                        let hasReplacements = false;
+                        const nextDocs = prev.map(doc => {
+                          if (snapshotMap.has(doc.id)) {
+                            hasReplacements = true;
+                            const replacement = snapshotMap.get(doc.id);
+                            snapshotMap.delete(doc.id);
+                            return replacement;
+                          }
+                          return doc;
+                        });
+
+                        const trulyNewerDocs = Array.from(snapshotMap.values());
                         if (trulyNewerDocs.length > 0) {
-                          return [...trulyNewerDocs, ...prev];
+                          return [...trulyNewerDocs, ...nextDocs];
                         }
-                        return prev;
+                        return hasReplacements ? nextDocs : prev;
                       });
                     },
                     (err) => {

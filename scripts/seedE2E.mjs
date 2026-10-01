@@ -117,6 +117,101 @@ export async function seedE2EData() {
     updatedAt: now,
   }, { merge: true });
 
+  // 4. Seed deterministic relationship: Student A <-> Student B (Accepted)
+  const connABId = "e2e-student-a_e2e-student-b";
+  await db.collection("connections").doc(connABId).set({
+    users: [E2E_USERS.studentA.uid, E2E_USERS.studentB.uid],
+    senderId: E2E_USERS.studentB.uid,
+    receiverId: E2E_USERS.studentA.uid,
+    status: "accepted",
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  // Seed deterministic conversation & message: Student A <-> Student B (1 unread for Student A)
+  const convABRef = db.collection("conversations").doc(connABId);
+  await convABRef.set({
+    id: connABId,
+    participants: [E2E_USERS.studentA.uid, E2E_USERS.studentB.uid],
+    participantProfiles: {
+      [E2E_USERS.studentA.uid]: {
+        displayName: E2E_USERS.studentA.displayName,
+        photoURL: null,
+      },
+      [E2E_USERS.studentB.uid]: {
+        displayName: E2E_USERS.studentB.displayName,
+        photoURL: null,
+      },
+    },
+    lastMessage: {
+      id: "seed-msg-ab-1",
+      content: "Hey Alex, excited to connect on CampusConnect!",
+      senderId: E2E_USERS.studentB.uid,
+      createdAt: now,
+    },
+    unreadCount: {
+      [E2E_USERS.studentA.uid]: 1,
+      [E2E_USERS.studentB.uid]: 0,
+    },
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  await convABRef.collection("messages").doc("seed-msg-ab-1").set({
+    id: "seed-msg-ab-1",
+    conversationId: connABId,
+    senderId: E2E_USERS.studentB.uid,
+    content: "Hey Alex, excited to connect on CampusConnect!",
+    createdAt: now,
+  });
+
+  // 5. Seed deterministic relationship: Student B <-> Student C (Accepted, for disconnect test)
+  const connBCId = "e2e-student-b_e2e-student-c";
+  await db.collection("connections").doc(connBCId).set({
+    users: [E2E_USERS.studentB.uid, E2E_USERS.studentC.uid],
+    senderId: E2E_USERS.studentB.uid,
+    receiverId: E2E_USERS.studentC.uid,
+    status: "accepted",
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  const convBCRef = db.collection("conversations").doc(connBCId);
+  await convBCRef.set({
+    id: connBCId,
+    participants: [E2E_USERS.studentB.uid, E2E_USERS.studentC.uid],
+    participantProfiles: {
+      [E2E_USERS.studentB.uid]: {
+        displayName: E2E_USERS.studentB.displayName,
+        photoURL: null,
+      },
+      [E2E_USERS.studentC.uid]: {
+        displayName: E2E_USERS.studentC.displayName,
+        photoURL: null,
+      },
+    },
+    lastMessage: {
+      id: "seed-msg-bc-1",
+      content: "Hi Casey, glad we are connected!",
+      senderId: E2E_USERS.studentB.uid,
+      createdAt: now,
+    },
+    unreadCount: {
+      [E2E_USERS.studentB.uid]: 0,
+      [E2E_USERS.studentC.uid]: 0,
+    },
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  await convBCRef.collection("messages").doc("seed-msg-bc-1").set({
+    id: "seed-msg-bc-1",
+    conversationId: connBCId,
+    senderId: E2E_USERS.studentB.uid,
+    content: "Hi Casey, glad we are connected!",
+    createdAt: now,
+  });
+
   console.log("[seedE2E] Deterministic E2E data seeded successfully.");
 }
 

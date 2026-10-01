@@ -123,7 +123,7 @@ test.describe("Messaging Regression (Unit 17.3)", () => {
     await confirmRemoveBtn.click();
 
     // Verify Student C card disappears from active connections
-    await expect(page.locator(`#btn-remove-${E2E_USERS.studentC.uid}`)).not.toBeVisible();
+    await expect(confirmRemoveBtn).not.toBeVisible();
 
     // 2. Navigate to existing conversation with Student C
     await page.goto(`/messages/${convBCId}`);

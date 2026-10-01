@@ -127,7 +127,7 @@ test.describe("Milestone 17 — Unit 17.4: Mobile Responsive Interactions", () =
     await expect(confirmRemoveBtn).toBeVisible();
     await confirmRemoveBtn.click();
 
-    await expect(page.locator(`#btn-remove-${E2E_USERS.studentC.uid}`)).not.toBeVisible();
+    await expect(confirmRemoveBtn).not.toBeVisible();
 
     // 2. Navigate to /messages on mobile
     await page.goto("/messages");

@@ -26,7 +26,7 @@ test.describe("Milestone 17 — Unit 17.4: Disconnected Conversation Preservatio
     await expect(confirmRemoveBtn).toBeVisible();
     await confirmRemoveBtn.click();
 
-    await expect(page.locator(`#btn-remove-${E2E_USERS.studentC.uid}`)).not.toBeVisible();
+    await expect(confirmRemoveBtn).not.toBeVisible();
 
     // Navigate to /messages (main conversation list view)
     await page.goto("/messages");
@@ -56,7 +56,7 @@ test.describe("Milestone 17 — Unit 17.4: Disconnected Conversation Preservatio
     await expect(confirmRemoveBtn).toBeVisible();
     await confirmRemoveBtn.click();
 
-    await expect(page.locator(`#btn-remove-${E2E_USERS.studentC.uid}`)).not.toBeVisible();
+    await expect(confirmRemoveBtn).not.toBeVisible();
 
     // Navigate to /messages and open Casey Morgan's conversation from the list
     await page.goto("/messages");

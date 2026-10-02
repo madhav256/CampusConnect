@@ -274,6 +274,40 @@ export function communityMemberFixture(
   };
 }
 
+export function eventFixture(
+  id = "event-test-1",
+  creatorId = TEST_UIDS.alice,
+  communityId = "apex-ai-club",
+  overrides = {}
+) {
+  const isApex = overrides.campusId
+    ? overrides.campusId === APEX_CAMPUS_ID
+    : communityId.startsWith("apex") || communityId === "apex-ai-club";
+  const campusId = overrides.campusId || (isApex ? APEX_CAMPUS_ID : ST_JUDE_CAMPUS_ID);
+  const laterTimestamp = firebase.firestore.Timestamp.fromMillis(1_700_003_600_000);
+  return {
+    id,
+    campusId,
+    communityId,
+    title: "Test Event Title",
+    slug: "test-event-slug",
+    description: "A deterministic test event description.",
+    category: "tech",
+    location: "Main Auditorium Hall A",
+    startAt: timestamp,
+    endAt: laterTimestamp,
+    imageURL: null,
+    createdBy: creatorId,
+    organizerName: "Test Organizer",
+    status: "published",
+    visibility: "campus_public",
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    ...overrides,
+  };
+}
+
+
 export async function seedBaseData(testEnvironment) {
   await testEnvironment.withSecurityRulesDisabled(async (context) => {
     const db = context.firestore();

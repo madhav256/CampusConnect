@@ -910,6 +910,152 @@ service cloud.firestore {
         isCommunityAdmin(resource.data.communityId)
       );
     }
+
+    // 9. Events collection (Campus Events & Activities - Milestone 20)
+    match /events/{eventId} {
+      function isCommunityAdmin(communityId) {
+        let adminMembershipPath = /databases/$(database)/documents/communityMembers/$(communityId + '_' + request.auth.uid);
+        return exists(adminMembershipPath) &&
+               get(adminMembershipPath).data.role == 'admin' &&
+               get(adminMembershipPath).data.status == 'active' &&
+               get(adminMembershipPath).data.campusId == getUserCampusId();
+      }
+
+      function isCommunityActiveMember(communityId) {
+        let mPath = /databases/$(database)/documents/communityMembers/$(communityId + '_' + request.auth.uid);
+        return exists(mPath) &&
+               get(mPath).data.status == 'active' &&
+               get(mPath).data.campusId == getUserCampusId();
+      }
+
+      function isValidEventCreate(eId) {
+        let d = request.resource.data;
+        let communityPath = /databases/$(database)/documents/communities/$(d.communityId);
+        return d.keys().hasOnly([
+                 'id', 'campusId', 'communityId', 'title', 'slug', 'description',
+                 'category', 'location', 'startAt', 'endAt', 'imageURL',
+                 'createdBy', 'organizerName', 'status', 'visibility',
+                 'createdAt', 'updatedAt'
+               ]) &&
+               d.keys().hasAll([
+                 'id', 'campusId', 'communityId', 'title', 'slug', 'description',
+                 'category', 'location', 'startAt', 'endAt', 'imageURL',
+                 'createdBy', 'organizerName', 'status', 'visibility',
+                 'createdAt', 'updatedAt'
+               ]) &&
+               d.id == eId &&
+               d.createdBy == request.auth.uid &&
+               d.campusId is string &&
+               getUserCampusId() != null &&
+               d.campusId == getUserCampusId() &&
+               d.communityId is string &&
+               exists(communityPath) &&
+               get(communityPath).data.campusId == d.campusId &&
+               isCommunityModeratorOrAdmin(d.communityId) &&
+               d.title is string &&
+               d.title.size() >= 3 &&
+               d.title.size() <= 100 &&
+               d.slug is string &&
+               d.slug.size() > 0 &&
+               d.description is string &&
+               d.description.size() > 0 &&
+               d.description.size() <= 3000 &&
+               d.category in [
+                 'academic', 'tech', 'cultural', 'sports',
+                 'career', 'workshop', 'social', 'competition'
+               ] &&
+               d.location is string &&
+               d.location.size() > 0 &&
+               d.location.size() <= 200 &&
+               d.startAt is timestamp &&
+               d.endAt is timestamp &&
+               d.endAt >= d.startAt &&
+               (d.imageURL == null || (d.imageURL is string && d.imageURL.size() > 0)) &&
+               d.organizerName is string &&
+               d.organizerName.size() > 0 &&
+               d.status == 'published' &&
+               d.visibility in ['campus_public', 'community_only'] &&
+               d.createdAt == request.time &&
+               d.updatedAt == request.time;
+      }
+
+      function isValidEventUpdate(eId) {
+        let d = request.resource.data;
+        let r = resource.data;
+        let isCreator = request.auth.uid == r.createdBy;
+        let isModOrAdmin = isCommunityModeratorOrAdmin(r.communityId);
+
+        let immutableFieldsPreserved =
+          d.id == r.id &&
+          d.campusId == r.campusId &&
+          d.communityId == r.communityId &&
+          d.createdBy == r.createdBy &&
+          d.createdAt == r.createdAt &&
+          r.campusId == getUserCampusId();
+
+        let validMutableFields =
+          d.keys().hasOnly([
+            'id', 'campusId', 'communityId', 'title', 'slug', 'description',
+            'category', 'location', 'startAt', 'endAt', 'imageURL',
+            'createdBy', 'organizerName', 'status', 'visibility',
+            'createdAt', 'updatedAt'
+          ]) &&
+          d.keys().hasAll([
+            'id', 'campusId', 'communityId', 'title', 'slug', 'description',
+            'category', 'location', 'startAt', 'endAt', 'imageURL',
+            'createdBy', 'organizerName', 'status', 'visibility',
+            'createdAt', 'updatedAt'
+          ]) &&
+          d.title is string &&
+          d.title.size() >= 3 &&
+          d.title.size() <= 100 &&
+          d.slug is string &&
+          d.slug.size() > 0 &&
+          d.description is string &&
+          d.description.size() > 0 &&
+          d.description.size() <= 3000 &&
+          d.category in [
+            'academic', 'tech', 'cultural', 'sports',
+            'career', 'workshop', 'social', 'competition'
+          ] &&
+          d.location is string &&
+          d.location.size() > 0 &&
+          d.location.size() <= 200 &&
+          d.startAt is timestamp &&
+          d.endAt is timestamp &&
+          d.endAt >= d.startAt &&
+          (d.imageURL == null || (d.imageURL is string && d.imageURL.size() > 0)) &&
+          d.organizerName is string &&
+          d.organizerName.size() > 0 &&
+          d.status in ['published', 'cancelled'] &&
+          d.visibility in ['campus_public', 'community_only'] &&
+          d.updatedAt == request.time;
+
+        return (isCreator || isModOrAdmin) &&
+               immutableFieldsPreserved &&
+               validMutableFields;
+      }
+
+      allow read: if isAuthenticated() && (
+        resource.data.campusId == getUserCampusId() && (
+          resource.data.visibility == 'campus_public' ||
+          (
+            resource.data.visibility == 'community_only' &&
+            isCommunityActiveMember(resource.data.communityId)
+          )
+        )
+      );
+
+      allow create: if isAuthenticated() && isValidEventCreate(eventId);
+
+      allow update: if isAuthenticated() && isValidEventUpdate(eventId);
+
+      allow delete: if isAuthenticated() && (
+        resource.data.campusId == getUserCampusId() && (
+          resource.data.createdBy == request.auth.uid ||
+          isCommunityAdmin(resource.data.communityId)
+        )
+      );
+    }
   }
 }
-

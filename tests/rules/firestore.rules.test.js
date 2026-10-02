@@ -29,6 +29,7 @@ import {
   campusFixture,
   communityFixture,
   communityMemberFixture,
+  eventFixture,
 } from "./fixtures.js";
 
 const serverTimestamp = () => firebase.firestore.FieldValue.serverTimestamp();
@@ -54,6 +55,10 @@ function communityRef(context, communityId) {
 
 function communityMemberRef(context, membershipId) {
   return context.firestore().collection("communityMembers").doc(membershipId);
+}
+
+function eventRef(context, eventId) {
+  return context.firestore().collection("events").doc(eventId);
 }
 
 
@@ -4139,6 +4144,696 @@ describe("Milestone 18 — Unit 18.2: Campuses & Multi-Tenancy Rules", () => {
         await expectPermissionDenied(() =>
           postRef(bob, "david-campus-post").delete()
         );
+      });
+    });
+  });
+
+  describe("Milestone 20 — Unit 20.2: Event Security Authority & Rules", () => {
+    async function seedUserWithCampus(uid, campusId) {
+      await testEnvironment.withSecurityRulesDisabled(async (context) => {
+        const db = context.firestore();
+        await db.collection("users").doc(uid).set(userFixture(uid, { campusId }));
+        await db.collection("publicProfiles").doc(uid).set(publicProfileFixture(uid, { campusId }));
+        await db.collection("directoryIndex").doc(uid).set(directoryIndexFixture(uid, { campusId }));
+      });
+    }
+
+    async function seedCommunity(communityId, campusId, overrides = {}) {
+      await testEnvironment.withSecurityRulesDisabled(async (context) => {
+        const db = context.firestore();
+        await db
+          .collection("communities")
+          .doc(communityId)
+          .set(communityFixture(communityId, { campusId, ...overrides }));
+      });
+    }
+
+    async function seedCommunityMember(
+      membershipId,
+      communityId,
+      userId,
+      campusId,
+      role = COMMUNITY_MEMBER_ROLES.MEMBER,
+      status = COMMUNITY_MEMBER_STATUSES.ACTIVE,
+      overrides = {}
+    ) {
+      await testEnvironment.withSecurityRulesDisabled(async (context) => {
+        const db = context.firestore();
+        await db
+          .collection("communityMembers")
+          .doc(membershipId)
+          .set(
+            communityMemberFixture(communityId, userId, {
+              id: membershipId,
+              campusId,
+              role,
+              status,
+              ...overrides,
+            })
+          );
+      });
+    }
+
+    async function seedEvent(eventId, creatorId, campusId, communityId, overrides = {}) {
+      await testEnvironment.withSecurityRulesDisabled(async (context) => {
+        const db = context.firestore();
+        await db
+          .collection("events")
+          .doc(eventId)
+          .set(
+            eventFixture(eventId, creatorId, communityId, {
+              campusId,
+              ...overrides,
+            })
+          );
+      });
+    }
+
+    const aliceUid = TEST_UIDS.alice; // Admin of apex-ai-club (Apex)
+    const bobUid = TEST_UIDS.bob; // Moderator of apex-ai-club (Apex)
+    const carolUid = TEST_UIDS.carol; // Regular member of apex-ai-club (Apex)
+    const davidUid = "test-uid-david"; // Non-member student (Apex)
+    const eveUid = "test-uid-eve"; // Admin of st-jude-medical-society (St. Jude)
+    const frankUid = "test-uid-frank"; // Removed member of apex-ai-club (Apex)
+    const graceUid = "test-uid-grace"; // Pending member of apex-ai-club (Apex)
+
+    beforeEach(async () => {
+      await seedUserWithCampus(aliceUid, APEX_CAMPUS_ID);
+      await seedUserWithCampus(bobUid, APEX_CAMPUS_ID);
+      await seedUserWithCampus(carolUid, APEX_CAMPUS_ID);
+      await seedUserWithCampus(davidUid, APEX_CAMPUS_ID);
+      await seedUserWithCampus(eveUid, ST_JUDE_CAMPUS_ID);
+      await seedUserWithCampus(frankUid, APEX_CAMPUS_ID);
+      await seedUserWithCampus(graceUid, APEX_CAMPUS_ID);
+
+      await seedCommunity("apex-ai-club", APEX_CAMPUS_ID);
+      await seedCommunity("st-jude-medical-society", ST_JUDE_CAMPUS_ID);
+
+      await seedCommunityMember(
+        `apex-ai-club_${aliceUid}`,
+        "apex-ai-club",
+        aliceUid,
+        APEX_CAMPUS_ID,
+        COMMUNITY_MEMBER_ROLES.ADMIN,
+        COMMUNITY_MEMBER_STATUSES.ACTIVE
+      );
+      await seedCommunityMember(
+        `apex-ai-club_${bobUid}`,
+        "apex-ai-club",
+        bobUid,
+        APEX_CAMPUS_ID,
+        COMMUNITY_MEMBER_ROLES.MODERATOR,
+        COMMUNITY_MEMBER_STATUSES.ACTIVE
+      );
+      await seedCommunityMember(
+        `apex-ai-club_${carolUid}`,
+        "apex-ai-club",
+        carolUid,
+        APEX_CAMPUS_ID,
+        COMMUNITY_MEMBER_ROLES.MEMBER,
+        COMMUNITY_MEMBER_STATUSES.ACTIVE
+      );
+      await seedCommunityMember(
+        `apex-ai-club_${frankUid}`,
+        "apex-ai-club",
+        frankUid,
+        APEX_CAMPUS_ID,
+        COMMUNITY_MEMBER_ROLES.MEMBER,
+        COMMUNITY_MEMBER_STATUSES.REMOVED
+      );
+      await seedCommunityMember(
+        `apex-ai-club_${graceUid}`,
+        "apex-ai-club",
+        graceUid,
+        APEX_CAMPUS_ID,
+        COMMUNITY_MEMBER_ROLES.MEMBER,
+        COMMUNITY_MEMBER_STATUSES.PENDING
+      );
+      await seedCommunityMember(
+        `st-jude-medical-society_${eveUid}`,
+        "st-jude-medical-society",
+        eveUid,
+        ST_JUDE_CAMPUS_ID,
+        COMMUNITY_MEMBER_ROLES.ADMIN,
+        COMMUNITY_MEMBER_STATUSES.ACTIVE
+      );
+    });
+
+    describe("Authentication Rules", () => {
+      beforeEach(async () => {
+        await seedEvent("pub-event-1", aliceUid, APEX_CAMPUS_ID, "apex-ai-club", {
+          visibility: "campus_public",
+        });
+      });
+
+      it("unauthenticated read denied", async () => {
+        const unauth = unauthenticated();
+        await expectPermissionDenied(() => eventRef(unauth, "pub-event-1").get());
+      });
+
+      it("unauthenticated create denied", async () => {
+        const unauth = unauthenticated();
+        await expectPermissionDenied(() =>
+          eventRef(unauth, "new-event").set({
+            ...eventFixture("new-event", "anon", "apex-ai-club"),
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("unauthenticated update denied", async () => {
+        const unauth = unauthenticated();
+        await expectPermissionDenied(() =>
+          eventRef(unauth, "pub-event-1").update({
+            title: "Hacked Title",
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("unauthenticated delete denied", async () => {
+        const unauth = unauthenticated();
+        await expectPermissionDenied(() => eventRef(unauth, "pub-event-1").delete());
+      });
+    });
+
+    describe("Campus Isolation & Visibility (Read Rules)", () => {
+      beforeEach(async () => {
+        // Apex campus_public event
+        await seedEvent("apex-pub-event", aliceUid, APEX_CAMPUS_ID, "apex-ai-club", {
+          visibility: "campus_public",
+          status: "published",
+        });
+        // Apex community_only event
+        await seedEvent("apex-comm-event", aliceUid, APEX_CAMPUS_ID, "apex-ai-club", {
+          visibility: "community_only",
+          status: "published",
+        });
+        // Apex cancelled event
+        await seedEvent("apex-cancelled-pub", aliceUid, APEX_CAMPUS_ID, "apex-ai-club", {
+          visibility: "campus_public",
+          status: "cancelled",
+        });
+        await seedEvent("apex-cancelled-comm", aliceUid, APEX_CAMPUS_ID, "apex-ai-club", {
+          visibility: "community_only",
+          status: "cancelled",
+        });
+      });
+
+      it("same-campus campus_public read succeeds", async () => {
+        const david = contextFor(davidUid); // Non-member on same campus
+        await assertSucceeds(eventRef(david, "apex-pub-event").get());
+      });
+
+      it("cross-campus campus_public read denied", async () => {
+        const eve = contextFor(eveUid); // St. Jude student
+        await expectPermissionDenied(() => eventRef(eve, "apex-pub-event").get());
+      });
+
+      it("same-campus community_only member read succeeds", async () => {
+        const carol = contextFor(carolUid); // Active member
+        await assertSucceeds(eventRef(carol, "apex-comm-event").get());
+      });
+
+      it("cross-campus community_only read denied", async () => {
+        const eve = contextFor(eveUid); // St. Jude
+        await expectPermissionDenied(() => eventRef(eve, "apex-comm-event").get());
+      });
+
+      it("same-campus community_only non-member read denied", async () => {
+        const david = contextFor(davidUid); // Non-member on same campus
+        await expectPermissionDenied(() => eventRef(david, "apex-comm-event").get());
+      });
+
+      it("same-campus community_only removed member read denied", async () => {
+        const frank = contextFor(frankUid); // Removed member
+        await expectPermissionDenied(() => eventRef(frank, "apex-comm-event").get());
+      });
+
+      it("same-campus community_only pending member read denied", async () => {
+        const grace = contextFor(graceUid); // Pending member
+        await expectPermissionDenied(() => eventRef(grace, "apex-comm-event").get());
+      });
+
+      it("eligible same-campus reader can still read a cancelled event according to its visibility rules", async () => {
+        const david = contextFor(davidUid); // Non-member student on same campus
+        // Can read cancelled campus_public event
+        await assertSucceeds(eventRef(david, "apex-cancelled-pub").get());
+        // Cannot read cancelled community_only event
+        await expectPermissionDenied(() => eventRef(david, "apex-cancelled-comm").get());
+
+        const carol = contextFor(carolUid); // Active member
+        // Can read cancelled community_only event
+        await assertSucceeds(eventRef(carol, "apex-cancelled-comm").get());
+      });
+    });
+
+    describe("Creator Authority (Create Rules)", () => {
+      it("active community moderator can create event", async () => {
+        const bob = contextFor(bobUid); // Moderator
+        await assertSucceeds(
+          eventRef(bob, "bob-created-event").set({
+            ...eventFixture("bob-created-event", bobUid, "apex-ai-club"),
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("active community admin can create event", async () => {
+        const alice = contextFor(aliceUid); // Admin
+        await assertSucceeds(
+          eventRef(alice, "alice-created-event").set({
+            ...eventFixture("alice-created-event", aliceUid, "apex-ai-club"),
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("regular community member cannot create event", async () => {
+        const carol = contextFor(carolUid); // Regular member
+        await expectPermissionDenied(() =>
+          eventRef(carol, "carol-created-event").set({
+            ...eventFixture("carol-created-event", carolUid, "apex-ai-club"),
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("non-member cannot create event", async () => {
+        const david = contextFor(davidUid); // Non-member
+        await expectPermissionDenied(() =>
+          eventRef(david, "david-created-event").set({
+            ...eventFixture("david-created-event", davidUid, "apex-ai-club"),
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("removed member cannot create event", async () => {
+        const frank = contextFor(frankUid); // Removed member
+        await expectPermissionDenied(() =>
+          eventRef(frank, "frank-created-event").set({
+            ...eventFixture("frank-created-event", frankUid, "apex-ai-club"),
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("pending member cannot create event", async () => {
+        const grace = contextFor(graceUid); // Pending member
+        await expectPermissionDenied(() =>
+          eventRef(grace, "grace-created-event").set({
+            ...eventFixture("grace-created-event", graceUid, "apex-ai-club"),
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("moderator cannot create event for community on a different campus", async () => {
+        const bob = contextFor(bobUid); // Apex moderator
+        await expectPermissionDenied(() =>
+          eventRef(bob, "bob-cross-campus").set({
+            ...eventFixture("bob-cross-campus", bobUid, "st-jude-medical-society", {
+              campusId: APEX_CAMPUS_ID,
+            }),
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("creator cannot create event referencing nonexistent community", async () => {
+        const bob = contextFor(bobUid);
+        await expectPermissionDenied(() =>
+          eventRef(bob, "bob-nonexistent-comm").set({
+            ...eventFixture("bob-nonexistent-comm", bobUid, "nonexistent-community-xyz"),
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("create fails if event campusId does not match user's campus", async () => {
+        const bob = contextFor(bobUid); // Apex student
+        await expectPermissionDenied(() =>
+          eventRef(bob, "bob-wrong-campus").set({
+            ...eventFixture("bob-wrong-campus", bobUid, "apex-ai-club", {
+              campusId: ST_JUDE_CAMPUS_ID,
+            }),
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+    });
+
+    describe("Schema Enforcement (Create Rules)", () => {
+      it("missing required field is rejected", async () => {
+        const bob = contextFor(bobUid);
+        const invalidPayload = eventFixture("bob-missing-loc", bobUid, "apex-ai-club");
+        delete invalidPayload.location;
+
+        await expectPermissionDenied(() =>
+          eventRef(bob, "bob-missing-loc").set({
+            ...invalidPayload,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("unexpected extra field is rejected", async () => {
+        const bob = contextFor(bobUid);
+        await expectPermissionDenied(() =>
+          eventRef(bob, "bob-extra-field").set({
+            ...eventFixture("bob-extra-field", bobUid, "apex-ai-club"),
+            extraField: "not allowed",
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("incorrect id is rejected", async () => {
+        const bob = contextFor(bobUid);
+        await expectPermissionDenied(() =>
+          eventRef(bob, "actual-doc-id").set({
+            ...eventFixture("actual-doc-id", bobUid, "apex-ai-club", {
+              id: "mismatched-doc-id",
+            }),
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("incorrect createdBy is rejected", async () => {
+        const bob = contextFor(bobUid);
+        await expectPermissionDenied(() =>
+          eventRef(bob, "bob-fake-author").set({
+            ...eventFixture("bob-fake-author", bobUid, "apex-ai-club", {
+              createdBy: aliceUid,
+            }),
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("invalid category is rejected", async () => {
+        const bob = contextFor(bobUid);
+        await expectPermissionDenied(() =>
+          eventRef(bob, "bob-bad-cat").set({
+            ...eventFixture("bob-bad-cat", bobUid, "apex-ai-club", {
+              category: "unsupported-category",
+            }),
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("initial status other than published is rejected", async () => {
+        const bob = contextFor(bobUid);
+        await expectPermissionDenied(() =>
+          eventRef(bob, "bob-cancelled-initial").set({
+            ...eventFixture("bob-cancelled-initial", bobUid, "apex-ai-club", {
+              status: "cancelled",
+            }),
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("invalid visibility is rejected", async () => {
+        const bob = contextFor(bobUid);
+        await expectPermissionDenied(() =>
+          eventRef(bob, "bob-bad-vis").set({
+            ...eventFixture("bob-bad-vis", bobUid, "apex-ai-club", {
+              visibility: "invite_only",
+            }),
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("non-timestamp startAt is rejected", async () => {
+        const bob = contextFor(bobUid);
+        await expectPermissionDenied(() =>
+          eventRef(bob, "bob-bad-start").set({
+            ...eventFixture("bob-bad-start", bobUid, "apex-ai-club", {
+              startAt: "2026-10-15T09:00:00Z",
+            }),
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("non-timestamp endAt is rejected", async () => {
+        const bob = contextFor(bobUid);
+        await expectPermissionDenied(() =>
+          eventRef(bob, "bob-bad-end").set({
+            ...eventFixture("bob-bad-end", bobUid, "apex-ai-club", {
+              endAt: 1700000000000,
+            }),
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("endAt before startAt is rejected", async () => {
+        const bob = contextFor(bobUid);
+        const earlyTimestamp = firebase.firestore.Timestamp.fromMillis(1_699_000_000_000);
+        await expectPermissionDenied(() =>
+          eventRef(bob, "bob-inverted-dates").set({
+            ...eventFixture("bob-inverted-dates", bobUid, "apex-ai-club", {
+              startAt: timestamp,
+              endAt: earlyTimestamp,
+            }),
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("incorrect createdAt is rejected", async () => {
+        const bob = contextFor(bobUid);
+        await expectPermissionDenied(() =>
+          eventRef(bob, "bob-bad-created-at").set({
+            ...eventFixture("bob-bad-created-at", bobUid, "apex-ai-club"),
+            createdAt: timestamp,
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("incorrect updatedAt is rejected", async () => {
+        const bob = contextFor(bobUid);
+        await expectPermissionDenied(() =>
+          eventRef(bob, "bob-bad-updated-at").set({
+            ...eventFixture("bob-bad-updated-at", bobUid, "apex-ai-club"),
+            createdAt: serverTimestamp(),
+            updatedAt: timestamp,
+          })
+        );
+      });
+    });
+
+    describe("Immutability Contract (Update Rules)", () => {
+      beforeEach(async () => {
+        await seedEvent("immutable-event-1", bobUid, APEX_CAMPUS_ID, "apex-ai-club");
+      });
+
+      it("update is denied when attempting to change id", async () => {
+        const bob = contextFor(bobUid);
+        await expectPermissionDenied(() =>
+          eventRef(bob, "immutable-event-1").update({
+            id: "changed-id",
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("update is denied when attempting to change campusId", async () => {
+        const bob = contextFor(bobUid);
+        await expectPermissionDenied(() =>
+          eventRef(bob, "immutable-event-1").update({
+            campusId: ST_JUDE_CAMPUS_ID,
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("update is denied when attempting to change communityId", async () => {
+        const bob = contextFor(bobUid);
+        await expectPermissionDenied(() =>
+          eventRef(bob, "immutable-event-1").update({
+            communityId: "st-jude-medical-society",
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("update is denied when attempting to change createdBy", async () => {
+        const bob = contextFor(bobUid);
+        await expectPermissionDenied(() =>
+          eventRef(bob, "immutable-event-1").update({
+            createdBy: aliceUid,
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("update is denied when attempting to change createdAt", async () => {
+        const bob = contextFor(bobUid);
+        await expectPermissionDenied(() =>
+          eventRef(bob, "immutable-event-1").update({
+            createdAt: laterTimestamp,
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+    });
+
+    describe("Update Authority & Cancellation", () => {
+      beforeEach(async () => {
+        await seedEvent("alice-event-1", aliceUid, APEX_CAMPUS_ID, "apex-ai-club");
+        await seedEvent("bob-event-1", bobUid, APEX_CAMPUS_ID, "apex-ai-club");
+      });
+
+      it("creator can update mutable event details", async () => {
+        const alice = contextFor(aliceUid);
+        await assertSucceeds(
+          eventRef(alice, "alice-event-1").update({
+            title: "Updated Alice Event Title",
+            description: "Updated description text.",
+            location: "Updated Hall B",
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("active community moderator can update mutable event details", async () => {
+        const bob = contextFor(bobUid); // Moderator of apex-ai-club
+        await assertSucceeds(
+          eventRef(bob, "alice-event-1").update({
+            title: "Moderator Updated Title",
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("active community admin can update mutable event details", async () => {
+        const alice = contextFor(aliceUid); // Admin of apex-ai-club
+        await assertSucceeds(
+          eventRef(alice, "bob-event-1").update({
+            title: "Admin Updated Title",
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("ordinary member cannot update event", async () => {
+        const carol = contextFor(carolUid); // Regular member
+        await expectPermissionDenied(() =>
+          eventRef(carol, "alice-event-1").update({
+            title: "Carol Hack Attempt",
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("unrelated student cannot update event", async () => {
+        const david = contextFor(davidUid); // Non-member student
+        await expectPermissionDenied(() =>
+          eventRef(david, "alice-event-1").update({
+            title: "David Hack Attempt",
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("creator can cancel event", async () => {
+        const alice = contextFor(aliceUid);
+        await assertSucceeds(
+          eventRef(alice, "alice-event-1").update({
+            status: "cancelled",
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("active community moderator can cancel event", async () => {
+        const bob = contextFor(bobUid); // Moderator
+        await assertSucceeds(
+          eventRef(bob, "alice-event-1").update({
+            status: "cancelled",
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("active community admin can cancel event", async () => {
+        const alice = contextFor(aliceUid); // Admin
+        await assertSucceeds(
+          eventRef(alice, "bob-event-1").update({
+            status: "cancelled",
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("ordinary member cannot cancel event", async () => {
+        const carol = contextFor(carolUid);
+        await expectPermissionDenied(() =>
+          eventRef(carol, "alice-event-1").update({
+            status: "cancelled",
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+    });
+
+    describe("Hard Delete Authority", () => {
+      beforeEach(async () => {
+        await seedEvent("delete-target-alice", aliceUid, APEX_CAMPUS_ID, "apex-ai-club");
+        await seedEvent("delete-target-bob", bobUid, APEX_CAMPUS_ID, "apex-ai-club");
+      });
+
+      it("creator can delete event", async () => {
+        const bob = contextFor(bobUid);
+        await assertSucceeds(eventRef(bob, "delete-target-bob").delete());
+      });
+
+      it("active community admin can delete event", async () => {
+        const alice = contextFor(aliceUid); // Admin
+        await assertSucceeds(eventRef(alice, "delete-target-bob").delete());
+      });
+
+      it("community moderator who is not creator cannot hard-delete event", async () => {
+        const bob = contextFor(bobUid); // Moderator
+        await expectPermissionDenied(() => eventRef(bob, "delete-target-alice").delete());
+      });
+
+      it("ordinary member cannot delete event", async () => {
+        const carol = contextFor(carolUid); // Member
+        await expectPermissionDenied(() => eventRef(carol, "delete-target-alice").delete());
+      });
+
+      it("cross-campus admin cannot delete event", async () => {
+        const eve = contextFor(eveUid); // St. Jude admin
+        await expectPermissionDenied(() => eventRef(eve, "delete-target-alice").delete());
       });
     });
   });

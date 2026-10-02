@@ -124,6 +124,10 @@ export function renderHook(hookFn, { initialProps } = {}) {
         }
         return refs[i];
       },
+
+      useContext(context) {
+        return context?._currentValue ?? null;
+      },
     };
 
     result.current = hookFn(currentProps);

@@ -3,7 +3,7 @@ import { subscribeToNewerPosts, fetchOlderPosts, createPost, deletePost, subscri
 import { useAuth } from "./useAuth";
 import { POSTS_PER_PAGE } from "../constants";
 import { db, isFirebaseConfigured } from "../firebase/config";
-import { collection, query, orderBy, endBefore, getDocs } from "firebase/firestore";
+import { collection, query, orderBy, endBefore, getDocs, where } from "firebase/firestore";
 
 function requireDb() {
   if (!isFirebaseConfigured || !db) {
@@ -14,7 +14,8 @@ function requireDb() {
   return db;
 }
 
-export function usePosts() {
+export function usePosts(options = {}) {
+  const explicitCampusId = typeof options === "string" ? options : options?.campusId || null;
   const { user } = useAuth();
   const [postsDocs, setPostsDocs] = useState([]); // DocumentSnapshots, newest to oldest
   const [postUpdates, setPostUpdates] = useState(new Map()); // postId => {likesCount: number, commentsCount: number}
@@ -90,7 +91,7 @@ export function usePosts() {
       }
 
       // Fetch the first page deterministically
-      const firstPageDocs = await fetchOlderPosts(POSTS_PER_PAGE, null);
+      const firstPageDocs = await fetchOlderPosts(POSTS_PER_PAGE, null, explicitCampusId);
 
       setPostsDocs(firstPageDocs);
 
@@ -127,17 +128,25 @@ export function usePosts() {
             console.error("Error subscribing to newer posts:", err);
             setError(() => "Failed to load new posts.");
           },
-          newestDoc // cursor for endBefore
+          newestDoc, // cursor for endBefore
+          explicitCampusId
         );
         normalListenerUnsubscribeRef.current = unsubscribeNormal;
 
         // Catch-up query: get any posts that may have been created between the fetch and listener setup
         // These are posts with timestamp > newestDoc (i.e., endBefore(newestDoc) with no limit)
-        const catchUpQuery = query(
-          collection(requireDb(), "posts"),
-          orderBy("createdAt", "desc"),
-          endBefore(newestDoc)
-        );
+        const catchUpQuery = explicitCampusId
+          ? query(
+              collection(requireDb(), "posts"),
+              where("campusId", "==", explicitCampusId),
+              orderBy("createdAt", "desc"),
+              endBefore(newestDoc)
+            )
+          : query(
+              collection(requireDb(), "posts"),
+              orderBy("createdAt", "desc"),
+              endBefore(newestDoc)
+            );
         const catchUpSnapshot = await getDocs(catchUpQuery);
         const catchUpDocs = catchUpSnapshot.docs;
 
@@ -174,7 +183,7 @@ export function usePosts() {
                 emptyFeedListenerUnsubscribeRef.current = null;
               }
               // Now fetch the first page (there is at least one post)
-              fetchOlderPosts(POSTS_PER_PAGE, null).then((firstPageDocs) => {
+              fetchOlderPosts(POSTS_PER_PAGE, null, explicitCampusId).then((firstPageDocs) => {
                 setPostsDocs(firstPageDocs);
                 if (firstPageDocs.length > 0) {
                   const newestDoc = firstPageDocs[0];
@@ -205,15 +214,23 @@ export function usePosts() {
                       console.error("Error subscribing to newer posts:", err);
                       setError(() => "Failed to load new posts.");
                     },
-                    newestDoc // cursor for endBefore
+                    newestDoc, // cursor for endBefore
+                    explicitCampusId
                   );
                   normalListenerUnsubscribeRef.current = unsubscribeNormal;
                   // Catch-up query for any posts that may have appeared between empty-feed detection and fetch
-                  const catchUpQuery = query(
-                    collection(requireDb(), "posts"),
-                    orderBy("createdAt", "desc"),
-                    endBefore(newestDoc)
-                  );
+                  const catchUpQuery = explicitCampusId
+                    ? query(
+                        collection(requireDb(), "posts"),
+                        where("campusId", "==", explicitCampusId),
+                        orderBy("createdAt", "desc"),
+                        endBefore(newestDoc)
+                      )
+                    : query(
+                        collection(requireDb(), "posts"),
+                        orderBy("createdAt", "desc"),
+                        endBefore(newestDoc)
+                      );
                   getDocs(catchUpQuery).then((catchUpSnapshot) => {
                     const catchUpDocs = catchUpSnapshot.docs;
                     if (catchUpDocs.length > 0) {
@@ -255,7 +272,7 @@ export function usePosts() {
       setIsInitialLoading(false);
       setIsInitialError(true);
     }
-  }, [user]);
+  }, [user, explicitCampusId]);
 
   // Load more older posts
   const loadMore = useCallback(async () => {
@@ -266,7 +283,7 @@ export function usePosts() {
 
     try {
       const oldestDoc = postsDocs.length > 0 ? postsDocs[postsDocs.length - 1] : null;
-      const olderDocs = await fetchOlderPosts(POSTS_PER_PAGE, oldestDoc);
+      const olderDocs = await fetchOlderPosts(POSTS_PER_PAGE, oldestDoc, explicitCampusId);
 
       if (olderDocs.length > 0) {
         // Filter out any posts we already have (by ID) to avoid duplicates
@@ -292,19 +309,22 @@ export function usePosts() {
     } finally {
       setIsFetchingOlder(false);
     }
-  }, [user, hasMorePosts, postsDocs, isFetchingOlder]);
+  }, [user, hasMorePosts, postsDocs, isFetchingOlder, explicitCampusId]);
 
   // Add a new post
-  const addPost = useCallback(async (content) => {
+  const addPost = useCallback(async (content, postCampusId = null) => {
     if (!user) throw new Error("Must be logged in to post.");
     if (!content || !content.trim()) throw new Error("Post content cannot be empty.");
+
+    const campusId = postCampusId || explicitCampusId || null;
 
     try {
       const postId = await createPost(
         user.uid,
         user.name || "Student",
         user.avatar || null,
-        content
+        content,
+        campusId
       );
 
       // No optimistic update - rely on realtime listener
@@ -313,7 +333,7 @@ export function usePosts() {
       console.error("Failed to create post:", err);
       throw err;
     }
-  }, [user]);
+  }, [user, explicitCampusId]);
 
   // Remove a post
   const removePost = useCallback(async (postId) => {

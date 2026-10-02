@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   endBefore: vi.fn(),
   updateDoc: vi.fn(),
   getDocs: vi.fn(),
+  where: vi.fn((field, op, val) => ({ field, op, val })),
   mockDb: { id: "mock-db" },
 }));
 
@@ -42,6 +43,7 @@ vi.mock("firebase/firestore", () => ({
   endAt: mocks.endAt,
   updateDoc: mocks.updateDoc,
   getDocs: mocks.getDocs,
+  where: mocks.where,
 }));
 
 import { subscribeToPostUpdatesInRange } from "../../src/services/postService.js";

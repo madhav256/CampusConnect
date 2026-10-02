@@ -92,6 +92,7 @@ export async function createPendingRequest(fromUser, toUser) {
     senderId: fromUser.uid,
     receiverId: toUser.uid,
     status: "pending",
+    campusId: fromUser.campusId || "apex-university",
     createdAt: now,
     updatedAt: now,
   });
@@ -128,6 +129,7 @@ export async function resetMessagingPairAB() {
     senderId: E2E_USERS.studentB.uid,
     receiverId: E2E_USERS.studentA.uid,
     status: "accepted",
+    campusId: "apex-university",
     createdAt: now,
     updatedAt: now,
   });
@@ -159,6 +161,7 @@ export async function resetMessagingPairAB() {
   await convABRef.set({
     id: connABId,
     participants: [E2E_USERS.studentA.uid, E2E_USERS.studentB.uid],
+    campusId: "apex-university",
     participantProfiles: {
       [E2E_USERS.studentA.uid]: {
         displayName: E2E_USERS.studentA.displayName,
@@ -198,6 +201,7 @@ export async function resetMessagingPairBC() {
     senderId: E2E_USERS.studentB.uid,
     receiverId: E2E_USERS.studentC.uid,
     status: "accepted",
+    campusId: "apex-university",
     createdAt: now,
     updatedAt: now,
   });
@@ -229,6 +233,7 @@ export async function resetMessagingPairBC() {
   await convBCRef.set({
     id: connBCId,
     participants: [E2E_USERS.studentB.uid, E2E_USERS.studentC.uid],
+    campusId: "apex-university",
     participantProfiles: {
       [E2E_USERS.studentB.uid]: {
         displayName: E2E_USERS.studentB.displayName,

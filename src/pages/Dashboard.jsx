@@ -1,11 +1,14 @@
 import { useState } from "react";
 import { useAuth } from "../hooks/useAuth";
+import { useOptionalCampus } from "../hooks/useCampus";
 import Navbar from "../components/layout/Navbar";
 import PageContainer from "../components/layout/PageContainer";
 import Feed from "../components/feed/Feed";
 
 export default function Dashboard() {
   const { user } = useAuth();
+  const campusContext = useOptionalCampus();
+  const campus = campusContext?.campus || null;
   const [error] = useState("");
 
   return (
@@ -23,7 +26,11 @@ export default function Dashboard() {
           <h1 className="font-serif text-3xl font-bold tracking-tight text-ink">
             Welcome back, {user?.name?.split(" ")[0] || "Student"}!
           </h1>
-          <p className="mt-1 text-ink-muted">Here&apos;s what&apos;s happening on campus today.</p>
+          <p className="mt-1 text-ink-muted">
+            {campus
+              ? `Here's what's happening at ${campus.name} today.`
+              : "Here's what's happening on campus today."}
+          </p>
         </div>
 
         <Feed />

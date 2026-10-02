@@ -10,6 +10,7 @@ import PageContainer from "../components/layout/PageContainer";
 import Section from "../components/layout/Section";
 import Avatar from "../components/ui/Avatar";
 import Card from "../components/ui/Card";
+import { CAMPUSES } from "../data/campuses";
 
 
 function getVisibleLinks(socialLinks = {}) {
@@ -66,10 +67,17 @@ export default function PublicProfile() {
         }
       } catch (err) {
         if (!isMounted) return;
+        const isNotFoundOrPermDenied =
+          err?.code === "permission-denied" ||
+          err?.message?.includes("Missing or insufficient permissions") ||
+          err?.message?.includes("permission-denied");
+
         setProfileState({
           loadedUid: uid,
           profile: null,
-          error: err.message || "Failed to load student profile.",
+          error: isNotFoundOrPermDenied
+            ? "This student profile does not exist or has been removed."
+            : err.message || "Failed to load student profile.",
         });
       }
     }
@@ -84,6 +92,10 @@ export default function PublicProfile() {
   const isLoading = profileState.loadedUid !== uid;
   const profile = profileState.profile;
   const error = profileState.error;
+
+  const targetCampus = profile?.campusId
+    ? CAMPUSES[profile.campusId] || { name: profile.campusId, shortName: profile.campusId }
+    : null;
 
   const visibleLinks = profile?.socialLinks
     ? getVisibleLinks(profile.socialLinks)
@@ -185,7 +197,16 @@ export default function PublicProfile() {
                 <Avatar name={profile.displayName} photoURL={profile.photoURL} size="xl" />
               </div>
               <div className="flex flex-col items-start sm:items-end gap-3 pb-2">
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  {targetCampus && (
+                    <span
+                      id="public-profile-campus-badge"
+                      className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-800 border border-emerald-200/60"
+                    >
+                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden="true"></span>
+                      {targetCampus.shortName || targetCampus.name}
+                    </span>
+                  )}
                   {profile.department && (
                     <span className="rounded-full bg-terracotta-50 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-terracotta-700 border border-terracotta-200/50">
                       {profile.department}

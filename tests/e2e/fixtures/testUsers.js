@@ -15,6 +15,7 @@ export const E2E_USERS = {
     year: "Senior",
     bio: "Computer Science senior focused on web architectures.",
     skills: ["React", "JavaScript", "Node.js"],
+    campusId: "apex-university",
     isDiscoverable: true,
   },
   studentB: {
@@ -26,6 +27,7 @@ export const E2E_USERS = {
     year: "Junior",
     bio: "HCI and Design Systems student.",
     skills: ["UI/UX", "Figma", "Tailwind"],
+    campusId: "apex-university",
     isDiscoverable: true,
   },
   studentC: {
@@ -37,6 +39,19 @@ export const E2E_USERS = {
     year: "Sophomore",
     bio: "Machine learning and statistics explorer.",
     skills: ["Python", "Machine Learning"],
+    campusId: "apex-university",
+    isDiscoverable: true,
+  },
+  studentStJude: {
+    uid: "e2e-student-st-jude",
+    email: "e2e.student.stjude@campusconnect.test",
+    password: "TestPassword123!",
+    displayName: "Rohan Varma",
+    department: "Computer Science",
+    year: "Junior",
+    bio: "St. Jude CS student.",
+    skills: ["Python", "Django"],
+    campusId: "st-jude-university",
     isDiscoverable: true,
   },
 };

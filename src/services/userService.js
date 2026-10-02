@@ -10,11 +10,10 @@ import {
   serverTimestamp,
   setDoc,
   updateDoc,
+  where,
   writeBatch,
 } from "firebase/firestore";
 import { db, isFirebaseConfigured } from "../firebase/config";
-
-
 
 function requireDb() {
   if (!isFirebaseConfigured || !db) {
@@ -53,6 +52,7 @@ export function normalizePublicProfile(uid, data) {
       portfolio: data?.socialLinks?.portfolio || "",
       website: data?.socialLinks?.website || "",
     },
+    ...(data?.campusId ? { campusId: data.campusId } : {}),
   };
 }
 
@@ -67,13 +67,20 @@ export function normalizeUserSettings(uid, data) {
       connectionAccepted:
         data?.notificationPreferences?.connectionAccepted !== false,
     },
+    ...(data?.campusId ? { campusId: data.campusId } : {}),
     createdAt: data?.createdAt || null,
     updatedAt: data?.updatedAt || null,
   };
 }
 
-
-export async function createUserProfile({ uid, displayName, email, photoURL, isDiscoverable = true }) {
+export async function createUserProfile({
+  uid,
+  displayName,
+  email,
+  photoURL,
+  isDiscoverable = true,
+  campusId = null,
+}) {
   const uRef = userDocRef(uid);
   const pubRef = publicProfileDocRef(uid);
   const indexRef = directoryIndexDocRef(uid);
@@ -103,6 +110,7 @@ export async function createUserProfile({ uid, displayName, email, photoURL, isD
     },
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
+    ...(campusId ? { campusId } : {}),
   };
 
   const publicProfile = {
@@ -119,6 +127,7 @@ export async function createUserProfile({ uid, displayName, email, photoURL, isD
       portfolio: "",
       website: "",
     },
+    ...(campusId ? { campusId } : {}),
   };
 
   batch.set(uRef, privateUser);
@@ -133,11 +142,12 @@ export async function createUserProfile({ uid, displayName, email, photoURL, isD
       year: "",
       skills: [],
       updatedAt: serverTimestamp(),
+      ...(campusId ? { campusId } : {}),
     });
   }
 
   await batch.commit();
-  usersCache = null;
+  usersCacheMap.clear();
 
   return {
     uid,
@@ -174,6 +184,8 @@ export function subscribeToUserProfile(uid, callback, onError) {
       year: publicProfile.year,
       skills: publicProfile.skills,
       socialLinks: publicProfile.socialLinks,
+      // Campus context
+      campusId: privateSettings.campusId || publicProfile.campusId || null,
       // Private fields strictly from users/{uid}
       email: privateSettings.email,
       isDiscoverable: privateSettings.isDiscoverable,
@@ -245,6 +257,7 @@ export async function updateUserProfile(uid, updates) {
     ...(updates.socialLinks || {}),
   };
   const newBio = updates.bio !== undefined ? updates.bio : (currentPub.bio || "");
+  const campusId = updates.campusId !== undefined ? updates.campusId : (currentPub.campusId || null);
 
   const publicProfileData = {
     uid,
@@ -255,6 +268,7 @@ export async function updateUserProfile(uid, updates) {
     year: newYear,
     skills: newSkills,
     socialLinks: newSocialLinks,
+    ...(campusId ? { campusId } : {}),
   };
 
   if (isDiscoverable) {
@@ -268,13 +282,14 @@ export async function updateUserProfile(uid, updates) {
       year: newYear,
       skills: newSkills,
       updatedAt: serverTimestamp(),
+      ...(campusId ? { campusId } : {}),
     });
     await batch.commit();
   } else {
     await setDoc(pubRef, publicProfileData, { merge: true });
   }
 
-  usersCache = null;
+  usersCacheMap.clear();
 }
 
 export async function updateUserSettings(uid, settingsUpdates) {
@@ -340,6 +355,7 @@ export async function updateUserSettings(uid, settingsUpdates) {
         year: pubData.year || "",
         skills: Array.isArray(pubData.skills) ? pubData.skills : [],
         updatedAt: serverTimestamp(),
+        ...(pubData.campusId ? { campusId: pubData.campusId } : {}),
       });
     } else {
       batch.delete(indexRef);
@@ -350,30 +366,55 @@ export async function updateUserSettings(uid, settingsUpdates) {
     await updateDoc(userRef, updates);
   }
 
-  usersCache = null;
+  usersCacheMap.clear();
 }
 
-let usersCache = null;
-let lastFetchTime = 0;
+const usersCacheMap = new Map();
 const CACHE_TTL_MS = 2 * 60 * 1000; // 2 minutes
 
-export async function fetchAllUsers(limitCount = 100) {
+export function clearUsersCache() {
+  usersCacheMap.clear();
+}
+
+export async function fetchAllUsers(limitCount = 100, options = {}) {
+  let count = limitCount;
+  let opts = options;
+  if (typeof limitCount === "object" && limitCount !== null) {
+    opts = limitCount;
+    count = opts.limit || 100;
+  }
+
+  const campusId = opts?.campusId || null;
+  const cacheKey = campusId || "__all__";
+
   const now = Date.now();
-  if (usersCache && now - lastFetchTime < CACHE_TTL_MS) {
-    return usersCache;
+  const cached = usersCacheMap.get(cacheKey);
+  if (cached && now - cached.timestamp < CACHE_TTL_MS) {
+    return cached.data;
   }
 
   const firestore = requireDb();
   const directoryRef = collection(firestore, "directoryIndex");
-  const q = query(directoryRef, orderBy("updatedAt", "desc"), limit(limitCount));
+
+  let q;
+  if (campusId) {
+    q = query(
+      directoryRef,
+      where("campusId", "==", campusId),
+      orderBy("updatedAt", "desc"),
+      limit(count),
+    );
+  } else {
+    q = query(directoryRef, orderBy("updatedAt", "desc"), limit(count));
+  }
+
   const snapshot = await getDocs(q);
 
   const users = snapshot.docs.map((docSnap) =>
-    normalizePublicProfile(docSnap.id, docSnap.data())
+    normalizePublicProfile(docSnap.id, docSnap.data()),
   );
 
-  usersCache = users;
-  lastFetchTime = now;
+  usersCacheMap.set(cacheKey, { data: users, timestamp: now });
   return users;
 }
 
@@ -382,13 +423,19 @@ export async function fetchUserById(uid) {
     return null;
   }
 
-  const pubRef = publicProfileDocRef(uid);
-  const snapshot = await getDoc(pubRef);
+  try {
+    const pubRef = publicProfileDocRef(uid);
+    const snapshot = await getDoc(pubRef);
 
-  if (!snapshot.exists()) {
-    return null;
+    if (!snapshot.exists()) {
+      return null;
+    }
+
+    return normalizePublicProfile(uid, snapshot.data());
+  } catch (err) {
+    if (err?.code === "permission-denied" || err?.message?.includes("permission")) {
+      return null;
+    }
+    throw err;
   }
-
-  return normalizePublicProfile(uid, snapshot.data());
 }
-

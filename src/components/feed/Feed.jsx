@@ -1,6 +1,7 @@
 import { FileText } from "lucide-react";
 import { usePosts } from "../../hooks/usePosts";
 import { useAuth } from "../../hooks/useAuth";
+import { useOptionalCampus } from "../../hooks/useCampus";
 import PostComposer from "./PostComposer";
 import PostCard from "./PostCard";
 import Card from "../ui/Card";
@@ -10,6 +11,8 @@ import { useEffect } from "react";
 
 export default function Feed() {
   const { user } = useAuth();
+  const campusContext = useOptionalCampus();
+  const campusId = campusContext?.campusId || null;
   const {
     posts,
     isLoading,
@@ -22,7 +25,7 @@ export default function Feed() {
     removePost,
     isInitialError,
     updatePost  // Function to update post state from children
-  } = usePosts();
+  } = usePosts({ campusId });
 
   // Initialize feed on mount
   useEffect(() => {

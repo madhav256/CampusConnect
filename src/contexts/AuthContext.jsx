@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AuthContext } from "./authContextValue";
 import {
   configureAuthPersistence,
@@ -16,6 +16,7 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [authError, setAuthError] = useState("");
+  const isSigningUpRef = useRef(false);
 
   useEffect(() => {
     let unsubscribe = () => {};
@@ -29,7 +30,7 @@ export function AuthProvider({ children }) {
             const authUser = toAuthUser(firebaseUser);
             setUser(authUser);
             setLoading(false);
-            if (authUser) {
+            if (authUser && !isSigningUpRef.current) {
               createUserProfile({
                 uid: authUser.uid,
                 displayName: authUser.name,
@@ -71,6 +72,7 @@ export function AuthProvider({ children }) {
 
   const signup = useCallback(async (credentials) => {
     setAuthError("");
+    isSigningUpRef.current = true;
 
     try {
       const createdUser = await signUpWithEmail(credentials);
@@ -79,6 +81,7 @@ export function AuthProvider({ children }) {
         displayName: createdUser.name,
         email: createdUser.email,
         photoURL: createdUser.photoURL,
+        ...(credentials.campusId ? { campusId: credentials.campusId } : {}),
       });
       setUser(createdUser);
       return createdUser;
@@ -86,6 +89,8 @@ export function AuthProvider({ children }) {
       const message = getAuthErrorMessage(error);
       setAuthError(message);
       throw new Error(message, { cause: error });
+    } finally {
+      isSigningUpRef.current = false;
     }
   }, []);
 

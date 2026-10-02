@@ -4,6 +4,7 @@ import { Menu, X, Bell, MessageSquare } from "lucide-react";
 import { useAuth } from "../../hooks/useAuth";
 import { useNotifications } from "../../hooks/useNotifications";
 import { useConversations } from "../../hooks/useConversations";
+import { useOptionalCampus } from "../../hooks/useCampus";
 import Avatar from "../ui/Avatar";
 
 const navItems = [
@@ -20,6 +21,8 @@ export default function Navbar() {
   const { user } = useAuth();
   const { unreadCount } = useNotifications();
   const { totalUnread: messageUnreadCount } = useConversations();
+  const campusContext = useOptionalCampus();
+  const campus = campusContext?.campus || null;
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const getLinkClasses = ({ isActive }) =>
@@ -46,13 +49,26 @@ export default function Navbar() {
       </a>
 
       <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3 sm:px-6">
-        {/* Brand Logo */}
-        <Link
-          to="/dashboard"
-          className="flex items-center gap-2 rounded-lg font-serif text-2xl font-bold tracking-tight text-ink transition hover:text-stone-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-terracotta-500"
-        >
-          <span>Campus<span className="font-normal italic text-terracotta-600">Connect</span></span>
-        </Link>
+        {/* Brand Logo & Campus Indicator */}
+        <div className="flex items-center gap-2.5">
+          <Link
+            to="/dashboard"
+            className="flex items-center gap-2 rounded-lg font-serif text-2xl font-bold tracking-tight text-ink transition hover:text-stone-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-terracotta-500"
+          >
+            <span>Campus<span className="font-normal italic text-terracotta-600">Connect</span></span>
+          </Link>
+          {campus && (
+            <span
+              id="navbar-campus-badge"
+              className="inline-flex items-center gap-1.5 rounded-full bg-stone-100 px-2.5 py-0.5 text-xs font-medium text-stone-700 border border-stone-200/80 shadow-xs"
+              title={campus.name}
+            >
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden="true"></span>
+              <span className="max-w-[140px] truncate">{campus.shortName || campus.name}</span>
+            </span>
+          )}
+        </div>
+
 
 
         {/* Desktop Navigation Links */}
@@ -162,6 +178,14 @@ export default function Navbar() {
                 {user?.name || user?.displayName || "Student"}
               </p>
               <p className="truncate text-xs text-ink-muted">{user?.email}</p>
+              {campus && (
+                <div className="mt-1 flex items-center gap-1.5">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden="true"></span>
+                  <p className="truncate text-xs font-medium text-terracotta-700">
+                    {campus.name}
+                  </p>
+                </div>
+              )}
             </div>
           </div>
 

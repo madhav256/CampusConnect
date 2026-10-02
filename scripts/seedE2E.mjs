@@ -10,6 +10,8 @@ import { initializeApp, getApps } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore, Timestamp } from "firebase-admin/firestore";
 import { E2E_USERS } from "../tests/e2e/fixtures/testUsers.js";
+import { seedCampuses } from "./seedCampuses.mjs";
+import { seedCommunities } from "./seedCommunities.mjs";
 
 const EMULATOR_PROJECT_ID = process.env.GCLOUD_PROJECT || "demo-campusconnect-rules-test";
 
@@ -40,7 +42,13 @@ const now = Timestamp.now();
 export async function seedE2EData() {
   console.log(`[seedE2E] Seeding deterministic E2E data to emulator (${EMULATOR_PROJECT_ID})...`);
 
-  // 1. Establish deterministic Auth users
+  // 0. Seed deterministic campuses (Milestone 18)
+  await seedCampuses(db, now);
+
+  // 1. Seed deterministic communities (Milestone 19)
+  await seedCommunities(db, now);
+
+  // 2. Establish deterministic Auth users
   for (const user of Object.values(E2E_USERS)) {
     try {
       await auth.createUser({
@@ -63,9 +71,12 @@ export async function seedE2EData() {
     }
 
     // 2. Seed 3-collection model: users, publicProfiles, directoryIndex
+    const userCampusId = user.campusId || "apex-university";
+
     await db.collection("users").doc(user.uid).set({
       uid: user.uid,
       email: user.email,
+      campusId: userCampusId,
       isDiscoverable: user.isDiscoverable !== false,
       notificationPreferences: {
         connectionRequests: true,
@@ -83,6 +94,7 @@ export async function seedE2EData() {
       department: user.department,
       year: user.year,
       skills: user.skills,
+      campusId: userCampusId,
       socialLinks: {
         github: "",
         linkedin: "",
@@ -99,23 +111,41 @@ export async function seedE2EData() {
         department: user.department,
         year: user.year,
         skills: user.skills,
+        campusId: userCampusId,
         updatedAt: now,
       }, { merge: true });
     }
   }
 
-  // 3. Seed baseline feed post by primary student A
+  // 3. Seed baseline feed post by primary student A (Apex University)
   await db.collection("posts").doc("e2e-seed-post-1").set({
     id: "e2e-seed-post-1",
     authorId: E2E_USERS.studentA.uid,
     authorName: E2E_USERS.studentA.displayName,
     authorAvatar: null,
+    campusId: "apex-university",
     content: "Welcome to the CampusConnect E2E test environment!",
     likesCount: 0,
     commentsCount: 0,
     createdAt: now,
     updatedAt: now,
   }, { merge: true });
+
+  // Baseline feed post by St. Jude student (St. Jude University)
+  if (E2E_USERS.studentStJude) {
+    await db.collection("posts").doc("e2e-seed-post-st-jude-1").set({
+      id: "e2e-seed-post-st-jude-1",
+      authorId: E2E_USERS.studentStJude.uid,
+      authorName: E2E_USERS.studentStJude.displayName,
+      authorAvatar: null,
+      campusId: "st-jude-university",
+      content: "Welcome to the St. Jude University community feed!",
+      likesCount: 0,
+      commentsCount: 0,
+      createdAt: now,
+      updatedAt: now,
+    }, { merge: true });
+  }
 
   // 4. Seed deterministic relationship: Student A <-> Student B (Accepted)
   const connABId = "e2e-student-a_e2e-student-b";
@@ -124,6 +154,7 @@ export async function seedE2EData() {
     senderId: E2E_USERS.studentB.uid,
     receiverId: E2E_USERS.studentA.uid,
     status: "accepted",
+    campusId: "apex-university",
     createdAt: now,
     updatedAt: now,
   });
@@ -133,6 +164,7 @@ export async function seedE2EData() {
   await convABRef.set({
     id: connABId,
     participants: [E2E_USERS.studentA.uid, E2E_USERS.studentB.uid],
+    campusId: "apex-university",
     participantProfiles: {
       [E2E_USERS.studentA.uid]: {
         displayName: E2E_USERS.studentA.displayName,
@@ -172,6 +204,7 @@ export async function seedE2EData() {
     senderId: E2E_USERS.studentB.uid,
     receiverId: E2E_USERS.studentC.uid,
     status: "accepted",
+    campusId: "apex-university",
     createdAt: now,
     updatedAt: now,
   });
@@ -180,6 +213,7 @@ export async function seedE2EData() {
   await convBCRef.set({
     id: connBCId,
     participants: [E2E_USERS.studentB.uid, E2E_USERS.studentC.uid],
+    campusId: "apex-university",
     participantProfiles: {
       [E2E_USERS.studentB.uid]: {
         displayName: E2E_USERS.studentB.displayName,

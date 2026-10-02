@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   orderBy: vi.fn((field, dir) => ({ field, dir })),
   limit: vi.fn((n) => ({ limit: n })),
   serverTimestamp: vi.fn(() => ({ _methodName: "serverTimestamp" })),
+  where: vi.fn((field, op, val) => ({ field, op, val })),
   mockDb: { id: "mock-db" },
 }));
 
@@ -34,6 +35,7 @@ vi.mock("firebase/firestore", () => ({
   orderBy: mocks.orderBy,
   limit: mocks.limit,
   serverTimestamp: mocks.serverTimestamp,
+  where: mocks.where,
 }));
 
 import {

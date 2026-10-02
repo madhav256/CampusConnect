@@ -11,6 +11,8 @@ import Textarea from "../components/ui/Textarea";
 
 import { useAuth } from "../hooks/useAuth";
 import { useUserProfile } from "../hooks/useUserProfile";
+import { useOptionalCampus } from "../hooks/useCampus";
+import { CAMPUSES } from "../data/campuses";
 
 const emptyForm = {
   displayName: "",
@@ -96,6 +98,8 @@ function getVisibleLinks(socialLinks = {}) {
 export default function Profile() {
   const { user } = useAuth();
   const { profile, loading, error, saveProfile } = useUserProfile(user?.uid);
+  const campusContext = useOptionalCampus();
+  const currentCampus = campusContext?.campus || (profile?.campusId ? CAMPUSES[profile.campusId] : null);
   const [isEditing, setIsEditing] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [errors, setErrors] = useState({});
@@ -250,7 +254,16 @@ export default function Profile() {
                   <p className="text-sm font-medium text-ink-muted">{profile.email}</p>
                 </div>
               </div>
-              <div className="flex flex-wrap gap-2 pb-1">
+              <div className="flex flex-wrap items-center gap-2 pb-1">
+                {currentCampus && (
+                  <span
+                    id="profile-campus-badge"
+                    className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-800 border border-emerald-200/60"
+                  >
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden="true"></span>
+                    {currentCampus.shortName || currentCampus.name}
+                  </span>
+                )}
                 <span className="rounded-full bg-terracotta-50 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-terracotta-700 border border-terracotta-200/50">
                   {profile.department}
                 </span>

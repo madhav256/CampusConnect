@@ -33,6 +33,9 @@ users/{uid}/notifications/{notificationId}
 
 conversations/{canonicalConversationId}
 └── messages/{messageId}
+
+campuses/{campusId} (campus authority)
+communities/{communityId} (campus community authority)
 ```
 
 The active client does not use separate `friendRequests`, `friendships`, or `bookmarks` collections.
@@ -370,6 +373,62 @@ Generated auto-IDs (e.g. `doc(collection(db, "conversations", convId, "messages"
     - `lastMessage.senderId == request.auth.uid`
     - `lastMessage.createdAt == request.time`
   - Neither a standalone message nor a standalone conversation summary can be created or updated independently.
+
+## 11. `campuses/{campusId}` (Campus Authority)
+
+Stores authoritative institutional metadata defining recognized university campuses. Serves as the foundation for multi-tenancy and the CampusNest ecosystem in StudentOS India.
+
+### Fields
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `id` | string | Canonical campus identifier (e.g. `apex-university`); must equal document ID |
+| `name` | string | Full official institutional name |
+| `shortName` | string | Short institutional name or acronym |
+| `slug` | string | URL-safe institutional slug |
+| `domain` | string | Institutional email domain (e.g. `campusconnect.edu`, `stjude.edu`) |
+| `location` | map | Nested map containing `city` (string), `state` (string), and `country` (string) |
+| `status` | string | Institutional status (`active`, `pending`, `inactive`) |
+| `branding` | map | Nested map containing `logoURL` (string or null) and `primaryColor` (string or null) |
+| `createdAt` | timestamp | Document creation timestamp |
+| `updatedAt` | timestamp | Last update timestamp |
+
+### Query and access behavior
+
+- Campuses are provisioned and maintained exclusively through administrative tools and seeding scripts (`scripts/seedCampuses.mjs`).
+- Client mutations are forbidden (`allow write: if false;`).
+- Read access is available to authenticated members for institutional verification, profile labeling, and campus-scoped queries.
+
+## 12. `communities/{communityId}` (Campus Community Authority)
+
+Stores authoritative metadata defining university student organizations, academic clubs, affinity groups, and cohorts. Serves as the community layer within CampusNest, extending student interaction from bilateral social connections to collective campus discovery.
+
+### Fields
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `id` | string | Canonical community identifier (e.g. `apex-ai-club`); must equal document ID |
+| `campusId` | string | Required parent campus identifier (e.g. `apex-university`); defines tenant boundary |
+| `name` | string | Official community name (e.g. `Apex AI & Robotics Society`) |
+| `slug` | string | URL-friendly identifier within campus (e.g. `ai-robotics-society`) |
+| `description` | string | Community description and mission statement |
+| `category` | string | Categorization enum (`academic`, `cultural`, `tech`, `sports`, `career`, `batch`, `interest`) |
+| `imageURL` | string or null | Community avatar / crest URL |
+| `bannerURL` | string or null | Community header cover banner URL |
+| `createdBy` | string | Creator UID or system provenance identifier |
+| `stats` | map | Nested map containing `memberCount` (integer >= 0) and `postCount` (integer >= 0) |
+| `status` | string | Lifecycle status (`active`, `archived`, `pending_approval`) |
+| `visibility` | string | Access visibility (`campus_public`, `campus_private`) |
+| `createdAt` | timestamp | Document creation timestamp |
+| `updatedAt` | timestamp | Last update timestamp |
+
+### Tenant Ownership & Access Semantics
+
+- **Strict Tenant Anchor:** Every community document belongs permanently to a single campus defined by `campusId`. A community cannot be transferred or shared across campuses.
+- **Root Collection Design:** Communities reside in the root `communities` collection, maintaining structural consistency with `posts`, `connections`, `conversations`, and `campuses`.
+- **Future Relationship with Posts & Members:**
+  - **Posts:** Future community discussion posts will associate with this collection via an optional `communityId` on top-level `posts` documents, allowing community-scoped feeds alongside campus-wide announcements.
+  - **Members:** Community memberships will be managed through dedicated relationships (`communityMembers`), decoupling group membership from bilateral connection graphs.
 
 ## Demo-only metadata
 

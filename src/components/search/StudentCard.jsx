@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import Card from "../ui/Card";
 import Avatar from "../ui/Avatar";
+import { CAMPUSES } from "../../data/campuses";
 
 export default function StudentCard({ user }) {
   const visibleSkills = Array.isArray(user?.skills) ? user.skills.slice(0, 3) : [];
@@ -19,6 +20,14 @@ export default function StudentCard({ user }) {
               {user?.displayName || "CampusConnect Student"}
             </h3>
             <div className="mt-1 flex flex-wrap gap-1.5">
+              {user?.campusId && (
+                <span
+                  data-testid="student-card-campus"
+                  className="inline-flex items-center rounded-md bg-stone-100 px-2 py-0.5 text-xs font-medium text-stone-600 border border-stone-200"
+                >
+                  {CAMPUSES[user.campusId]?.shortName || user.campusId}
+                </span>
+              )}
               {user?.department && (
                 <span className="inline-flex items-center rounded-md bg-terracotta-50 px-2 py-0.5 text-xs font-medium text-terracotta-700 border border-terracotta-200/50">
                   {user.department}

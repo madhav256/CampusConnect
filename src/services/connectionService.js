@@ -42,7 +42,7 @@ export function getConnectionDocId(uidA, uidB) {
  * @param {string} fromUid - Sender's UID
  * @param {string} toUid - Receiver's UID
  */
-export async function sendConnectionRequest(fromUid, toUid) {
+export async function sendConnectionRequest(fromUid, toUid, options = {}) {
   if (!fromUid || !toUid || fromUid === toUid) {
     throw new Error("Invalid participant UIDs.");
   }
@@ -54,6 +54,15 @@ export async function sendConnectionRequest(fromUid, toUid) {
 
   // Fetch actor's verified profile for denormalized notification payload
   const senderProfile = await fetchUserById(fromUid);
+
+  const connectionCampusId = options?.campusId || senderProfile?.campusId || null;
+
+  if (connectionCampusId) {
+    const receiverProfile = await fetchUserById(toUid);
+    if (receiverProfile?.campusId && receiverProfile.campusId !== connectionCampusId) {
+      throw new Error("Students must belong to the same campus to connect.");
+    }
+  }
 
   await runTransaction(firestore, async (transaction) => {
     const connDoc = await transaction.get(connRef);
@@ -85,6 +94,7 @@ export async function sendConnectionRequest(fromUid, toUid) {
       status: "pending",
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
+      ...(connectionCampusId ? { campusId: connectionCampusId } : {}),
     });
 
     // Create recipient's connection_request notification unconditionally (recipient filters client-side)

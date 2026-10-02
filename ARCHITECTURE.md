@@ -207,9 +207,21 @@ The active collections are:
 - `connections/{canonicalConnectionId}`: one relationship document per pair;
 - `users/{uid}/notifications/{notificationId}`: recipient-scoped connection notifications;
 - `conversations/{canonicalConnectionId}`: 1-to-1 conversation metadata between connected peers;
-- `conversations/{canonicalConnectionId}/messages/{messageId}`: append-only immutable message subcollection.
+- `conversations/{canonicalConnectionId}/messages/{messageId}`: append-only immutable message subcollection;
+- `campuses/{campusId}`: authoritative campus metadata for multi-tenancy and the CampusNest domain;
+- `communities/{communityId}`: authoritative campus community metadata defining student clubs, societies, and cohorts.
 
 The full field-level schema and current rule behavior are documented in [FIRESTORE_SCHEMA.md](FIRESTORE_SCHEMA.md).
+
+### Community Domain
+
+CampusConnect structures collective student life through an institutional hierarchy:
+
+$$\text{Campus} \longrightarrow \text{Communities}$$
+
+1. **Campus Root:** Every community belongs permanently to an authoritative institutional tenant (`campusId`), inheriting the multi-tenant isolation boundary established in Milestone 18.
+2. **First-Class Communities:** Defined in the root `communities/{communityId}` collection to provide uniform querying, direct identifier resolution, and architectural consistency with `campuses`, `posts`, and `conversations`.
+
 
 ### Messaging Architecture & Contracts
 

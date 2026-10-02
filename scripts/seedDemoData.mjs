@@ -25,6 +25,8 @@ import {
   DEMO_POST_IDS,
   getDemoConnectionId,
 } from "../src/data/demoData.js";
+import { seedCampuses } from "./seedCampuses.mjs";
+import { seedCommunities } from "./seedCommunities.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -189,7 +191,13 @@ async function seedDemoEnvironment() {
   const auth = getAuth(app);
   const db = getFirestore(app);
 
-  // 1. Resolve or provision the single primary demo student in Firebase Auth
+  // 0. Seed deterministic campuses (Milestone 18)
+  await seedCampuses(db);
+
+  // 1. Seed deterministic communities (Milestone 19)
+  await seedCommunities(db);
+
+  // 2. Resolve or provision the single primary demo student in Firebase Auth
   const demoEmail = DEMO_PRIMARY_STUDENT.email;
   const demoPassword =
     process.env.DEMO_USER_PASSWORD ||

@@ -7,6 +7,7 @@ import {
   resetFirestore,
   testEnvironment,
 } from "./testEnv.js";
+import { APEX_CAMPUS_ID, ST_JUDE_CAMPUS_ID } from "../../src/constants.js";
 import {
   TEST_IDS,
   TEST_UIDS,
@@ -20,6 +21,7 @@ import {
   userFixture,
   publicProfileFixture,
   directoryIndexFixture,
+  campusFixture,
 } from "./fixtures.js";
 
 const serverTimestamp = () => firebase.firestore.FieldValue.serverTimestamp();
@@ -33,6 +35,10 @@ const unauthenticated = () => testEnvironment.unauthenticatedContext();
 
 async function expectPermissionDenied(operation) {
   await expect(operation()).rejects.toMatchObject({ code: "permission-denied" });
+}
+
+function campusRef(context, campusId) {
+  return context.firestore().collection("campuses").doc(campusId);
 }
 
 function userRef(context, uid) {
@@ -3003,5 +3009,292 @@ describe("messages rules", () => {
     await expectPermissionDenied(() =>
       messageRef(bob, "alice_bob", "msg-1").delete()
     );
+  });
+});
+
+describe("Milestone 18 — Unit 18.2: Campuses & Multi-Tenancy Rules", () => {
+  async function seedUserWithCampus(uid, campusId) {
+    await testEnvironment.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+      await db.collection("users").doc(uid).set(userFixture(uid, { campusId }));
+      await db.collection("publicProfiles").doc(uid).set(publicProfileFixture(uid, { campusId }));
+      await db.collection("directoryIndex").doc(uid).set(directoryIndexFixture(uid, { campusId }));
+    });
+  }
+
+  async function seedPostWithCampus(postId, authorId, campusId, overrides = {}) {
+    await testEnvironment.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+      await db.collection("posts").doc(postId).set(postFixture(postId, authorId, { campusId, ...overrides }));
+    });
+  }
+
+  describe("Campus document access (Goal 1)", () => {
+    it("allow authenticated user to read an existing campus document", async () => {
+      const alice = contextFor(TEST_UIDS.alice);
+      await assertSucceeds(campusRef(alice, APEX_CAMPUS_ID).get());
+    });
+
+    it("reject unauthenticated user from reading campus documents", async () => {
+      await expectPermissionDenied(() =>
+        campusRef(unauthenticated(), APEX_CAMPUS_ID).get()
+      );
+    });
+
+    it("reject client attempts to create a campus document", async () => {
+      const alice = contextFor(TEST_UIDS.alice);
+      await expectPermissionDenied(() =>
+        campusRef(alice, "unauthorized-campus").set(campusFixture("unauthorized-campus"))
+      );
+    });
+
+    it("reject client attempts to update a campus document", async () => {
+      const alice = contextFor(TEST_UIDS.alice);
+      await expectPermissionDenied(() =>
+        campusRef(alice, APEX_CAMPUS_ID).update({ name: "Tampered University Name" })
+      );
+    });
+
+    it("reject client attempts to delete a campus document", async () => {
+      const alice = contextFor(TEST_UIDS.alice);
+      await expectPermissionDenied(() =>
+        campusRef(alice, APEX_CAMPUS_ID).delete()
+      );
+    });
+  });
+
+  describe("User creation and campus immutability", () => {
+    it("allow user creation with a valid existing campusId", async () => {
+      const context = contextFor("student-valid-campus");
+      const db = context.firestore();
+      const batch = db.batch();
+
+      batch.set(
+        userRef(context, "student-valid-campus"),
+        userCreateData("student-valid-campus", { campusId: APEX_CAMPUS_ID })
+      );
+      batch.set(
+        publicProfileRef(context, "student-valid-campus"),
+        publicProfileFixture("student-valid-campus", { campusId: APEX_CAMPUS_ID })
+      );
+      batch.set(
+        directoryIndexRef(context, "student-valid-campus"),
+        {
+          ...directoryIndexFixture("student-valid-campus", { campusId: APEX_CAMPUS_ID }),
+          updatedAt: serverTimestamp(),
+        }
+      );
+
+      await assertSucceeds(batch.commit());
+    });
+
+    it("reject user creation with a non-existent campusId", async () => {
+      const context = contextFor("student-invalid-campus");
+      const db = context.firestore();
+      const batch = db.batch();
+
+      batch.set(
+        userRef(context, "student-invalid-campus"),
+        userCreateData("student-invalid-campus", { campusId: "fictional-nonexistent-campus" })
+      );
+      batch.set(
+        publicProfileRef(context, "student-invalid-campus"),
+        publicProfileFixture("student-invalid-campus", { campusId: "fictional-nonexistent-campus" })
+      );
+
+      await expectPermissionDenied(() => batch.commit());
+    });
+
+    it("reject client attempts to update or alter their campusId", async () => {
+      await seedUserWithCampus(TEST_UIDS.alice, APEX_CAMPUS_ID);
+      const alice = contextFor(TEST_UIDS.alice);
+
+      await expectPermissionDenied(() =>
+        userRef(alice, TEST_UIDS.alice).update({
+          campusId: ST_JUDE_CAMPUS_ID,
+          updatedAt: serverTimestamp(),
+        })
+      );
+    });
+  });
+
+  describe("Cross-campus post isolation (Goal 3)", () => {
+    beforeEach(async () => {
+      await seedUserWithCampus(TEST_UIDS.alice, APEX_CAMPUS_ID);
+      await seedUserWithCampus(TEST_UIDS.bob, ST_JUDE_CAMPUS_ID);
+      await seedPostWithCampus("post-apex", TEST_UIDS.alice, APEX_CAMPUS_ID);
+      await seedPostWithCampus("post-st-jude", TEST_UIDS.bob, ST_JUDE_CAMPUS_ID);
+    });
+
+    it("allow student to read posts from their own campus", async () => {
+      const alice = contextFor(TEST_UIDS.alice);
+      const bob = contextFor(TEST_UIDS.bob);
+
+      await assertSucceeds(postRef(alice, "post-apex").get());
+      await assertSucceeds(postRef(bob, "post-st-jude").get());
+    });
+
+    it("reject student from reading posts from a different campus", async () => {
+      const alice = contextFor(TEST_UIDS.alice);
+      const bob = contextFor(TEST_UIDS.bob);
+
+      await expectPermissionDenied(() => postRef(alice, "post-st-jude").get());
+      await expectPermissionDenied(() => postRef(bob, "post-apex").get());
+    });
+
+    it("allow student to create a post scoped to their own campus", async () => {
+      const alice = contextFor(TEST_UIDS.alice);
+      await assertSucceeds(
+        postRef(alice, "new-post-apex").set(
+          postFixture("new-post-apex", TEST_UIDS.alice, {
+            campusId: APEX_CAMPUS_ID,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          })
+        )
+      );
+    });
+
+    it("reject student attempting to spoof another campus on post creation", async () => {
+      const alice = contextFor(TEST_UIDS.alice);
+      await expectPermissionDenied(() =>
+        postRef(alice, "spoofed-post").set(
+          postFixture("spoofed-post", TEST_UIDS.alice, {
+            campusId: ST_JUDE_CAMPUS_ID,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          })
+        )
+      );
+    });
+
+    it("reject student without a campus from creating a campus-scoped post", async () => {
+      const carol = contextFor(TEST_UIDS.carol);
+      await expectPermissionDenied(() =>
+        postRef(carol, "carol-post").set(
+          postFixture("carol-post", TEST_UIDS.carol, {
+            campusId: APEX_CAMPUS_ID,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          })
+        )
+      );
+    });
+  });
+
+  describe("Cross-campus post interactions (Comments & Likes)", () => {
+    beforeEach(async () => {
+      await seedUserWithCampus(TEST_UIDS.alice, APEX_CAMPUS_ID);
+      await seedUserWithCampus(TEST_UIDS.bob, ST_JUDE_CAMPUS_ID);
+      await seedPostWithCampus("post-apex-int", TEST_UIDS.alice, APEX_CAMPUS_ID);
+      await seedPostWithCampus("post-stjude-int", TEST_UIDS.bob, ST_JUDE_CAMPUS_ID);
+    });
+
+    it("reject student from commenting on a post from another campus", async () => {
+      const alice = contextFor(TEST_UIDS.alice);
+      await expectPermissionDenied(() =>
+        commitCommentCreate(alice, "post-stjude-int", "comment-cross", TEST_UIDS.alice)
+      );
+    });
+
+    it("allow student to comment on a post from their own campus", async () => {
+      const bob = contextFor(TEST_UIDS.bob);
+      await assertSucceeds(
+        commitCommentCreate(bob, "post-stjude-int", "comment-same", TEST_UIDS.bob)
+      );
+    });
+
+    it("reject student from liking a post from another campus", async () => {
+      const alice = contextFor(TEST_UIDS.alice);
+      await expectPermissionDenied(() =>
+        likeRef(alice, "post-stjude-int", TEST_UIDS.alice).set({
+          userId: TEST_UIDS.alice,
+          createdAt: serverTimestamp(),
+        })
+      );
+    });
+
+    it("allow student to like a post from their own campus", async () => {
+      const bob = contextFor(TEST_UIDS.bob);
+      await assertSucceeds(
+        likeRef(bob, "post-stjude-int", TEST_UIDS.bob).set({
+          userId: TEST_UIDS.bob,
+          createdAt: serverTimestamp(),
+        })
+      );
+    });
+  });
+
+  describe("Cross-campus connection requests", () => {
+    beforeEach(async () => {
+      await seedUserWithCampus(TEST_UIDS.alice, APEX_CAMPUS_ID);
+      await seedUserWithCampus(TEST_UIDS.bob, ST_JUDE_CAMPUS_ID);
+      await seedUserWithCampus(TEST_UIDS.carol, APEX_CAMPUS_ID);
+    });
+
+    it("reject connection request between students of different campuses", async () => {
+      const alice = contextFor(TEST_UIDS.alice);
+      const connId = [TEST_UIDS.alice, TEST_UIDS.bob].sort().join("_");
+      await expectPermissionDenied(() =>
+        connectionRef(alice, connId).set({
+          ...connectionFixture(TEST_UIDS.alice, TEST_UIDS.bob),
+          campusId: APEX_CAMPUS_ID,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        })
+      );
+    });
+
+    it("allow connection request between students of the same campus", async () => {
+      const alice = contextFor(TEST_UIDS.alice);
+      const connId = [TEST_UIDS.alice, TEST_UIDS.carol].sort().join("_");
+      await assertSucceeds(
+        connectionRef(alice, connId).set({
+          ...connectionFixture(TEST_UIDS.alice, TEST_UIDS.carol),
+          campusId: APEX_CAMPUS_ID,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        })
+      );
+    });
+
+    it("reject connection request with spoofed campusId", async () => {
+      const alice = contextFor(TEST_UIDS.alice);
+      const connId = [TEST_UIDS.alice, TEST_UIDS.carol].sort().join("_");
+      await expectPermissionDenied(() =>
+        connectionRef(alice, connId).set({
+          ...connectionFixture(TEST_UIDS.alice, TEST_UIDS.carol),
+          campusId: ST_JUDE_CAMPUS_ID,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        })
+      );
+    });
+  });
+
+  describe("Cross-campus public profile & directoryIndex reads", () => {
+    beforeEach(async () => {
+      await seedUserWithCampus(TEST_UIDS.alice, APEX_CAMPUS_ID);
+      await seedUserWithCampus(TEST_UIDS.bob, ST_JUDE_CAMPUS_ID);
+    });
+
+    it("allow reading public profile of student from the same campus", async () => {
+      const alice = contextFor(TEST_UIDS.alice);
+      await assertSucceeds(publicProfileRef(alice, TEST_UIDS.alice).get());
+    });
+
+    it("reject reading public profile of student from another campus", async () => {
+      const alice = contextFor(TEST_UIDS.alice);
+      await expectPermissionDenied(() =>
+        publicProfileRef(alice, TEST_UIDS.bob).get()
+      );
+    });
+
+    it("reject reading directoryIndex entry of student from another campus", async () => {
+      const alice = contextFor(TEST_UIDS.alice);
+      await expectPermissionDenied(() =>
+        directoryIndexRef(alice, TEST_UIDS.bob).get()
+      );
+    });
   });
 });

@@ -1,15 +1,19 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { GraduationCap } from "lucide-react";
 import { useAuth } from "../hooks/useAuth";
 import Button from "../components/ui/Button";
 import Card from "../components/ui/Card";
 import Input from "../components/ui/Input";
+import { DEFAULT_CAMPUS_ID } from "../constants";
+import { CAMPUS_LIST } from "../data/campuses";
+import { fetchAllCampuses } from "../services/campusService";
 
 const initialForm = {
   name: "",
   email: "",
   password: "",
+  campusId: DEFAULT_CAMPUS_ID,
 };
 
 function isValidEmail(email) {
@@ -33,6 +37,10 @@ function validateRegisterForm(form) {
     errors.password = "Password must be at least 6 characters.";
   }
 
+  if (!form.campusId) {
+    errors.campusId = "Please select your university or campus.";
+  }
+
   return errors;
 }
 
@@ -41,9 +49,25 @@ export default function Register() {
   const navigate = useNavigate();
 
   const [form, setForm] = useState(initialForm);
+  const [campuses, setCampuses] = useState(CAMPUS_LIST);
   const [errors, setErrors] = useState({});
   const [feedback, setFeedback] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    let isMounted = true;
+    fetchAllCampuses()
+      .then((data) => {
+        if (isMounted && Array.isArray(data) && data.length > 0) {
+          setCampuses(data);
+        }
+      })
+      .catch(() => {});
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const handleChange = (event) => {
     const { name, value } = event.target;
@@ -70,6 +94,7 @@ export default function Register() {
         name: form.name.trim(),
         email: form.email.trim(),
         password: form.password,
+        campusId: form.campusId,
       });
       navigate("/dashboard", { replace: true });
     } catch (error) {
@@ -140,6 +165,38 @@ export default function Register() {
               required
             />
 
+            <div className="space-y-2">
+              <label htmlFor="register-campus" className="block text-sm font-medium text-stone-700">
+                University / Campus <span className="text-terracotta-600">*</span>
+              </label>
+              <select
+                id="register-campus"
+                name="campusId"
+                value={form.campusId}
+                onChange={handleChange}
+                aria-invalid={Boolean(errors.campusId)}
+                aria-describedby={errors.campusId ? "register-campus-error" : undefined}
+                className={`w-full rounded-xl border bg-surface px-4 py-2 text-ink outline-none transition disabled:cursor-not-allowed disabled:bg-stone-100 disabled:text-stone-400 ${
+                  errors.campusId
+                    ? "border-rose-400 focus:border-rose-500 focus:ring-2 focus:ring-rose-500/20"
+                    : "border-border-warm focus:border-terracotta-600 focus:ring-2 focus:ring-terracotta-500/20"
+                }`}
+                required
+              >
+                <option value="">Select your campus...</option>
+                {campuses.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name} ({c.shortName || c.name})
+                  </option>
+                ))}
+              </select>
+              {errors.campusId && (
+                <p id="register-campus-error" className="text-sm text-rose-600">
+                  {errors.campusId}
+                </p>
+              )}
+            </div>
+
             <div className="pt-2">
               <Button
                 type="submit"
@@ -167,4 +224,3 @@ export default function Register() {
     </div>
   );
 }
-

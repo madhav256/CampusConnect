@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { fetchAllUsers } from "../services/userService";
 
-export function useUserSearch(searchTerm = "") {
+export function useUserSearch(searchTerm = "", options = {}) {
+  const campusId = typeof options === "string" ? options : options?.campusId || null;
   const [debouncedTerm, setDebouncedTerm] = useState(searchTerm);
   const [retryTrigger, setRetryTrigger] = useState(0);
   const [searchResults, setSearchResults] = useState({
@@ -42,7 +43,7 @@ export function useUserSearch(searchTerm = "") {
 
     let isMounted = true;
 
-    fetchAllUsers(100)
+    fetchAllUsers(100, { campusId })
       .then((allUsers) => {
         if (!isMounted) return;
 
@@ -79,7 +80,7 @@ export function useUserSearch(searchTerm = "") {
     return () => {
       isMounted = false;
     };
-  }, [trimmed, isQueryValid, retryTrigger]);
+  }, [trimmed, isQueryValid, retryTrigger, campusId]);
 
   const isCurrentTerm = searchResults.term === trimmed;
   const results = isQueryValid && isCurrentTerm ? searchResults.users : [];

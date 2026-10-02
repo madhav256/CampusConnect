@@ -1,5 +1,7 @@
 import firebase from "firebase/compat/app";
 import "firebase/compat/firestore";
+import { APEX_CAMPUS_ID } from "../../src/constants.js";
+import { CAMPUS_LIST } from "../../src/data/campuses.js";
 
 export const TEST_UIDS = {
   alice: "alice",
@@ -14,6 +16,30 @@ export const TEST_IDS = {
 };
 
 const timestamp = firebase.firestore.Timestamp.fromMillis(1_700_000_000_000);
+
+export function campusFixture(campusId = APEX_CAMPUS_ID, overrides = {}) {
+  const isApex = campusId === APEX_CAMPUS_ID;
+  return {
+    id: campusId,
+    name: isApex ? "Apex Institute of Technology" : "St. Jude University",
+    shortName: isApex ? "Apex Tech" : "St. Jude",
+    slug: campusId,
+    domain: isApex ? "campusconnect.edu" : "stjude.edu",
+    location: {
+      city: isApex ? "Bengaluru" : "Mumbai",
+      state: isApex ? "Karnataka" : "Maharashtra",
+      country: "India",
+    },
+    status: "active",
+    branding: {
+      logoURL: null,
+      primaryColor: isApex ? "#c2410c" : "#0284c7",
+    },
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    ...overrides,
+  };
+}
 
 export function userFixture(uid, overrides = {}) {
   return {
@@ -201,6 +227,14 @@ export async function seedBaseData(testEnvironment) {
   await testEnvironment.withSecurityRulesDisabled(async (context) => {
     const db = context.firestore();
     const batch = db.batch();
+
+    for (const campus of CAMPUS_LIST) {
+      batch.set(db.collection("campuses").doc(campus.id), {
+        ...campus,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      });
+    }
 
     for (const uid of Object.values(TEST_UIDS)) {
       batch.set(db.collection("users").doc(uid), userFixture(uid));

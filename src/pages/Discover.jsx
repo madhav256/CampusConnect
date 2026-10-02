@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Search, Users } from "lucide-react";
 import { useUserSearch } from "../hooks/useUserSearch";
+import { useOptionalCampus } from "../hooks/useCampus";
 import Navbar from "../components/layout/Navbar";
 import PageContainer from "../components/layout/PageContainer";
 import StudentCard from "../components/search/StudentCard";
@@ -9,8 +10,11 @@ import EmptyState from "../components/ui/EmptyState";
 
 
 export default function Discover() {
+  const campusContext = useOptionalCampus();
+  const campus = campusContext?.campus || null;
+  const campusId = campusContext?.campusId || null;
   const [searchTerm, setSearchTerm] = useState("");
-  const { results, isLoading, error, debouncedTerm, retry } = useUserSearch(searchTerm);
+  const { results, isLoading, error, debouncedTerm, retry } = useUserSearch(searchTerm, campusId);
 
   const trimmedTerm = debouncedTerm.trim();
   const isQueryTooShort = trimmedTerm.length < 2;
@@ -21,9 +25,22 @@ export default function Discover() {
 
       <PageContainer>
         <div className="mb-8">
-          <h1 className="font-serif text-3xl font-bold tracking-tight text-ink">Discover Students</h1>
+          <div className="flex flex-wrap items-center gap-3">
+            <h1 className="font-serif text-3xl font-bold tracking-tight text-ink">Discover Students</h1>
+            {campus && (
+              <span
+                id="discover-campus-badge"
+                className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-800 border border-emerald-200/60"
+              >
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden="true"></span>
+                {campus.shortName || campus.name}
+              </span>
+            )}
+          </div>
           <p className="mt-1 text-ink-muted">
-            Find and connect with classmates across departments, academic years, and skills.
+            {campus
+              ? `Find and connect with classmates at ${campus.name} across departments, academic years, and skills.`
+              : "Find and connect with classmates across departments, academic years, and skills."}
           </p>
         </div>
 

@@ -30,7 +30,9 @@ test.describe("Milestone 17 — Unit 17.1 Smoke Suite", () => {
     await expect(
       page.getByRole("heading", { name: `Welcome back, ${student.displayName.split(" ")[0]}!` })
     ).toBeVisible();
-    await expect(page.getByText("Here's what's happening on campus today.")).toBeVisible();
+    await expect(
+      page.getByText(/Here's what's happening (at .+|on campus) today\./)
+    ).toBeVisible();
 
     // 4. Verify authenticated navigation bar links exist
     await expect(page.getByRole("link", { name: "Dashboard", exact: true })).toBeVisible();

@@ -12,6 +12,7 @@ import {
   ST_JUDE_CAMPUS_ID,
   COMMUNITY_MEMBER_ROLES,
   COMMUNITY_MEMBER_STATUSES,
+  EVENT_VISIBILITIES,
 } from "../../src/constants.js";
 import {
   TEST_IDS,
@@ -4834,6 +4835,82 @@ describe("Milestone 18 — Unit 18.2: Campuses & Multi-Tenancy Rules", () => {
       it("cross-campus admin cannot delete event", async () => {
         const eve = contextFor(eveUid); // St. Jude admin
         await expectPermissionDenied(() => eventRef(eve, "delete-target-alice").delete());
+      });
+    });
+
+    describe("Query & Visibility Rules Compatibility (Community Member vs Non-Member)", () => {
+      beforeEach(async () => {
+        // Seed 1 campus_public event and 1 community_only event for apex-ai-club
+        await seedEvent("query-event-public", aliceUid, APEX_CAMPUS_ID, "apex-ai-club", {
+          visibility: EVENT_VISIBILITIES.CAMPUS_PUBLIC,
+          title: "Public Event",
+        });
+        await seedEvent("query-event-private", aliceUid, APEX_CAMPUS_ID, "apex-ai-club", {
+          visibility: EVENT_VISIBILITIES.COMMUNITY_ONLY,
+          title: "Members Only Event",
+        });
+      });
+
+      it("non-member query constrained to visibility == campus_public succeeds", async () => {
+        const david = contextFor(davidUid); // Same-campus student, non-member
+        const q = david
+          .firestore()
+          .collection("events")
+          .where("campusId", "==", APEX_CAMPUS_ID)
+          .where("communityId", "==", "apex-ai-club")
+          .where("visibility", "==", "campus_public");
+
+        const snap = await assertSucceeds(q.get());
+        expect(snap.docs.length).toBe(1);
+        expect(snap.docs[0].id).toBe("query-event-public");
+      });
+
+      it("non-member broad community query without visibility constraint is denied by security rules", async () => {
+        const david = contextFor(davidUid); // Non-member
+        const q = david
+          .firestore()
+          .collection("events")
+          .where("campusId", "==", APEX_CAMPUS_ID)
+          .where("communityId", "==", "apex-ai-club");
+
+        await expectPermissionDenied(() => q.get());
+      });
+
+      it("active member query with visibility in ['campus_public', 'community_only'] or separate queries succeeds", async () => {
+        const carol = contextFor(carolUid); // Active member
+        const qCommunityOnly = carol
+          .firestore()
+          .collection("events")
+          .where("campusId", "==", APEX_CAMPUS_ID)
+          .where("communityId", "==", "apex-ai-club")
+          .where("visibility", "==", "community_only");
+
+        const snapCommOnly = await assertSucceeds(qCommunityOnly.get());
+        expect(snapCommOnly.docs.length).toBe(1);
+        expect(snapCommOnly.docs[0].id).toBe("query-event-private");
+
+        const qPublic = carol
+          .firestore()
+          .collection("events")
+          .where("campusId", "==", APEX_CAMPUS_ID)
+          .where("communityId", "==", "apex-ai-club")
+          .where("visibility", "==", "campus_public");
+
+        const snapPublic = await assertSucceeds(qPublic.get());
+        expect(snapPublic.docs.length).toBe(1);
+        expect(snapPublic.docs[0].id).toBe("query-event-public");
+      });
+
+      it("non-member query for community_only visibility is denied", async () => {
+        const david = contextFor(davidUid); // Non-member
+        const q = david
+          .firestore()
+          .collection("events")
+          .where("campusId", "==", APEX_CAMPUS_ID)
+          .where("communityId", "==", "apex-ai-club")
+          .where("visibility", "==", "community_only");
+
+        await expectPermissionDenied(() => q.get());
       });
     });
   });

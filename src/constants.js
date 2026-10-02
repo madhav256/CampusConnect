@@ -51,3 +51,31 @@ export const COMMUNITY_MEMBER_STATUSES = {
 };
 
 export const COMMUNITY_MEMBER_STATUS_LIST = Object.values(COMMUNITY_MEMBER_STATUSES);
+
+// Event Domain Constants (Milestone 20 - Campus Events & Activities)
+export const EVENT_CATEGORIES = {
+  ACADEMIC: "academic",
+  TECH: "tech",
+  CULTURAL: "cultural",
+  SPORTS: "sports",
+  CAREER: "career",
+  WORKSHOP: "workshop",
+  SOCIAL: "social",
+  COMPETITION: "competition",
+};
+
+export const EVENT_CATEGORY_LIST = Object.values(EVENT_CATEGORIES);
+
+export const EVENT_STATUSES = {
+  PUBLISHED: "published",
+  CANCELLED: "cancelled",
+};
+
+export const EVENT_STATUS_LIST = Object.values(EVENT_STATUSES);
+
+export const EVENT_VISIBILITIES = {
+  CAMPUS_PUBLIC: "campus_public",
+  COMMUNITY_ONLY: "community_only",
+};
+
+export const EVENT_VISIBILITY_LIST = Object.values(EVENT_VISIBILITIES);

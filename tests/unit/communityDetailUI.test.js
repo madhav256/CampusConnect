@@ -24,6 +24,18 @@ const mocks = vi.hoisted(() => ({
   useConversations: vi.fn(() => ({ totalUnread: 0 })),
   useCommunity: vi.fn(),
   useCommunityMembers: vi.fn(),
+  usePosts: vi.fn(() => ({
+    posts: [],
+    isLoading: false,
+    error: null,
+    hasMorePosts: false,
+    isFetchingOlder: false,
+    initialize: vi.fn(),
+    loadMore: vi.fn(),
+    addPost: vi.fn(),
+    removePost: vi.fn(),
+    updatePost: vi.fn(),
+  })),
 }));
 
 vi.mock("react-router-dom", () => ({
@@ -59,6 +71,10 @@ vi.mock("../../src/hooks/useCommunity", () => ({
 
 vi.mock("../../src/hooks/useCommunityMembers", () => ({
   useCommunityMembers: (id) => mocks.useCommunityMembers(id),
+}));
+
+vi.mock("../../src/hooks/usePosts", () => ({
+  usePosts: (opts) => mocks.usePosts(opts),
 }));
 
 // Recursive search helpers for React element trees
@@ -383,6 +399,39 @@ describe("Milestone 19 — Unit 19.6: Community Detail UI", () => {
       });
 
       expect(mockLeave).toHaveBeenCalledTimes(1);
+    });
+
+    it("renders community activity section and gates composer based on membership", () => {
+      // 1. Non-member state
+      const { result: nonMemberResult } = renderHook(() => CommunityDetail());
+      expect(findByTestId(nonMemberResult.current, "community-activity-section")).not.toBeNull();
+
+      const nonMemberComposer = findInReactTree(
+        nonMemberResult.current,
+        (n) => n.props?.["data-testid"] === "community-post-composer"
+      );
+      expect(nonMemberComposer).toBeNull();
+
+      // 2. Member state
+      mocks.useCommunityMembers.mockReturnValue({
+        members: [COMMUNITY_MEMBER_APEX_AI_STUDENT1],
+        membership: COMMUNITY_MEMBER_APEX_AI_STUDENT1,
+        isMember: true,
+        isAdmin: true,
+        isLoading: false,
+        error: null,
+        join: mockJoin,
+        leave: mockLeave,
+        refetch: vi.fn(),
+      });
+
+      const { result: memberResult } = renderHook(() => CommunityDetail());
+      expect(findByTestId(memberResult.current, "community-activity-section")).not.toBeNull();
+      const memberComposer = findInReactTree(
+        memberResult.current,
+        (n) => n.props?.isMember === true
+      );
+      expect(memberComposer).not.toBeNull();
     });
   });
 });

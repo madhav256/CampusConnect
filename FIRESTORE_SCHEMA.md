@@ -154,6 +154,7 @@ Client-created posts use an auto-generated Firestore document ID and initialize 
 
 - `subscribeToNewerPosts` listens for new posts in real-time (optionally filtered by `campusId` or `communityId`).
 - `fetchOlderPosts` uses cursor-based pagination (`startAfter`) to load older posts incrementally.
+- Community posts are surfaced through the community detail experience (`/communities/:communityId`), where eligible members create community posts via `CommunityPostComposer` and view discussion threads via `CommunityPostFeed`.
 - Authenticated users can read posts from their own campus (`resource.data.campusId == getUserCampusId()`).
 - Authenticated users can create a post when providing valid schema fields (author ID, non-empty content under 2000 characters, zero counters, and server timestamps for both `createdAt` and `updatedAt`).
 - The post author can delete their own post.

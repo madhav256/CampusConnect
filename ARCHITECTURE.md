@@ -54,6 +54,8 @@ Firebase Storage is not part of the active client architecture. The Firebase con
 | `/dashboard` | Authenticated | Real-time campus feed |
 | `/profile` | Authenticated | Current user's editable profile |
 | `/discover` | Authenticated | Bounded student search |
+| `/communities` | Authenticated | Campus-scoped community discovery |
+| `/communities/:communityId` | Authenticated | Community detail, profile, and community discussion feed |
 | `/users/:uid` | Authenticated | Public profile and connection CTA |
 | `/connections` | Authenticated | Accepted connections and pending requests |
 | `/messages` | Authenticated | 1-to-1 private messaging overview |
@@ -74,6 +76,7 @@ src/
 ├── main.jsx
 ├── index.css
 ├── components/
+│   ├── community/        # CommunityCard, CommunityCategoryBadge, CommunityGrid, CommunityHero, CommunityMembersPreview, CommunityPostComposer, CommunityPostFeed
 │   ├── dev/              # Development-only security audit panel
 │   ├── feed/             # Feed, posts, comments, composers
 │   ├── layout/           # Navbar, PageContainer, Section

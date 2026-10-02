@@ -16,6 +16,20 @@ function requireDb() {
 
 export function usePosts(options = {}) {
   const explicitCampusId = typeof options === "string" ? options : options?.campusId || null;
+  const explicitCommunityId = typeof options === "object" ? options?.communityId || null : null;
+  const postOptions = useMemo(() => {
+    if (explicitCommunityId) {
+      return {
+        ...(explicitCampusId ? { campusId: explicitCampusId } : {}),
+        communityId: explicitCommunityId,
+      };
+    }
+    if (explicitCampusId) {
+      return { campusId: explicitCampusId };
+    }
+    return null;
+  }, [explicitCampusId, explicitCommunityId]);
+
   const { user } = useAuth();
   const [postsDocs, setPostsDocs] = useState([]); // DocumentSnapshots, newest to oldest
   const [postUpdates, setPostUpdates] = useState(new Map()); // postId => {likesCount: number, commentsCount: number}
@@ -91,7 +105,7 @@ export function usePosts(options = {}) {
       }
 
       // Fetch the first page deterministically
-      const firstPageDocs = await fetchOlderPosts(POSTS_PER_PAGE, null, explicitCampusId);
+      const firstPageDocs = await fetchOlderPosts(POSTS_PER_PAGE, null, postOptions);
 
       setPostsDocs(firstPageDocs);
 
@@ -129,24 +143,31 @@ export function usePosts(options = {}) {
             setError(() => "Failed to load new posts.");
           },
           newestDoc, // cursor for endBefore
-          explicitCampusId
+          postOptions
         );
         normalListenerUnsubscribeRef.current = unsubscribeNormal;
 
         // Catch-up query: get any posts that may have been created between the fetch and listener setup
         // These are posts with timestamp > newestDoc (i.e., endBefore(newestDoc) with no limit)
-        const catchUpQuery = explicitCampusId
+        const catchUpQuery = explicitCommunityId
           ? query(
               collection(requireDb(), "posts"),
-              where("campusId", "==", explicitCampusId),
+              where("communityId", "==", explicitCommunityId),
               orderBy("createdAt", "desc"),
               endBefore(newestDoc)
             )
-          : query(
-              collection(requireDb(), "posts"),
-              orderBy("createdAt", "desc"),
-              endBefore(newestDoc)
-            );
+          : explicitCampusId
+            ? query(
+                collection(requireDb(), "posts"),
+                where("campusId", "==", explicitCampusId),
+                orderBy("createdAt", "desc"),
+                endBefore(newestDoc)
+              )
+            : query(
+                collection(requireDb(), "posts"),
+                orderBy("createdAt", "desc"),
+                endBefore(newestDoc)
+              );
         const catchUpSnapshot = await getDocs(catchUpQuery);
         const catchUpDocs = catchUpSnapshot.docs;
 
@@ -183,7 +204,7 @@ export function usePosts(options = {}) {
                 emptyFeedListenerUnsubscribeRef.current = null;
               }
               // Now fetch the first page (there is at least one post)
-              fetchOlderPosts(POSTS_PER_PAGE, null, explicitCampusId).then((firstPageDocs) => {
+              fetchOlderPosts(POSTS_PER_PAGE, null, postOptions).then((firstPageDocs) => {
                 setPostsDocs(firstPageDocs);
                 if (firstPageDocs.length > 0) {
                   const newestDoc = firstPageDocs[0];
@@ -215,22 +236,29 @@ export function usePosts(options = {}) {
                       setError(() => "Failed to load new posts.");
                     },
                     newestDoc, // cursor for endBefore
-                    explicitCampusId
+                    postOptions
                   );
                   normalListenerUnsubscribeRef.current = unsubscribeNormal;
                   // Catch-up query for any posts that may have appeared between empty-feed detection and fetch
-                  const catchUpQuery = explicitCampusId
+                  const catchUpQuery = explicitCommunityId
                     ? query(
                         collection(requireDb(), "posts"),
-                        where("campusId", "==", explicitCampusId),
+                        where("communityId", "==", explicitCommunityId),
                         orderBy("createdAt", "desc"),
                         endBefore(newestDoc)
                       )
-                    : query(
-                        collection(requireDb(), "posts"),
-                        orderBy("createdAt", "desc"),
-                        endBefore(newestDoc)
-                      );
+                    : explicitCampusId
+                      ? query(
+                          collection(requireDb(), "posts"),
+                          where("campusId", "==", explicitCampusId),
+                          orderBy("createdAt", "desc"),
+                          endBefore(newestDoc)
+                        )
+                      : query(
+                          collection(requireDb(), "posts"),
+                          orderBy("createdAt", "desc"),
+                          endBefore(newestDoc)
+                        );
                   getDocs(catchUpQuery).then((catchUpSnapshot) => {
                     const catchUpDocs = catchUpSnapshot.docs;
                     if (catchUpDocs.length > 0) {
@@ -260,7 +288,8 @@ export function usePosts(options = {}) {
             setError(() => "Failed to load initial posts.");
             setIsInitialLoading(false);
             setIsInitialError(true);
-          }
+          },
+          postOptions
         );
         emptyFeedListenerUnsubscribeRef.current = unsubscribeEmptyFeed;
       }
@@ -272,7 +301,7 @@ export function usePosts(options = {}) {
       setIsInitialLoading(false);
       setIsInitialError(true);
     }
-  }, [user, explicitCampusId]);
+  }, [user, postOptions, explicitCampusId, explicitCommunityId]);
 
   // Load more older posts
   const loadMore = useCallback(async () => {
@@ -283,7 +312,7 @@ export function usePosts(options = {}) {
 
     try {
       const oldestDoc = postsDocs.length > 0 ? postsDocs[postsDocs.length - 1] : null;
-      const olderDocs = await fetchOlderPosts(POSTS_PER_PAGE, oldestDoc, explicitCampusId);
+      const olderDocs = await fetchOlderPosts(POSTS_PER_PAGE, oldestDoc, postOptions);
 
       if (olderDocs.length > 0) {
         // Filter out any posts we already have (by ID) to avoid duplicates
@@ -309,14 +338,23 @@ export function usePosts(options = {}) {
     } finally {
       setIsFetchingOlder(false);
     }
-  }, [user, hasMorePosts, postsDocs, isFetchingOlder, explicitCampusId]);
+  }, [user, hasMorePosts, postsDocs, isFetchingOlder, postOptions]);
 
   // Add a new post
-  const addPost = useCallback(async (content, postCampusId = null) => {
+  const addPost = useCallback(async (content, postOptionsArg = null) => {
     if (!user) throw new Error("Must be logged in to post.");
     if (!content || !content.trim()) throw new Error("Post content cannot be empty.");
 
-    const campusId = postCampusId || explicitCampusId || null;
+    const campusId = typeof postOptionsArg === "string"
+      ? postOptionsArg
+      : postOptionsArg?.campusId || explicitCampusId || null;
+    const communityId = typeof postOptionsArg === "object"
+      ? postOptionsArg?.communityId || explicitCommunityId || null
+      : explicitCommunityId || null;
+
+    const finalOptions = communityId
+      ? { ...(campusId ? { campusId } : {}), communityId }
+      : campusId;
 
     try {
       const postId = await createPost(
@@ -324,7 +362,7 @@ export function usePosts(options = {}) {
         user.name || "Student",
         user.avatar || null,
         content,
-        campusId
+        finalOptions
       );
 
       // No optimistic update - rely on realtime listener
@@ -333,7 +371,7 @@ export function usePosts(options = {}) {
       console.error("Failed to create post:", err);
       throw err;
     }
-  }, [user, explicitCampusId]);
+  }, [user, explicitCampusId, explicitCommunityId]);
 
   // Remove a post
   const removePost = useCallback(async (postId) => {
@@ -393,7 +431,8 @@ export function usePosts(options = {}) {
       },
       (err) => {
         console.error("Error subscribing to post updates in range:", err);
-      }
+      },
+      postOptions
     );
 
     // Cleanup on unmount or before next restart.
@@ -403,7 +442,7 @@ export function usePosts(options = {}) {
         rangeListenerUnsubscribeRef.current = null;
       }
     };
-  }, [user, postsDocs]);
+  }, [user, postsDocs, postOptions]);
 
 
   // Clean up listeners on unmount

@@ -18,6 +18,8 @@ import EmptyState from "../components/ui/EmptyState";
 import CommunityHero from "../components/community/CommunityHero";
 import CommunityCategoryBadge from "../components/community/CommunityCategoryBadge";
 import CommunityMembersPreview from "../components/community/CommunityMembersPreview";
+import CommunityPostComposer from "../components/community/CommunityPostComposer";
+import CommunityPostFeed from "../components/community/CommunityPostFeed";
 import { CAMPUSES } from "../data/campuses";
 
 export default function CommunityDetail() {
@@ -248,6 +250,27 @@ export default function CommunityDetail() {
               {/* Members Preview Card */}
               <CommunityMembersPreview members={members} />
             </div>
+          </div>
+
+          {/* Community Activity Section */}
+          <div data-testid="community-activity-section" className="space-y-4 pt-4 border-t border-border-warm/60">
+            <div className="flex items-center justify-between">
+              <h2 className="font-serif text-xl font-bold tracking-tight text-ink">
+                Community Discussion
+              </h2>
+            </div>
+
+            {/* Member-Gated Post Composer */}
+            <CommunityPostComposer
+              community={community}
+              isMember={isMember}
+            />
+
+            {/* Community Feed */}
+            <CommunityPostFeed
+              community={community}
+              isMember={isMember}
+            />
           </div>
         </div>
       </PageContainer>

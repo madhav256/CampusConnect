@@ -10,6 +10,7 @@ const Dashboard = lazy(() => import("./pages/Dashboard"));
 const Profile = lazy(() => import("./pages/Profile"));
 const Discover = lazy(() => import("./pages/Discover"));
 const Communities = lazy(() => import("./pages/Communities"));
+const CommunityDetail = lazy(() => import("./pages/CommunityDetail"));
 const PublicProfile = lazy(() => import("./pages/PublicProfile"));
 const Connections = lazy(() => import("./pages/Connections"));
 const Notifications = lazy(() => import("./pages/Notifications"));
@@ -66,6 +67,14 @@ function App() {
               element={
                 <ProtectedRoute>
                   <Communities />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/communities/:communityId"
+              element={
+                <ProtectedRoute>
+                  <CommunityDetail />
                 </ProtectedRoute>
               }
             />

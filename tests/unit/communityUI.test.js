@@ -189,6 +189,12 @@ describe("Milestone 19 — Unit 19.5: Community UI Components & Discovery Page",
       const img = findInReactTree(el, (n) => n.type === "img" && n.props?.src === "https://example.com/banner.png");
       expect(img).not.toBeNull();
     });
+
+    it("links to the community detail route", () => {
+      const el = renderComponent(CommunityCard, { community: COMMUNITY_APEX_AI });
+      const link = findInReactTree(el, (n) => n.props?.to === `/communities/${COMMUNITY_APEX_AI.id}`);
+      expect(link).not.toBeNull();
+    });
   });
 
   describe("CommunityGrid", () => {

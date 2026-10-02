@@ -5,6 +5,7 @@
  * campus identity, and engagement statistics.
  */
 
+import { Link } from "react-router-dom";
 import { Users, MessageSquare, Globe } from "lucide-react";
 import Card from "../ui/Card";
 import CommunityCategoryBadge from "./CommunityCategoryBadge";
@@ -21,10 +22,14 @@ export default function CommunityCard({ community }) {
     null;
 
   return (
-    <Card
+    <Link
+      to={`/communities/${community.id}`}
       data-testid={`community-card-${community.id}`}
-      className="flex flex-col justify-between transition duration-150 hover:border-stone-300 hover:shadow-sm"
+      className="group block h-full rounded-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-terracotta-500"
     >
+      <Card
+        className="flex h-full flex-col justify-between transition duration-150 group-hover:border-stone-300 group-hover:shadow-sm"
+      >
       <div>
         {/* Banner / Header Image or Fallback Header */}
         {community.bannerURL ? (
@@ -96,5 +101,6 @@ export default function CommunityCard({ community }) {
         </div>
       </div>
     </Card>
-  );
+  </Link>
+);
 }

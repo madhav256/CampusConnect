@@ -46,7 +46,109 @@ vi.mock("firebase/firestore", () => ({
   where: mocks.where,
 }));
 
-import { subscribeToPostUpdatesInRange } from "../../src/services/postService.js";
+import {
+  createPost,
+  subscribeToPostUpdatesInRange,
+} from "../../src/services/postService.js";
+
+describe("createPost", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.addDoc.mockResolvedValue({ id: "new-post-123" });
+  });
+
+  it("creates a campus-wide post without communityId", async () => {
+    const postId = await createPost(
+      "author-1",
+      "Alice Chen",
+      "avatar.png",
+      "Hello campus-wide feed!",
+      "apex-university"
+    );
+
+    expect(postId).toBe("new-post-123");
+    expect(mocks.addDoc).toHaveBeenCalledWith(
+      expect.objectContaining({ path: "posts" }),
+      expect.objectContaining({
+        authorId: "author-1",
+        authorName: "Alice Chen",
+        authorAvatar: "avatar.png",
+        content: "Hello campus-wide feed!",
+        campusId: "apex-university",
+        likesCount: 0,
+        commentsCount: 0,
+      })
+    );
+
+    const callArgs = mocks.addDoc.mock.calls[0][1];
+    expect(callArgs.communityId).toBeUndefined();
+  });
+
+  it("creates a community post with communityId via options object", async () => {
+    const postId = await createPost(
+      "author-1",
+      "Alice Chen",
+      null,
+      "Discussing autonomous rover navigation.",
+      { campusId: "apex-university", communityId: "apex-ai-club" }
+    );
+
+    expect(postId).toBe("new-post-123");
+    expect(mocks.addDoc).toHaveBeenCalledWith(
+      expect.objectContaining({ path: "posts" }),
+      expect.objectContaining({
+        authorId: "author-1",
+        authorName: "Alice Chen",
+        authorAvatar: null,
+        content: "Discussing autonomous rover navigation.",
+        campusId: "apex-university",
+        communityId: "apex-ai-club",
+        likesCount: 0,
+        commentsCount: 0,
+      })
+    );
+  });
+
+  it("creates a community post with communityId via positional argument", async () => {
+    const postId = await createPost(
+      "author-2",
+      "Rohan Varma",
+      null,
+      "Clinical trials discussion.",
+      "st-jude-university",
+      "st-jude-medical-society"
+    );
+
+    expect(postId).toBe("new-post-123");
+    expect(mocks.addDoc).toHaveBeenCalledWith(
+      expect.objectContaining({ path: "posts" }),
+      expect.objectContaining({
+        authorId: "author-2",
+        authorName: "Rohan Varma",
+        campusId: "st-jude-university",
+        communityId: "st-jude-medical-society",
+      })
+    );
+  });
+
+  it("validates and trims content, throwing error on empty content", async () => {
+    await expect(createPost("u1", "User", null, "")).rejects.toThrow(
+      "Post content cannot be empty."
+    );
+    await expect(createPost("u1", "User", null, "   ")).rejects.toThrow(
+      "Post content cannot be empty."
+    );
+    await expect(createPost("u1", "User", null, null)).rejects.toThrow(
+      "Post content cannot be empty."
+    );
+
+    await createPost("u1", "User", null, "  Trimmable content  ", "apex-university");
+    expect(mocks.addDoc).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ content: "Trimmable content" })
+    );
+  });
+});
 
 describe("subscribeToPostUpdatesInRange", () => {
   beforeEach(() => {

@@ -214,11 +214,17 @@ The active collections are:
 
 The full field-level schema and current rule behavior are documented in [FIRESTORE_SCHEMA.md](FIRESTORE_SCHEMA.md).
 
-### Community Domain & Membership Authority
+### Community Domain, Membership Authority & Content Integration
 
 CampusConnect structures collective student life through an institutional hierarchy:
 
-$$\text{Campus} \longrightarrow \text{Communities} \longrightarrow \text{Community Members}$$
+```text
+Campus
+ └── Communities
+        └── Community Members
+              ↓
+             Posts
+```
 
 1. **Campus Root:** Every community belongs permanently to an authoritative institutional tenant (`campusId`), inheriting the multi-tenant isolation boundary established in Milestone 18.
 2. **First-Class Communities:** Defined in the root `communities/{communityId}` collection to provide uniform querying, direct identifier resolution, and architectural consistency with `campuses`, `posts`, and `conversations`.
@@ -228,6 +234,11 @@ $$\text{Campus} \longrightarrow \text{Communities} \longrightarrow \text{Communi
    - **Tenant Boundary Isolation:** Security rules enforce strict tenant parity: the member student's campus, community campus, and membership document campus must match (`campusId == getUserCampusId()`). Cross-campus memberships are rejected.
    - **Role-Based Authority & Privilege Escalation Prevention:** Supported roles include `member`, `moderator`, and `admin`. Client self-joins are strictly restricted to `member` role; self-promotion or client assignment of `admin` or `moderator` privileges is rejected by security rules. Only validated active community admins can update member roles.
    - **Decoupled Social Graph:** Community membership is completely independent of 1-to-1 connections (`connections`) and private messaging (`conversations`), ensuring community participation does not compromise personal connection boundaries.
+4. **Community Content Integration (`posts` as Single Root Collection):**
+   - **Root Collection Pattern Preserved:** Rather than fracturing the database into separate collections (`communityPosts/{postId}`) or nested subcollections (`communities/{communityId}/posts/{postId}`), `posts/{postId}` remains the single authoritative collection for all posts.
+   - **Optional Community Association:** Post documents optionally specify `communityId?: string`. When omitted, the post is a campus-wide feed item. When provided, the post represents a community discussion thread.
+   - **Membership Authority Enforcement:** Creation of a community post (`communityId != null`) strictly requires active membership in `communityMembers/{communityId}_{authorId}` (`status == 'active'`) and tenant parity across the author's campus, community's campus, and post's campus.
+   - **Shared Infrastructure:** Likes, comments, real-time listeners, and cursor pagination reuse the robust, verified `posts` subsystem without divergent schemas.
 
 
 ### Messaging Architecture & Contracts

@@ -3653,5 +3653,220 @@ describe("Milestone 18 — Unit 18.2: Campuses & Multi-Tenancy Rules", () => {
       });
     });
   });
+
+  describe("Milestone 19 — Unit 19.3: Community Content Integration Rules", () => {
+    async function seedUserWithCampus(uid, campusId) {
+      await testEnvironment.withSecurityRulesDisabled(async (context) => {
+        const db = context.firestore();
+        await db.collection("users").doc(uid).set(userFixture(uid, { campusId }));
+        await db.collection("publicProfiles").doc(uid).set(publicProfileFixture(uid, { campusId }));
+        await db.collection("directoryIndex").doc(uid).set(directoryIndexFixture(uid, { campusId }));
+      });
+    }
+
+    async function seedCommunity(communityId, campusId, overrides = {}) {
+      await testEnvironment.withSecurityRulesDisabled(async (context) => {
+        const db = context.firestore();
+        await db
+          .collection("communities")
+          .doc(communityId)
+          .set(communityFixture(communityId, { campusId, ...overrides }));
+      });
+    }
+
+    async function seedCommunityMember(
+      membershipId,
+      communityId,
+      userId,
+      campusId,
+      role = COMMUNITY_MEMBER_ROLES.MEMBER,
+      status = COMMUNITY_MEMBER_STATUSES.ACTIVE,
+      overrides = {}
+    ) {
+      await testEnvironment.withSecurityRulesDisabled(async (context) => {
+        const db = context.firestore();
+        await db
+          .collection("communityMembers")
+          .doc(membershipId)
+          .set(
+            communityMemberFixture(communityId, userId, {
+              id: membershipId,
+              campusId,
+              role,
+              status,
+              ...overrides,
+            })
+          );
+      });
+    }
+
+    beforeEach(async () => {
+      await seedUserWithCampus(TEST_UIDS.alice, APEX_CAMPUS_ID);
+      await seedUserWithCampus(TEST_UIDS.bob, APEX_CAMPUS_ID);
+      await seedUserWithCampus(TEST_UIDS.carol, ST_JUDE_CAMPUS_ID);
+
+      await seedCommunity("apex-ai-club", APEX_CAMPUS_ID);
+      await seedCommunity("st-jude-medical-society", ST_JUDE_CAMPUS_ID);
+    });
+
+    describe("Campus posts (Existing behavior preserved)", () => {
+      it("same campus post creation succeeds without communityId", async () => {
+        const alice = contextFor(TEST_UIDS.alice);
+        await assertSucceeds(
+          postRef(alice, "campus-post-alice").set(
+            postFixture("campus-post-alice", TEST_UIDS.alice, {
+              campusId: APEX_CAMPUS_ID,
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp(),
+            })
+          )
+        );
+      });
+
+      it("reject post creation targeting a different campus without communityId", async () => {
+        const alice = contextFor(TEST_UIDS.alice);
+        await expectPermissionDenied(() =>
+          postRef(alice, "cross-campus-post-alice").set(
+            postFixture("cross-campus-post-alice", TEST_UIDS.alice, {
+              campusId: ST_JUDE_CAMPUS_ID,
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp(),
+            })
+          )
+        );
+      });
+    });
+
+    describe("Community posts", () => {
+      it("active community member can create community post", async () => {
+        const alice = contextFor(TEST_UIDS.alice);
+        const membershipId = `apex-ai-club_${TEST_UIDS.alice}`;
+        await seedCommunityMember(
+          membershipId,
+          "apex-ai-club",
+          TEST_UIDS.alice,
+          APEX_CAMPUS_ID,
+          COMMUNITY_MEMBER_ROLES.MEMBER,
+          COMMUNITY_MEMBER_STATUSES.ACTIVE
+        );
+
+        await assertSucceeds(
+          postRef(alice, "community-post-alice").set(
+            postFixture("community-post-alice", TEST_UIDS.alice, {
+              campusId: APEX_CAMPUS_ID,
+              communityId: "apex-ai-club",
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp(),
+            })
+          )
+        );
+      });
+
+      it("non-member cannot create community post", async () => {
+        const bob = contextFor(TEST_UIDS.bob);
+        // Bob is on APEX_CAMPUS_ID, but has NO membership in apex-ai-club
+
+        await expectPermissionDenied(() =>
+          postRef(bob, "community-post-bob-nonmember").set(
+            postFixture("community-post-bob-nonmember", TEST_UIDS.bob, {
+              campusId: APEX_CAMPUS_ID,
+              communityId: "apex-ai-club",
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp(),
+            })
+          )
+        );
+      });
+
+      it("cross-campus community post is rejected", async () => {
+        const alice = contextFor(TEST_UIDS.alice);
+        // Alice is on APEX_CAMPUS_ID. Attempting to post to St. Jude's community with Apex campusId
+        await expectPermissionDenied(() =>
+          postRef(alice, "cross-campus-community-post-1").set(
+            postFixture("cross-campus-community-post-1", TEST_UIDS.alice, {
+              campusId: APEX_CAMPUS_ID,
+              communityId: "st-jude-medical-society",
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp(),
+            })
+          )
+        );
+
+        // Attempting to post to St. Jude's community with St. Jude campusId (cross-campus spoof)
+        await expectPermissionDenied(() =>
+          postRef(alice, "cross-campus-community-post-2").set(
+            postFixture("cross-campus-community-post-2", TEST_UIDS.alice, {
+              campusId: ST_JUDE_CAMPUS_ID,
+              communityId: "st-jude-medical-society",
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp(),
+            })
+          )
+        );
+      });
+
+      it("missing community is rejected", async () => {
+        const alice = contextFor(TEST_UIDS.alice);
+        await expectPermissionDenied(() =>
+          postRef(alice, "missing-community-post").set(
+            postFixture("missing-community-post", TEST_UIDS.alice, {
+              campusId: APEX_CAMPUS_ID,
+              communityId: "nonexistent-community-xyz",
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp(),
+            })
+          )
+        );
+      });
+
+      it("removed member cannot create community post", async () => {
+        const alice = contextFor(TEST_UIDS.alice);
+        const membershipId = `apex-ai-club_${TEST_UIDS.alice}`;
+        await seedCommunityMember(
+          membershipId,
+          "apex-ai-club",
+          TEST_UIDS.alice,
+          APEX_CAMPUS_ID,
+          COMMUNITY_MEMBER_ROLES.MEMBER,
+          COMMUNITY_MEMBER_STATUSES.REMOVED
+        );
+
+        await expectPermissionDenied(() =>
+          postRef(alice, "removed-member-post").set(
+            postFixture("removed-member-post", TEST_UIDS.alice, {
+              campusId: APEX_CAMPUS_ID,
+              communityId: "apex-ai-club",
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp(),
+            })
+          )
+        );
+      });
+
+      it("pending member cannot create community post", async () => {
+        const alice = contextFor(TEST_UIDS.alice);
+        const membershipId = `apex-ai-club_${TEST_UIDS.alice}`;
+        await seedCommunityMember(
+          membershipId,
+          "apex-ai-club",
+          TEST_UIDS.alice,
+          APEX_CAMPUS_ID,
+          COMMUNITY_MEMBER_ROLES.MEMBER,
+          COMMUNITY_MEMBER_STATUSES.PENDING
+        );
+
+        await expectPermissionDenied(() =>
+          postRef(alice, "pending-member-post").set(
+            postFixture("pending-member-post", TEST_UIDS.alice, {
+              campusId: APEX_CAMPUS_ID,
+              communityId: "apex-ai-club",
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp(),
+            })
+          )
+        );
+      });
+    });
+  });
 });
 

@@ -167,12 +167,24 @@ service cloud.firestore {
              (!('campusId' in pubDoc.data) || request.resource.data.get('campusId', null) == pubDoc.data.campusId);
     }
 
+    function isValidCommunityPost(d) {
+      let communityPath = /databases/$(database)/documents/communities/$(d.communityId);
+      let membershipPath = /databases/$(database)/documents/communityMembers/$(d.communityId + '_' + d.authorId);
+      return d.communityId is string &&
+             'campusId' in d &&
+             d.campusId is string &&
+             exists(communityPath) &&
+             get(communityPath).data.campusId == d.campusId &&
+             exists(membershipPath) &&
+             get(membershipPath).data.status == 'active';
+    }
+
     function isValidPostCreate() {
       let d = request.resource.data;
       return d.keys().hasOnly([
                'authorId', 'authorName', 'authorAvatar', 'content',
                'likesCount', 'commentsCount', 'createdAt', 'updatedAt',
-               'campusId'
+               'campusId', 'communityId'
              ]) &&
              d.keys().hasAll([
                'authorId', 'authorName', 'authorAvatar', 'content',
@@ -192,8 +204,13 @@ service cloud.firestore {
                d.campusId is string &&
                getUserCampusId() != null &&
                d.campusId == getUserCampusId()
+             )) &&
+             (!('communityId' in d) || (
+               d.communityId != null &&
+               isValidCommunityPost(d)
              ));
     }
+
 
     // Validates atomic like/unlike transactions on posts.
     function isValidPostLikeUpdate(postId) {

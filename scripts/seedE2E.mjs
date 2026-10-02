@@ -151,6 +151,22 @@ export async function seedE2EData() {
     }, { merge: true });
   }
 
+  // 3b. Seed deterministic community post by Student A in apex-ai-club (Milestone 19.3)
+  await db.collection("posts").doc("e2e-seed-community-post-1").set({
+    id: "e2e-seed-community-post-1",
+    authorId: E2E_USERS.studentA.uid,
+    authorName: E2E_USERS.studentA.displayName,
+    authorAvatar: null,
+    campusId: "apex-university",
+    communityId: "apex-ai-club",
+    content: "Welcome to the Apex AI & Robotics Society discussion thread!",
+    likesCount: 0,
+    commentsCount: 0,
+    createdAt: now,
+    updatedAt: now,
+  }, { merge: true });
+
+
   // 4. Seed deterministic relationship: Student A <-> Student B (Accepted)
   const connABId = "e2e-student-a_e2e-student-b";
   await db.collection("connections").doc(connABId).set({

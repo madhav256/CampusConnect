@@ -130,15 +130,32 @@ Stores text feed posts.
 | `commentsCount` | number | Denormalized comment counter; initialized to 0 |
 | `createdAt` | timestamp | Creation time; must equal `request.time` |
 | `updatedAt` | timestamp | Last validated update time; must equal `request.time` on create |
+| `campusId` | string or `undefined` | Optional institutional campus identifier (e.g. `apex-university`); defines tenant boundary |
+| `communityId` | string or `undefined` | Optional community identifier (e.g. `apex-ai-club`); links post to a community discussion |
 
 Client-created posts use an auto-generated Firestore document ID and initialize both counters to zero. The demo seeder uses deterministic IDs such as `demo_post_01` and writes seeded counter values through Admin SDK.
 
+### Campus-Wide vs. Community Posts
+
+- **Campus-Wide Posts (`communityId` omitted or null):**
+  - Standard social feed posts scoped to the author's campus (`campusId == getUserCampusId()`).
+  - Existing behavior, indexing, and permissions are fully preserved.
+- **Community Posts (`communityId` present):**
+  - Connects the existing post system with communities without creating separate post collections (`communityPosts`) or subcollections (`communities/{id}/posts`).
+  - Single source of truth: `posts/{postId}` remains the single root collection.
+  - Requires **membership authority**: enforced in Firestore security rules via `communityMembers/{communityId}_{authorId}`.
+  - Invariants strictly validated on creation:
+    1. Parent community exists at `communities/{communityId}` (`exists(/communities/$(d.communityId))`).
+    2. Community belongs to the same campus as the post (`get(/communities/$(d.communityId)).data.campusId == d.campusId`).
+    3. Author holds an active membership record (`exists(/communityMembers/$(d.communityId + '_' + d.authorId))` and `data.status == 'active'`).
+    4. Cross-campus community posts and posts by non-members, pending members, or removed members are strictly rejected.
+
 ### Queries and writes
 
-- `subscribeToNewerPosts` listens for new posts in real-time.
+- `subscribeToNewerPosts` listens for new posts in real-time (optionally filtered by `campusId` or `communityId`).
 - `fetchOlderPosts` uses cursor-based pagination (`startAfter`) to load older posts incrementally.
-- Authenticated users can read posts.
-- Authenticated users can create a post when providing exactly the documented 8 keys, matching author ID, non-empty content under 2000 characters, zero counters, and server timestamps for both `createdAt` and `updatedAt`.
+- Authenticated users can read posts from their own campus (`resource.data.campusId == getUserCampusId()`).
+- Authenticated users can create a post when providing valid schema fields (author ID, non-empty content under 2000 characters, zero counters, and server timestamps for both `createdAt` and `updatedAt`).
 - The post author can delete their own post.
 - The active UI has no post-edit operation.
 

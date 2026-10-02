@@ -34,9 +34,31 @@ function resolveCampusId(opt) {
   return null;
 }
 
-export async function createPost(authorId, authorName, authorAvatar, content, campusIdOrOptions = null) {
+function resolveCommunityId(opt, communityIdArg = null) {
+  if (typeof communityIdArg === "string" && communityIdArg.trim()) {
+    return communityIdArg.trim();
+  }
+  if (opt && typeof opt === "object" && typeof opt.communityId === "string" && opt.communityId.trim()) {
+    return opt.communityId.trim();
+  }
+  return null;
+}
+
+export async function createPost(
+  authorId,
+  authorName,
+  authorAvatar,
+  content,
+  campusIdOrOptions = null,
+  communityIdArg = null
+) {
+  if (typeof content !== "string" || !content.trim()) {
+    throw new Error("Post content cannot be empty.");
+  }
+
   const postsRef = collection(requireDb(), "posts");
   const campusId = resolveCampusId(campusIdOrOptions);
+  const communityId = resolveCommunityId(campusIdOrOptions, communityIdArg);
 
   const newPost = {
     authorId,
@@ -48,6 +70,7 @@ export async function createPost(authorId, authorName, authorAvatar, content, ca
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
     ...(campusId ? { campusId } : {}),
+    ...(communityId ? { communityId } : {}),
   };
 
   const docRef = await addDoc(postsRef, newPost);
@@ -57,10 +80,16 @@ export async function createPost(authorId, authorName, authorAvatar, content, ca
 export function subscribeToNewerPosts(callback, onError, newestPostDoc = null, campusIdOrOptions = null) {
   const postsRef = collection(requireDb(), "posts");
   const campusId = resolveCampusId(campusIdOrOptions);
+  const communityId = resolveCommunityId(campusIdOrOptions);
 
-  let q = campusId
-    ? query(postsRef, where("campusId", "==", campusId), orderBy("createdAt", "desc"))
-    : query(postsRef, orderBy("createdAt", "desc"));
+  let q;
+  if (communityId) {
+    q = query(postsRef, where("communityId", "==", communityId), orderBy("createdAt", "desc"));
+  } else if (campusId) {
+    q = query(postsRef, where("campusId", "==", campusId), orderBy("createdAt", "desc"));
+  } else {
+    q = query(postsRef, orderBy("createdAt", "desc"));
+  }
 
   if (newestPostDoc !== null) {
     // Get posts strictly newer than newestPostDoc (higher timestamp)
@@ -81,10 +110,16 @@ export function subscribeToNewerPosts(callback, onError, newestPostDoc = null, c
 export async function fetchOlderPosts(pageSize, oldestPostDoc = null, campusIdOrOptions = null) {
   const postsRef = collection(requireDb(), "posts");
   const campusId = resolveCampusId(campusIdOrOptions);
+  const communityId = resolveCommunityId(campusIdOrOptions);
 
-  let q = campusId
-    ? query(postsRef, where("campusId", "==", campusId), orderBy("createdAt", "desc"), limit(pageSize))
-    : query(postsRef, orderBy("createdAt", "desc"), limit(pageSize));
+  let q;
+  if (communityId) {
+    q = query(postsRef, where("communityId", "==", communityId), orderBy("createdAt", "desc"), limit(pageSize));
+  } else if (campusId) {
+    q = query(postsRef, where("campusId", "==", campusId), orderBy("createdAt", "desc"), limit(pageSize));
+  } else {
+    q = query(postsRef, orderBy("createdAt", "desc"), limit(pageSize));
+  }
 
   if (oldestPostDoc !== null) {
     // Get posts strictly older than oldestPostDoc (lower timestamp)
@@ -104,10 +139,13 @@ export async function deletePost(postId) {
 export function subscribeToEmptyFeed(callback, onError, campusIdOrOptions = null) {
   const postsRef = collection(requireDb(), "posts");
   const campusId = resolveCampusId(campusIdOrOptions);
+  const communityId = resolveCommunityId(campusIdOrOptions);
 
-  const q = campusId
-    ? query(postsRef, where("campusId", "==", campusId), orderBy("createdAt", "desc"), limit(1))
-    : query(postsRef, orderBy("createdAt", "desc"), limit(1));
+  const q = communityId
+    ? query(postsRef, where("communityId", "==", communityId), orderBy("createdAt", "desc"), limit(1))
+    : campusId
+      ? query(postsRef, where("campusId", "==", campusId), orderBy("createdAt", "desc"), limit(1))
+      : query(postsRef, orderBy("createdAt", "desc"), limit(1));
 
   // Returns DocumentSnapshots in the callback
   return onSnapshot(
@@ -134,21 +172,30 @@ export function subscribeToPostUpdatesInRange(newestDoc, oldestDoc, callback, on
   try {
     const postsRef = collection(requireDb(), "posts");
     const campusId = resolveCampusId(campusIdOrOptions);
+    const communityId = resolveCommunityId(campusIdOrOptions);
 
-    const q = campusId
+    const q = communityId
       ? query(
           postsRef,
-          where("campusId", "==", campusId),
+          where("communityId", "==", communityId),
           orderBy("createdAt", "desc"),
           startAt(newestDoc),
           endAt(oldestDoc)
         )
-      : query(
-          postsRef,
-          orderBy("createdAt", "desc"),
-          startAt(newestDoc),
-          endAt(oldestDoc)
-        );
+      : campusId
+        ? query(
+            postsRef,
+            where("campusId", "==", campusId),
+            orderBy("createdAt", "desc"),
+            startAt(newestDoc),
+            endAt(oldestDoc)
+          )
+        : query(
+            postsRef,
+            orderBy("createdAt", "desc"),
+            startAt(newestDoc),
+            endAt(oldestDoc)
+          );
 
     return onSnapshot(
       q,
@@ -168,3 +215,4 @@ export function subscribeToPostUpdatesInRange(newestDoc, oldestDoc, callback, on
     return () => {};
   }
 }
+

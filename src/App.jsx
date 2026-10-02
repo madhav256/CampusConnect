@@ -9,6 +9,7 @@ import ErrorBoundary from "./components/ui/ErrorBoundary";
 const Dashboard = lazy(() => import("./pages/Dashboard"));
 const Profile = lazy(() => import("./pages/Profile"));
 const Discover = lazy(() => import("./pages/Discover"));
+const Communities = lazy(() => import("./pages/Communities"));
 const PublicProfile = lazy(() => import("./pages/PublicProfile"));
 const Connections = lazy(() => import("./pages/Connections"));
 const Notifications = lazy(() => import("./pages/Notifications"));
@@ -57,6 +58,14 @@ function App() {
               element={
                 <ProtectedRoute>
                   <Discover />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/communities"
+              element={
+                <ProtectedRoute>
+                  <Communities />
                 </ProtectedRoute>
               }
             />

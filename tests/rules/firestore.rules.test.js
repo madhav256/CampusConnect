@@ -7,7 +7,12 @@ import {
   resetFirestore,
   testEnvironment,
 } from "./testEnv.js";
-import { APEX_CAMPUS_ID, ST_JUDE_CAMPUS_ID } from "../../src/constants.js";
+import {
+  APEX_CAMPUS_ID,
+  ST_JUDE_CAMPUS_ID,
+  COMMUNITY_MEMBER_ROLES,
+  COMMUNITY_MEMBER_STATUSES,
+} from "../../src/constants.js";
 import {
   TEST_IDS,
   TEST_UIDS,
@@ -22,6 +27,8 @@ import {
   publicProfileFixture,
   directoryIndexFixture,
   campusFixture,
+  communityFixture,
+  communityMemberFixture,
 } from "./fixtures.js";
 
 const serverTimestamp = () => firebase.firestore.FieldValue.serverTimestamp();
@@ -40,6 +47,15 @@ async function expectPermissionDenied(operation) {
 function campusRef(context, campusId) {
   return context.firestore().collection("campuses").doc(campusId);
 }
+
+function communityRef(context, communityId) {
+  return context.firestore().collection("communities").doc(communityId);
+}
+
+function communityMemberRef(context, membershipId) {
+  return context.firestore().collection("communityMembers").doc(membershipId);
+}
+
 
 function userRef(context, uid) {
   return context.firestore().collection("users").doc(uid);
@@ -3297,4 +3313,345 @@ describe("Milestone 18 — Unit 18.2: Campuses & Multi-Tenancy Rules", () => {
       );
     });
   });
+
+  describe("Milestone 19 — Unit 19.2: Community & Membership Rules", () => {
+    async function seedCommunity(communityId, campusId, overrides = {}) {
+      await testEnvironment.withSecurityRulesDisabled(async (context) => {
+        const db = context.firestore();
+        await db
+          .collection("communities")
+          .doc(communityId)
+          .set(communityFixture(communityId, { campusId, ...overrides }));
+      });
+    }
+
+    async function seedCommunityMember(
+      membershipId,
+      communityId,
+      userId,
+      campusId,
+      role = COMMUNITY_MEMBER_ROLES.MEMBER,
+      status = COMMUNITY_MEMBER_STATUSES.ACTIVE,
+      overrides = {}
+    ) {
+      await testEnvironment.withSecurityRulesDisabled(async (context) => {
+        const db = context.firestore();
+        await db
+          .collection("communityMembers")
+          .doc(membershipId)
+          .set(
+            communityMemberFixture(communityId, userId, {
+              id: membershipId,
+              campusId,
+              role,
+              status,
+              ...overrides,
+            })
+          );
+      });
+    }
+
+    describe("Communities Collection Rules", () => {
+      beforeEach(async () => {
+        await seedUserWithCampus(TEST_UIDS.alice, APEX_CAMPUS_ID);
+        await seedUserWithCampus(TEST_UIDS.bob, ST_JUDE_CAMPUS_ID);
+        await seedCommunity("apex-ai-club", APEX_CAMPUS_ID);
+        await seedCommunity("st-jude-medical-society", ST_JUDE_CAMPUS_ID);
+      });
+
+      it("same-campus authenticated read succeeds", async () => {
+        const alice = contextFor(TEST_UIDS.alice);
+        await assertSucceeds(communityRef(alice, "apex-ai-club").get());
+      });
+
+      it("cross-campus read fails", async () => {
+        const alice = contextFor(TEST_UIDS.alice);
+        await expectPermissionDenied(() =>
+          communityRef(alice, "st-jude-medical-society").get()
+        );
+      });
+
+      it("unauthenticated read fails", async () => {
+        await expectPermissionDenied(() =>
+          communityRef(unauthenticated(), "apex-ai-club").get()
+        );
+      });
+
+      it("unauthorized write fails", async () => {
+        const alice = contextFor(TEST_UIDS.alice);
+        await expectPermissionDenied(() =>
+          communityRef(alice, "apex-new-club").set(
+            communityFixture("apex-new-club", { campusId: APEX_CAMPUS_ID })
+          )
+        );
+      });
+    });
+
+    describe("Community Members Collection Rules", () => {
+      beforeEach(async () => {
+        await seedUserWithCampus(TEST_UIDS.alice, APEX_CAMPUS_ID);
+        await seedUserWithCampus(TEST_UIDS.bob, ST_JUDE_CAMPUS_ID);
+        await seedUserWithCampus(TEST_UIDS.carol, APEX_CAMPUS_ID);
+        await seedCommunity("apex-ai-club", APEX_CAMPUS_ID);
+        await seedCommunity("st-jude-medical-society", ST_JUDE_CAMPUS_ID);
+      });
+
+      it("valid membership creation succeeds", async () => {
+        const alice = contextFor(TEST_UIDS.alice);
+        const membershipId = `apex-ai-club_${TEST_UIDS.alice}`;
+        await assertSucceeds(
+          communityMemberRef(alice, membershipId).set({
+            id: membershipId,
+            communityId: "apex-ai-club",
+            userId: TEST_UIDS.alice,
+            campusId: APEX_CAMPUS_ID,
+            role: COMMUNITY_MEMBER_ROLES.MEMBER,
+            status: COMMUNITY_MEMBER_STATUSES.ACTIVE,
+            joinedAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("cross-campus membership rejected", async () => {
+        const alice = contextFor(TEST_UIDS.alice);
+        const membershipId = `st-jude-medical-society_${TEST_UIDS.alice}`;
+        // Alice from Apex tries to join St. Jude community with St. Jude campusId
+        await expectPermissionDenied(() =>
+          communityMemberRef(alice, membershipId).set({
+            id: membershipId,
+            communityId: "st-jude-medical-society",
+            userId: TEST_UIDS.alice,
+            campusId: ST_JUDE_CAMPUS_ID,
+            role: COMMUNITY_MEMBER_ROLES.MEMBER,
+            status: COMMUNITY_MEMBER_STATUSES.ACTIVE,
+            joinedAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          })
+        );
+
+        // Alice from Apex tries to join St. Jude community with Apex campusId
+        await expectPermissionDenied(() =>
+          communityMemberRef(alice, membershipId).set({
+            id: membershipId,
+            communityId: "st-jude-medical-society",
+            userId: TEST_UIDS.alice,
+            campusId: APEX_CAMPUS_ID,
+            role: COMMUNITY_MEMBER_ROLES.MEMBER,
+            status: COMMUNITY_MEMBER_STATUSES.ACTIVE,
+            joinedAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("invalid community rejected", async () => {
+        const alice = contextFor(TEST_UIDS.alice);
+        const membershipId = `non-existent-club_${TEST_UIDS.alice}`;
+        await expectPermissionDenied(() =>
+          communityMemberRef(alice, membershipId).set({
+            id: membershipId,
+            communityId: "non-existent-club",
+            userId: TEST_UIDS.alice,
+            campusId: APEX_CAMPUS_ID,
+            role: COMMUNITY_MEMBER_ROLES.MEMBER,
+            status: COMMUNITY_MEMBER_STATUSES.ACTIVE,
+            joinedAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("invalid user rejected", async () => {
+        const alice = contextFor(TEST_UIDS.alice);
+        // Alice tries to create membership for Carol
+        const membershipId = `apex-ai-club_${TEST_UIDS.carol}`;
+        await expectPermissionDenied(() =>
+          communityMemberRef(alice, membershipId).set({
+            id: membershipId,
+            communityId: "apex-ai-club",
+            userId: TEST_UIDS.carol,
+            campusId: APEX_CAMPUS_ID,
+            role: COMMUNITY_MEMBER_ROLES.MEMBER,
+            status: COMMUNITY_MEMBER_STATUSES.ACTIVE,
+            joinedAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          })
+        );
+
+        // Unauthenticated user rejected
+        await expectPermissionDenied(() =>
+          communityMemberRef(
+            unauthenticated(),
+            `apex-ai-club_${TEST_UIDS.alice}`
+          ).set({
+            id: `apex-ai-club_${TEST_UIDS.alice}`,
+            communityId: "apex-ai-club",
+            userId: TEST_UIDS.alice,
+            campusId: APEX_CAMPUS_ID,
+            role: COMMUNITY_MEMBER_ROLES.MEMBER,
+            status: COMMUNITY_MEMBER_STATUSES.ACTIVE,
+            joinedAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("privilege escalation rejected on creation", async () => {
+        const alice = contextFor(TEST_UIDS.alice);
+        const membershipId = `apex-ai-club_${TEST_UIDS.alice}`;
+        // Alice tries to make herself admin on create
+        await expectPermissionDenied(() =>
+          communityMemberRef(alice, membershipId).set({
+            id: membershipId,
+            communityId: "apex-ai-club",
+            userId: TEST_UIDS.alice,
+            campusId: APEX_CAMPUS_ID,
+            role: COMMUNITY_MEMBER_ROLES.ADMIN,
+            status: COMMUNITY_MEMBER_STATUSES.ACTIVE,
+            joinedAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          })
+        );
+
+        // Alice tries to make herself moderator on create
+        await expectPermissionDenied(() =>
+          communityMemberRef(alice, membershipId).set({
+            id: membershipId,
+            communityId: "apex-ai-club",
+            userId: TEST_UIDS.alice,
+            campusId: APEX_CAMPUS_ID,
+            role: COMMUNITY_MEMBER_ROLES.MODERATOR,
+            status: COMMUNITY_MEMBER_STATUSES.ACTIVE,
+            joinedAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("privilege escalation rejected on update by member", async () => {
+        const alice = contextFor(TEST_UIDS.alice);
+        const membershipId = `apex-ai-club_${TEST_UIDS.alice}`;
+        await seedCommunityMember(
+          membershipId,
+          "apex-ai-club",
+          TEST_UIDS.alice,
+          APEX_CAMPUS_ID,
+          COMMUNITY_MEMBER_ROLES.MEMBER
+        );
+
+        // Alice tries to update her role from member to admin
+        await expectPermissionDenied(() =>
+          communityMemberRef(alice, membershipId).update({
+            role: COMMUNITY_MEMBER_ROLES.ADMIN,
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("arbitrary modification of another user's membership rejected", async () => {
+        const alice = contextFor(TEST_UIDS.alice);
+        const carolMembershipId = `apex-ai-club_${TEST_UIDS.carol}`;
+        await seedCommunityMember(
+          carolMembershipId,
+          "apex-ai-club",
+          TEST_UIDS.carol,
+          APEX_CAMPUS_ID,
+          COMMUNITY_MEMBER_ROLES.MEMBER
+        );
+
+        // Alice (not admin, not owner) tries to modify Carol's status
+        await expectPermissionDenied(() =>
+          communityMemberRef(alice, carolMembershipId).update({
+            status: COMMUNITY_MEMBER_STATUSES.REMOVED,
+            updatedAt: serverTimestamp(),
+          })
+        );
+
+        // Alice tries to delete Carol's membership
+        await expectPermissionDenied(() =>
+          communityMemberRef(alice, carolMembershipId).delete()
+        );
+      });
+
+      it("allows member to delete their own membership", async () => {
+        const alice = contextFor(TEST_UIDS.alice);
+        const membershipId = `apex-ai-club_${TEST_UIDS.alice}`;
+        await seedCommunityMember(
+          membershipId,
+          "apex-ai-club",
+          TEST_UIDS.alice,
+          APEX_CAMPUS_ID,
+          COMMUNITY_MEMBER_ROLES.MEMBER
+        );
+
+        await assertSucceeds(
+          communityMemberRef(alice, membershipId).delete()
+        );
+      });
+
+      it("allows community admin to update another user's role and status", async () => {
+        const alice = contextFor(TEST_UIDS.alice);
+        const aliceMembershipId = `apex-ai-club_${TEST_UIDS.alice}`;
+        const carolMembershipId = `apex-ai-club_${TEST_UIDS.carol}`;
+
+        // Alice is active admin of apex-ai-club
+        await seedCommunityMember(
+          aliceMembershipId,
+          "apex-ai-club",
+          TEST_UIDS.alice,
+          APEX_CAMPUS_ID,
+          COMMUNITY_MEMBER_ROLES.ADMIN
+        );
+        // Carol is active member of apex-ai-club
+        await seedCommunityMember(
+          carolMembershipId,
+          "apex-ai-club",
+          TEST_UIDS.carol,
+          APEX_CAMPUS_ID,
+          COMMUNITY_MEMBER_ROLES.MEMBER
+        );
+
+        // Alice promotes Carol to moderator
+        await assertSucceeds(
+          communityMemberRef(alice, carolMembershipId).update({
+            role: COMMUNITY_MEMBER_ROLES.MODERATOR,
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("same-campus community member read succeeds, cross-campus read fails", async () => {
+        const alice = contextFor(TEST_UIDS.alice);
+        const bob = contextFor(TEST_UIDS.bob);
+        const aliceMembershipId = `apex-ai-club_${TEST_UIDS.alice}`;
+        const bobMembershipId = `st-jude-medical-society_${TEST_UIDS.bob}`;
+
+        await seedCommunityMember(
+          aliceMembershipId,
+          "apex-ai-club",
+          TEST_UIDS.alice,
+          APEX_CAMPUS_ID
+        );
+        await seedCommunityMember(
+          bobMembershipId,
+          "st-jude-medical-society",
+          TEST_UIDS.bob,
+          ST_JUDE_CAMPUS_ID
+        );
+
+        // Alice reads Apex membership -> succeeds
+        await assertSucceeds(communityMemberRef(alice, aliceMembershipId).get());
+
+        // Alice reads St. Jude membership -> fails
+        await expectPermissionDenied(() =>
+          communityMemberRef(alice, bobMembershipId).get()
+        );
+
+        // Bob reads St. Jude membership -> succeeds
+        await assertSucceeds(communityMemberRef(bob, bobMembershipId).get());
+      });
+    });
+  });
 });
+

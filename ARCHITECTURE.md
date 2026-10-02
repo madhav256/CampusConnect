@@ -209,18 +209,25 @@ The active collections are:
 - `conversations/{canonicalConnectionId}`: 1-to-1 conversation metadata between connected peers;
 - `conversations/{canonicalConnectionId}/messages/{messageId}`: append-only immutable message subcollection;
 - `campuses/{campusId}`: authoritative campus metadata for multi-tenancy and the CampusNest domain;
-- `communities/{communityId}`: authoritative campus community metadata defining student clubs, societies, and cohorts.
+- `communities/{communityId}`: authoritative campus community metadata defining student clubs, societies, and cohorts;
+- `communityMembers/{membershipId}`: authoritative community membership records linking students to campus communities with role-based security authority.
 
 The full field-level schema and current rule behavior are documented in [FIRESTORE_SCHEMA.md](FIRESTORE_SCHEMA.md).
 
-### Community Domain
+### Community Domain & Membership Authority
 
 CampusConnect structures collective student life through an institutional hierarchy:
 
-$$\text{Campus} \longrightarrow \text{Communities}$$
+$$\text{Campus} \longrightarrow \text{Communities} \longrightarrow \text{Community Members}$$
 
 1. **Campus Root:** Every community belongs permanently to an authoritative institutional tenant (`campusId`), inheriting the multi-tenant isolation boundary established in Milestone 18.
 2. **First-Class Communities:** Defined in the root `communities/{communityId}` collection to provide uniform querying, direct identifier resolution, and architectural consistency with `campuses`, `posts`, and `conversations`.
+3. **Community Membership Security Authority (`communityMembers`):**
+   - **Root Collection Pattern:** Memberships reside in the root `communityMembers/{membershipId}` collection rather than subcollections, maintaining repository-wide root-domain conventions.
+   - **Deterministic Canonical IDs:** Keyed deterministically as `{communityId}_{userId}` (e.g. `apex-ai-club_e2e-student-a`), ensuring idempotent writes and preventing duplicate memberships.
+   - **Tenant Boundary Isolation:** Security rules enforce strict tenant parity: the member student's campus, community campus, and membership document campus must match (`campusId == getUserCampusId()`). Cross-campus memberships are rejected.
+   - **Role-Based Authority & Privilege Escalation Prevention:** Supported roles include `member`, `moderator`, and `admin`. Client self-joins are strictly restricted to `member` role; self-promotion or client assignment of `admin` or `moderator` privileges is rejected by security rules. Only validated active community admins can update member roles.
+   - **Decoupled Social Graph:** Community membership is completely independent of 1-to-1 connections (`connections`) and private messaging (`conversations`), ensuring community participation does not compromise personal connection boundaries.
 
 
 ### Messaging Architecture & Contracts

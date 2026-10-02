@@ -27,6 +27,7 @@ import {
 } from "../src/data/demoData.js";
 import { seedCampuses } from "./seedCampuses.mjs";
 import { seedCommunities } from "./seedCommunities.mjs";
+import { seedCommunityMembers } from "./seedCommunityMembers.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -196,6 +197,9 @@ async function seedDemoEnvironment() {
 
   // 1. Seed deterministic communities (Milestone 19)
   await seedCommunities(db);
+
+  // 1.5. Seed deterministic community members (Milestone 19.2)
+  await seedCommunityMembers(db);
 
   // 2. Resolve or provision the single primary demo student in Firebase Auth
   const demoEmail = DEMO_PRIMARY_STUDENT.email;

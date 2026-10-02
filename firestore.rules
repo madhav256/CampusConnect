@@ -775,5 +775,89 @@ service cloud.firestore {
         allow delete: if false;
       }
     }
+
+    // 7. Communities collection (Campus Community Authority - Milestone 19)
+    match /communities/{communityId} {
+      allow read: if isAuthenticated() && (
+        !('campusId' in resource.data) ||
+        resource.data.campusId == getUserCampusId()
+      );
+      allow write: if false;
+    }
+
+    // 8. Community Members collection (Community Membership & Security Authority - Milestone 19.2)
+    match /communityMembers/{membershipId} {
+      function isCommunityAdmin(communityId) {
+        let adminMembershipPath = /databases/$(database)/documents/communityMembers/$(communityId + '_' + request.auth.uid);
+        return exists(adminMembershipPath) &&
+               get(adminMembershipPath).data.role == 'admin' &&
+               get(adminMembershipPath).data.status == 'active';
+      }
+
+      function isValidCommunityMemberCreate(mId) {
+        let d = request.resource.data;
+        let communityPath = /databases/$(database)/documents/communities/$(d.communityId);
+        return d.keys().hasOnly(['id', 'communityId', 'userId', 'campusId', 'role', 'status', 'joinedAt', 'updatedAt']) &&
+               d.keys().hasAll(['id', 'communityId', 'userId', 'campusId', 'role', 'status', 'joinedAt', 'updatedAt']) &&
+               d.id == mId &&
+               d.id == d.communityId + '_' + d.userId &&
+               d.userId == request.auth.uid &&
+               d.campusId is string &&
+               getUserCampusId() != null &&
+               d.campusId == getUserCampusId() &&
+               d.role == 'member' &&
+               d.status in ['active', 'pending'] &&
+               d.joinedAt == request.time &&
+               d.updatedAt == request.time &&
+               exists(communityPath) &&
+               get(communityPath).data.campusId == d.campusId;
+      }
+
+      function isValidCommunityMemberUpdate(mId) {
+        let d = request.resource.data;
+        let r = resource.data;
+        let isOwner = request.auth.uid == r.userId;
+        let isAdmin = isCommunityAdmin(r.communityId);
+
+        let immutableFieldsPreserved =
+          d.id == r.id &&
+          d.communityId == r.communityId &&
+          d.userId == r.userId &&
+          d.campusId == r.campusId &&
+          d.joinedAt == r.joinedAt &&
+          d.updatedAt == request.time;
+
+        let validOwnerUpdate =
+          isOwner &&
+          immutableFieldsPreserved &&
+          d.role == r.role &&
+          d.diff(r).affectedKeys().hasOnly(['status', 'updatedAt']) &&
+          d.status in ['active', 'removed', 'pending'];
+
+        let validAdminUpdate =
+          isAdmin &&
+          immutableFieldsPreserved &&
+          d.diff(r).affectedKeys().hasOnly(['role', 'status', 'updatedAt']) &&
+          d.role in ['member', 'moderator', 'admin'] &&
+          d.status in ['active', 'removed', 'pending'];
+
+        return (validOwnerUpdate || validAdminUpdate);
+      }
+
+      allow read: if isAuthenticated() && (
+        !('campusId' in resource.data) ||
+        resource.data.campusId == getUserCampusId()
+      );
+
+      allow create: if isAuthenticated() && isValidCommunityMemberCreate(membershipId);
+
+      allow update: if isAuthenticated() && isValidCommunityMemberUpdate(membershipId);
+
+      allow delete: if isAuthenticated() && (
+        request.auth.uid == resource.data.userId ||
+        isCommunityAdmin(resource.data.communityId)
+      );
+    }
   }
 }
+

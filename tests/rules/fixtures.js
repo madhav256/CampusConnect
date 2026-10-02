@@ -1,7 +1,13 @@
 import firebase from "firebase/compat/app";
 import "firebase/compat/firestore";
-import { APEX_CAMPUS_ID } from "../../src/constants.js";
+import {
+  APEX_CAMPUS_ID,
+  ST_JUDE_CAMPUS_ID,
+  COMMUNITY_MEMBER_ROLES,
+  COMMUNITY_MEMBER_STATUSES,
+} from "../../src/constants.js";
 import { CAMPUS_LIST } from "../../src/data/campuses.js";
+import { COMMUNITY_LIST } from "../../src/data/communities.js";
 
 export const TEST_UIDS = {
   alice: "alice",
@@ -223,6 +229,51 @@ export function directoryIndexFixture(uid, overrides = {}) {
   };
 }
 
+export function communityFixture(communityId = "apex-ai-club", overrides = {}) {
+  const isApex = communityId.startsWith("apex") || communityId === "apex-ai-club";
+  return {
+    id: communityId,
+    campusId: isApex ? APEX_CAMPUS_ID : ST_JUDE_CAMPUS_ID,
+    name: isApex ? "Apex AI & Robotics Society" : "St. Jude Medical Society",
+    slug: isApex ? "ai-robotics-society" : "medical-society",
+    description: "A deterministic community fixture.",
+    category: isApex ? "tech" : "academic",
+    imageURL: null,
+    bannerURL: null,
+    createdBy: "system",
+    stats: {
+      memberCount: 0,
+      postCount: 0,
+    },
+    status: "active",
+    visibility: "campus_public",
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    ...overrides,
+  };
+}
+
+export function communityMemberFixture(
+  communityId = "apex-ai-club",
+  userId = TEST_UIDS.alice,
+  overrides = {}
+) {
+  const isApex = communityId.startsWith("apex") || communityId === "apex-ai-club";
+  const campusId = overrides.campusId || (isApex ? APEX_CAMPUS_ID : ST_JUDE_CAMPUS_ID);
+  const id = overrides.id || `${communityId}_${userId}`;
+  return {
+    id,
+    communityId,
+    userId,
+    campusId,
+    role: overrides.role || COMMUNITY_MEMBER_ROLES.MEMBER,
+    status: overrides.status || COMMUNITY_MEMBER_STATUSES.ACTIVE,
+    joinedAt: timestamp,
+    updatedAt: timestamp,
+    ...overrides,
+  };
+}
+
 export async function seedBaseData(testEnvironment) {
   await testEnvironment.withSecurityRulesDisabled(async (context) => {
     const db = context.firestore();
@@ -231,6 +282,14 @@ export async function seedBaseData(testEnvironment) {
     for (const campus of CAMPUS_LIST) {
       batch.set(db.collection("campuses").doc(campus.id), {
         ...campus,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      });
+    }
+
+    for (const community of COMMUNITY_LIST) {
+      batch.set(db.collection("communities").doc(community.id), {
+        ...community,
         createdAt: timestamp,
         updatedAt: timestamp,
       });
@@ -262,3 +321,4 @@ export async function seedBaseData(testEnvironment) {
     await batch.commit();
   });
 }
+

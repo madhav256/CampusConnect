@@ -36,7 +36,9 @@ conversations/{canonicalConversationId}
 
 campuses/{campusId} (campus authority)
 communities/{communityId} (campus community authority)
+communityMembers/{membershipId} (community membership authority)
 ```
+
 
 The active client does not use separate `friendRequests`, `friendships`, or `bookmarks` collections.
 
@@ -428,7 +430,55 @@ Stores authoritative metadata defining university student organizations, academi
 - **Root Collection Design:** Communities reside in the root `communities` collection, maintaining structural consistency with `posts`, `connections`, `conversations`, and `campuses`.
 - **Future Relationship with Posts & Members:**
   - **Posts:** Future community discussion posts will associate with this collection via an optional `communityId` on top-level `posts` documents, allowing community-scoped feeds alongside campus-wide announcements.
-  - **Members:** Community memberships will be managed through dedicated relationships (`communityMembers`), decoupling group membership from bilateral connection graphs.
+  - **Members:** Community memberships are managed through dedicated relationships in the root `communityMembers` collection, decoupling group membership from bilateral connection graphs.
+
+## 13. `communityMembers/{membershipId}` (Community Membership Authority)
+
+Stores authoritative membership records linking students to communities within their university campus. Serves as the security and authorization authority for community interactions, moderation privileges, and participation boundaries.
+
+### Deterministic Document ID
+
+```text
+{communityId}_{userId}
+```
+
+Example: `apex-ai-club_e2e-student-a`. This deterministic pattern guarantees idempotent membership provisioning and prevents duplicate memberships for any given student in a community.
+
+### Fields
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `id` | string | Canonical membership identifier (`{communityId}_{userId}`); must equal document ID |
+| `communityId` | string | Reference to target parent community; immutable |
+| `userId` | string | Firebase Auth UID of member student; immutable |
+| `campusId` | string | Tenant campus identifier; must match both the student's campus and parent community campus |
+| `role` | string | Authorization role enum (`member`, `moderator`, `admin`) |
+| `status` | string | Membership state enum (`active`, `removed`, `pending`) |
+| `joinedAt` | timestamp | Document creation timestamp; immutable |
+| `updatedAt` | timestamp | Timestamp of last membership role or status modification |
+
+### Tenant Boundary & Community Relationship
+
+- **Strict Tenant Anchor:** A membership document permanently reflects the tenant boundary of its parent campus (`campusId`). Cross-campus memberships are strictly forbidden by security rules: a student cannot join a community hosted by a different campus.
+- **Root Collection Design:** `communityMembers` is stored as a first-class root collection rather than a subcollection (`communities/{communityId}/members/{userId}`). This matches the repository-wide architectural pattern (e.g. `posts`, `connections`, `conversations`) and facilitates global queries across user memberships without collection group queries.
+- **Decoupled Social Graph:** Community membership is fully decoupled from 1-to-1 connections (`connections`). Being a member of the same community does not automatically create a bilateral connection or open private messaging, preserving user privacy.
+
+### Security Rules Behavior
+
+- **Read Access:** Authenticated members of the same campus can read community memberships (`resource.data.campusId == getUserCampusId()`). Cross-campus reads are strictly denied (`permission-denied`).
+- **Creation Validation:**
+  - Owner authentication required (`request.auth.uid == userId`).
+  - Strict 8-key schema enforcement (`isValidCommunityMemberCreate`).
+  - Deterministic ID pattern enforced (`id == communityId + '_' + userId`).
+  - Community existence and campus parity validated via `exists()` and `get(/communities/$(communityId)).data.campusId == campusId`.
+  - User campus parity validated (`campusId == getUserCampusId()`).
+  - Initial role restricted to `member` (`d.role == 'member'`), preventing self-assigned privilege escalation to `admin` or `moderator`.
+  - Initial status restricted to `active` or `pending`.
+- **Update Restrictions:**
+  - Member self-updates: Owner can modify only `status` and `updatedAt`. The `role` field is strictly immutable for the member (`d.role == r.role`), rejecting self-escalation attempts.
+  - Community admin updates: Validated active community admins (`isCommunityAdmin(communityId)`) can update member roles (`member`, `moderator`, `admin`) and statuses (`active`, `removed`, `pending`).
+  - Arbitrary updates: Unrelated non-admin users cannot alter any membership document.
+- **Deletion:** A student can leave a community by deleting their own membership document (`request.auth.uid == resource.data.userId`), or an active community admin can delete the document.
 
 ## Demo-only metadata
 

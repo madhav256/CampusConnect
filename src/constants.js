@@ -34,3 +34,20 @@ export const COMMUNITY_VISIBILITIES = {
 };
 
 export const COMMUNITY_VISIBILITY_LIST = Object.values(COMMUNITY_VISIBILITIES);
+
+// Community Membership Constants (Milestone 19.2 - Membership & Security Authority)
+export const COMMUNITY_MEMBER_ROLES = {
+  MEMBER: "member",
+  MODERATOR: "moderator",
+  ADMIN: "admin",
+};
+
+export const COMMUNITY_MEMBER_ROLE_LIST = Object.values(COMMUNITY_MEMBER_ROLES);
+
+export const COMMUNITY_MEMBER_STATUSES = {
+  ACTIVE: "active",
+  REMOVED: "removed",
+  PENDING: "pending",
+};
+
+export const COMMUNITY_MEMBER_STATUS_LIST = Object.values(COMMUNITY_MEMBER_STATUSES);

@@ -239,6 +239,24 @@ Campus
    - **Optional Community Association:** Post documents optionally specify `communityId?: string`. When omitted, the post is a campus-wide feed item. When provided, the post represents a community discussion thread.
    - **Membership Authority Enforcement:** Creation of a community post (`communityId != null`) strictly requires active membership in `communityMembers/{communityId}_{authorId}` (`status == 'active'`) and tenant parity across the author's campus, community's campus, and post's campus.
    - **Shared Infrastructure:** Likes, comments, real-time listeners, and cursor pagination reuse the robust, verified `posts` subsystem without divergent schemas.
+5. **Community Client Layer (Services & Hooks):**
+   The frontend exposes the community domain through a decoupled, two-tier client architecture:
+
+   ```text
+   Client Layer
+
+   Community Services (communityService.js, communityMemberService.js)
+           │
+           ▼
+   Community Hooks (useCommunities.js, useCommunity.js, useCommunityMembers.js)
+           │
+           ▼
+   Future Community UI (Views, Cards, Detail Pages)
+   ```
+
+   - **Services Tier:** `communityService.js` and `communityMemberService.js` encapsulate all Firebase Firestore interaction, point lookups, real-time snapshot queries, document normalization, and membership actions (`joinCommunity`, `leaveCommunity`), maintaining clean separation from React components.
+   - **Hooks Tier:** `useCommunities`, `useCommunity`, and `useCommunityMembers` provide React lifecycle integration, managing loading/error states, reactive subscriptions, and derived membership roles (`isMember`, `isAdmin`).
+   - **UI Decoupling:** Client data access is established and unit tested independently prior to mounting UI screens, preserving testability and architectural boundaries.
 
 
 ### Messaging Architecture & Contracts

@@ -59,8 +59,59 @@ test.describe("Milestone 19 — Unit 19.7: Community Discovery & Feed Interactio
     // 3. Verify Join Community button is available
     await expect(page.locator("[data-testid='join-community-button']")).toBeVisible();
 
-    // 4. Verify post composer is strictly hidden for non-member
+    // 4. Verify post composer and moderation panel are strictly hidden for non-member
     await expect(page.locator("#community-post-content")).not.toBeVisible();
     await expect(page.locator("[data-testid='community-post-composer']")).not.toBeVisible();
+    await expect(page.locator("[data-testid='community-moderation-panel']")).not.toBeVisible();
+  });
+
+  test("Admin views community moderation panel and manages member role", async ({ page }) => {
+    // 1. Log in as studentA (active admin of Apex AI club)
+    await loginAs(page, E2E_USERS.studentA);
+
+    // 2. Navigate to /communities/apex-ai-club
+    await page.goto("/communities/apex-ai-club");
+    await expect(page.locator("[data-testid='community-hero-name']")).toContainText("Apex AI & Robotics Society");
+
+    // 3. Verify moderation panel is visible with Admin badge
+    const modPanel = page.locator("[data-testid='community-moderation-panel']");
+    await expect(modPanel).toBeVisible();
+    await expect(page.locator("[data-testid='moderation-role-badge']")).toHaveText("Admin");
+
+    // 4. Verify member e2e-student-b is listed
+    const memberRow = page.locator("[data-testid='moderation-member-row-e2e-student-b']");
+    await expect(memberRow).toBeVisible();
+
+    // 5. Admin promotes student-b to moderator
+    const promoteBtn = page.locator("[data-testid='promote-moderator-e2e-student-b']");
+    await expect(promoteBtn).toBeVisible();
+    await promoteBtn.click();
+
+    // 6. Verify success banner appears and demote button is now shown
+    await expect(page.locator("[data-testid='moderation-success']")).toBeVisible();
+    const demoteBtn = page.locator("[data-testid='demote-member-e2e-student-b']");
+    await expect(demoteBtn).toBeVisible();
+
+    // 7. Admin demotes student-b back to regular member
+    await demoteBtn.click();
+    await expect(page.locator("[data-testid='moderation-success']")).toBeVisible();
+    await expect(page.locator("[data-testid='promote-moderator-e2e-student-b']")).toBeVisible();
+  });
+
+  test("Ordinary community member does not see moderation panel or post moderation on others' posts", async ({
+    page,
+  }) => {
+    // 1. Log in as studentB (regular member)
+    await loginAs(page, E2E_USERS.studentB);
+
+    // 2. Navigate to /communities/apex-ai-club
+    await page.goto("/communities/apex-ai-club");
+    await expect(page.locator("[data-testid='community-hero-name']")).toContainText("Apex AI & Robotics Society");
+
+    // 3. Moderation panel is strictly hidden for regular members
+    await expect(page.locator("[data-testid='community-moderation-panel']")).not.toBeVisible();
+
+    // 4. Moderate post button is strictly hidden for regular members
+    await expect(page.locator("[data-testid='moderate-post-button']")).not.toBeVisible();
   });
 });

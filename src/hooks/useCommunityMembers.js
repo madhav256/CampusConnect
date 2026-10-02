@@ -12,6 +12,8 @@ import {
   subscribeToCommunityMembership,
   joinCommunity,
   leaveCommunity,
+  updateCommunityMemberRole,
+  updateCommunityMemberStatus,
 } from "../services/communityMemberService.js";
 import {
   COMMUNITY_MEMBER_ROLES,
@@ -27,11 +29,14 @@ import {
  *   members: Array<object>,
  *   membership: object|null,
  *   isMember: boolean,
+ *   isModerator: boolean,
  *   isAdmin: boolean,
  *   isLoading: boolean,
  *   error: string|null,
  *   join: (campusId: string) => Promise<object>,
  *   leave: () => Promise<void>,
+ *   updateRole: (targetUserId: string, newRole: string) => Promise<void>,
+ *   updateStatus: (targetUserId: string, newStatus: string) => Promise<void>,
  *   refetch: () => Promise<void>,
  * }}
  */
@@ -59,6 +64,10 @@ export function useCommunityMembers(communityId, explicitUserId) {
     membership?.status === COMMUNITY_MEMBER_STATUSES.ACTIVE;
   const isAdmin =
     isMember && membership?.role === COMMUNITY_MEMBER_ROLES.ADMIN;
+  const isModerator =
+    isMember &&
+    (membership?.role === COMMUNITY_MEMBER_ROLES.MODERATOR ||
+      membership?.role === COMMUNITY_MEMBER_ROLES.ADMIN);
 
   const refetch = useCallback(async () => {
     if (!communityId) {
@@ -112,6 +121,38 @@ export function useCommunityMembers(communityId, explicitUserId) {
     }
   }, [communityId, currentUid]);
 
+  const handleUpdateRole = useCallback(
+    async (targetUserId, newRole) => {
+      if (!communityId || !targetUserId || !newRole) {
+        throw new Error("Missing parameters for updating member role.");
+      }
+      try {
+        setError(null);
+        await updateCommunityMemberRole(communityId, targetUserId, newRole);
+      } catch (err) {
+        setError(err?.message || "Failed to update member role.");
+        throw err;
+      }
+    },
+    [communityId]
+  );
+
+  const handleUpdateStatus = useCallback(
+    async (targetUserId, newStatus) => {
+      if (!communityId || !targetUserId || !newStatus) {
+        throw new Error("Missing parameters for updating member status.");
+      }
+      try {
+        setError(null);
+        await updateCommunityMemberStatus(communityId, targetUserId, newStatus);
+      } catch (err) {
+        setError(err?.message || "Failed to update member status.");
+        throw err;
+      }
+    },
+    [communityId]
+  );
+
   useEffect(() => {
     if (!communityId) {
       return;
@@ -153,11 +194,14 @@ export function useCommunityMembers(communityId, explicitUserId) {
     members,
     membership,
     isMember,
+    isModerator,
     isAdmin,
     isLoading,
     error,
     join: handleJoin,
     leave: handleLeave,
+    updateRole: handleUpdateRole,
+    updateStatus: handleUpdateStatus,
     refetch,
   };
 }

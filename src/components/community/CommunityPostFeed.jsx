@@ -18,6 +18,7 @@ import EmptyState from "../ui/EmptyState";
 export default function CommunityPostFeed({
   community,
   isMember = false,
+  canModerate = false,
   // Optional controlled props for direct injection / testability
   posts: controlledPosts,
   isLoading: controlledIsLoading,
@@ -141,6 +142,7 @@ export default function CommunityPostFeed({
             currentUserId={user?.uid}
             onDelete={onDelete}
             updatePost={updatePost}
+            canModerate={canModerate}
           />
         ))}
       </div>

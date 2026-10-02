@@ -16,6 +16,7 @@ import {
   query,
   serverTimestamp,
   setDoc,
+  updateDoc,
   where,
 } from "firebase/firestore";
 import { db, isFirebaseConfigured } from "../firebase/config";
@@ -238,3 +239,52 @@ export async function leaveCommunity(communityId, userId) {
 
   await deleteDoc(mRef);
 }
+
+/**
+ * Updates the role of a community member.
+ * Backed by isValidCommunityMemberUpdate in Firestore security rules.
+ *
+ * @param {string} communityId
+ * @param {string} userId
+ * @param {string} newRole
+ * @returns {Promise<void>}
+ */
+export async function updateCommunityMemberRole(communityId, userId, newRole) {
+  if (!communityId || !userId || !newRole) {
+    throw new Error("communityId, userId, and newRole are required to update member role.");
+  }
+
+  const membershipId = getCommunityMemberId(communityId, userId);
+  const mRef = communityMemberDocRef(membershipId);
+
+  await updateDoc(mRef, {
+    role: newRole,
+    updatedAt: serverTimestamp(),
+  });
+}
+
+/**
+ * Updates the status of a community member (e.g., 'active', 'removed').
+ * Backed by isValidCommunityMemberUpdate in Firestore security rules.
+ *
+ * @param {string} communityId
+ * @param {string} userId
+ * @param {string} newStatus
+ * @returns {Promise<void>}
+ */
+export async function updateCommunityMemberStatus(communityId, userId, newStatus) {
+  if (!communityId || !userId || !newStatus) {
+    throw new Error("communityId, userId, and newStatus are required to update member status.");
+  }
+
+  const membershipId = getCommunityMemberId(communityId, userId);
+  const mRef = communityMemberDocRef(membershipId);
+
+  await updateDoc(mRef, {
+    status: newStatus,
+    updatedAt: serverTimestamp(),
+  });
+}
+
+export const updateMemberRole = updateCommunityMemberRole;
+export const updateMemberStatus = updateCommunityMemberStatus;

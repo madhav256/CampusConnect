@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   getDocs: vi.fn(),
   setDoc: vi.fn(),
   deleteDoc: vi.fn(),
+  updateDoc: vi.fn(),
   onSnapshot: vi.fn(),
   query: vi.fn((ref, ...constraints) => ({ ref, constraints })),
   where: vi.fn((field, op, val) => ({ field, op, val })),
@@ -31,6 +32,7 @@ vi.mock("firebase/firestore", () => ({
   getDocs: mocks.getDocs,
   setDoc: mocks.setDoc,
   deleteDoc: mocks.deleteDoc,
+  updateDoc: mocks.updateDoc,
   onSnapshot: mocks.onSnapshot,
   query: mocks.query,
   where: mocks.where,
@@ -47,6 +49,8 @@ import {
   subscribeToCommunityMembers,
   joinCommunity,
   leaveCommunity,
+  updateCommunityMemberRole,
+  updateCommunityMemberStatus,
 } from "../../src/services/communityMemberService.js";
 
 describe("Milestone 19 — Unit 19.4: Community Member Service", () => {
@@ -322,6 +326,64 @@ describe("Milestone 19 — Unit 19.4: Community Member Service", () => {
       await leaveCommunity("apex-ai-club", "u1");
       expect(mocks.deleteDoc).toHaveBeenCalledWith(
         expect.objectContaining({ path: "communityMembers/apex-ai-club_u1" })
+      );
+    });
+  });
+
+  describe("updateCommunityMemberRole", () => {
+    it("validates required parameters and throws error on missing fields", async () => {
+      await expect(updateCommunityMemberRole("", "u1", "moderator")).rejects.toThrow(
+        "communityId, userId, and newRole are required"
+      );
+      await expect(updateCommunityMemberRole("apex-ai-club", "", "moderator")).rejects.toThrow(
+        "communityId, userId, and newRole are required"
+      );
+      await expect(updateCommunityMemberRole("apex-ai-club", "u1", "")).rejects.toThrow(
+        "communityId, userId, and newRole are required"
+      );
+    });
+
+    it("updates member role with serverTimestamp", async () => {
+      mocks.updateDoc.mockResolvedValueOnce();
+
+      await updateCommunityMemberRole("apex-ai-club", "u1", COMMUNITY_MEMBER_ROLES.MODERATOR);
+
+      expect(mocks.doc).toHaveBeenCalledWith(mocks.mockDb, "communityMembers", "apex-ai-club_u1");
+      expect(mocks.updateDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: "communityMembers/apex-ai-club_u1" }),
+        expect.objectContaining({
+          role: COMMUNITY_MEMBER_ROLES.MODERATOR,
+          updatedAt: expect.any(Object),
+        })
+      );
+    });
+  });
+
+  describe("updateCommunityMemberStatus", () => {
+    it("validates required parameters and throws error on missing fields", async () => {
+      await expect(updateCommunityMemberStatus("", "u1", "removed")).rejects.toThrow(
+        "communityId, userId, and newStatus are required"
+      );
+      await expect(updateCommunityMemberStatus("apex-ai-club", "", "removed")).rejects.toThrow(
+        "communityId, userId, and newStatus are required"
+      );
+      await expect(updateCommunityMemberStatus("apex-ai-club", "u1", "")).rejects.toThrow(
+        "communityId, userId, and newStatus are required"
+      );
+    });
+
+    it("updates member status with serverTimestamp", async () => {
+      mocks.updateDoc.mockResolvedValueOnce();
+
+      await updateCommunityMemberStatus("apex-ai-club", "u1", COMMUNITY_MEMBER_STATUSES.REMOVED);
+
+      expect(mocks.doc).toHaveBeenCalledWith(mocks.mockDb, "communityMembers", "apex-ai-club_u1");
+      expect(mocks.updateDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: "communityMembers/apex-ai-club_u1" }),
+        expect.objectContaining({
+          status: COMMUNITY_MEMBER_STATUSES.REMOVED,
+          updatedAt: expect.any(Object),
+        })
       );
     });
   });

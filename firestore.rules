@@ -179,6 +179,14 @@ service cloud.firestore {
              get(membershipPath).data.status == 'active';
     }
 
+    function isCommunityModeratorOrAdmin(communityId) {
+      let mPath = /databases/$(database)/documents/communityMembers/$(communityId + '_' + request.auth.uid);
+      return exists(mPath) &&
+             get(mPath).data.status == 'active' &&
+             get(mPath).data.campusId == getUserCampusId() &&
+             (get(mPath).data.role == 'admin' || get(mPath).data.role == 'moderator');
+    }
+
     function isValidPostCreate() {
       let d = request.resource.data;
       return d.keys().hasOnly([
@@ -491,7 +499,15 @@ service cloud.firestore {
         isValidPostLikeUpdate(postId)
       );
 
-      allow delete: if isAuthenticated() && resource.data.authorId == request.auth.uid;
+      allow delete: if isAuthenticated() && (
+        resource.data.authorId == request.auth.uid ||
+        (
+          'communityId' in resource.data &&
+          resource.data.communityId != null &&
+          resource.data.campusId == getUserCampusId() &&
+          isCommunityModeratorOrAdmin(resource.data.communityId)
+        )
+      );
 
       match /comments/{commentId} {
         allow read: if isAuthenticated() && (
@@ -802,13 +818,22 @@ service cloud.firestore {
       allow write: if false;
     }
 
-    // 8. Community Members collection (Community Membership & Security Authority - Milestone 19.2)
+    // 8. Community Members collection (Community Membership & Security Authority - Milestone 19.2/19.8)
     match /communityMembers/{membershipId} {
       function isCommunityAdmin(communityId) {
         let adminMembershipPath = /databases/$(database)/documents/communityMembers/$(communityId + '_' + request.auth.uid);
         return exists(adminMembershipPath) &&
                get(adminMembershipPath).data.role == 'admin' &&
-               get(adminMembershipPath).data.status == 'active';
+               get(adminMembershipPath).data.status == 'active' &&
+               get(adminMembershipPath).data.campusId == getUserCampusId();
+      }
+
+      function isCommunityModerator(communityId) {
+        let modMembershipPath = /databases/$(database)/documents/communityMembers/$(communityId + '_' + request.auth.uid);
+        return exists(modMembershipPath) &&
+               get(modMembershipPath).data.role == 'moderator' &&
+               get(modMembershipPath).data.status == 'active' &&
+               get(modMembershipPath).data.campusId == getUserCampusId();
       }
 
       function isValidCommunityMemberCreate(mId) {
@@ -835,6 +860,7 @@ service cloud.firestore {
         let r = resource.data;
         let isOwner = request.auth.uid == r.userId;
         let isAdmin = isCommunityAdmin(r.communityId);
+        let isMod = isCommunityModerator(r.communityId);
 
         let immutableFieldsPreserved =
           d.id == r.id &&
@@ -842,7 +868,8 @@ service cloud.firestore {
           d.userId == r.userId &&
           d.campusId == r.campusId &&
           d.joinedAt == r.joinedAt &&
-          d.updatedAt == request.time;
+          d.updatedAt == request.time &&
+          r.campusId == getUserCampusId();
 
         let validOwnerUpdate =
           isOwner &&
@@ -858,7 +885,15 @@ service cloud.firestore {
           d.role in ['member', 'moderator', 'admin'] &&
           d.status in ['active', 'removed', 'pending'];
 
-        return (validOwnerUpdate || validAdminUpdate);
+        let validModeratorUpdate =
+          isMod &&
+          immutableFieldsPreserved &&
+          r.role == 'member' &&
+          d.role == r.role &&
+          d.diff(r).affectedKeys().hasOnly(['status', 'updatedAt']) &&
+          d.status in ['active', 'removed', 'pending'];
+
+        return (validOwnerUpdate || validAdminUpdate || validModeratorUpdate);
       }
 
       allow read: if isAuthenticated() && (

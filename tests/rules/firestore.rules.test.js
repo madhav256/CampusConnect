@@ -3868,5 +3868,278 @@ describe("Milestone 18 — Unit 18.2: Campuses & Multi-Tenancy Rules", () => {
       });
     });
   });
-});
 
+  describe("Milestone 19 — Unit 19.8: Community Moderation & Management Rules", () => {
+    async function seedUserWithCampus(uid, campusId) {
+      await testEnvironment.withSecurityRulesDisabled(async (context) => {
+        const db = context.firestore();
+        await db.collection("users").doc(uid).set(userFixture(uid, { campusId }));
+        await db.collection("publicProfiles").doc(uid).set(publicProfileFixture(uid, { campusId }));
+        await db.collection("directoryIndex").doc(uid).set(directoryIndexFixture(uid, { campusId }));
+      });
+    }
+
+    async function seedCommunity(communityId, campusId, overrides = {}) {
+      await testEnvironment.withSecurityRulesDisabled(async (context) => {
+        const db = context.firestore();
+        await db
+          .collection("communities")
+          .doc(communityId)
+          .set(communityFixture(communityId, { campusId, ...overrides }));
+      });
+    }
+
+    async function seedCommunityMember(
+      membershipId,
+      communityId,
+      userId,
+      campusId,
+      role = COMMUNITY_MEMBER_ROLES.MEMBER,
+      status = COMMUNITY_MEMBER_STATUSES.ACTIVE,
+      overrides = {}
+    ) {
+      await testEnvironment.withSecurityRulesDisabled(async (context) => {
+        const db = context.firestore();
+        await db
+          .collection("communityMembers")
+          .doc(membershipId)
+          .set(
+            communityMemberFixture(communityId, userId, {
+              id: membershipId,
+              campusId,
+              role,
+              status,
+              ...overrides,
+            })
+          );
+      });
+    }
+
+    async function seedPost(postId, authorId, campusId, communityId = null) {
+      await testEnvironment.withSecurityRulesDisabled(async (context) => {
+        const db = context.firestore();
+        await db
+          .collection("posts")
+          .doc(postId)
+          .set(
+            postFixture(postId, authorId, {
+              campusId,
+              ...(communityId ? { communityId } : {}),
+            })
+          );
+      });
+    }
+
+    const aliceUid = TEST_UIDS.alice; // Admin of apex-ai-club
+    const bobUid = TEST_UIDS.bob; // Moderator of apex-ai-club
+    const carolUid = TEST_UIDS.carol; // Regular member of apex-ai-club
+    const davidUid = "test-uid-david"; // Regular member / author
+    const eveUid = "test-uid-eve"; // Moderator of st-jude-medical-society
+
+    beforeEach(async () => {
+      await seedUserWithCampus(aliceUid, APEX_CAMPUS_ID);
+      await seedUserWithCampus(bobUid, APEX_CAMPUS_ID);
+      await seedUserWithCampus(carolUid, APEX_CAMPUS_ID);
+      await seedUserWithCampus(davidUid, APEX_CAMPUS_ID);
+      await seedUserWithCampus(eveUid, ST_JUDE_CAMPUS_ID);
+
+      await seedCommunity("apex-ai-club", APEX_CAMPUS_ID);
+      await seedCommunity("st-jude-medical-society", ST_JUDE_CAMPUS_ID);
+
+      // Seed memberships
+      await seedCommunityMember(
+        `apex-ai-club_${aliceUid}`,
+        "apex-ai-club",
+        aliceUid,
+        APEX_CAMPUS_ID,
+        COMMUNITY_MEMBER_ROLES.ADMIN,
+        COMMUNITY_MEMBER_STATUSES.ACTIVE
+      );
+      await seedCommunityMember(
+        `apex-ai-club_${bobUid}`,
+        "apex-ai-club",
+        bobUid,
+        APEX_CAMPUS_ID,
+        COMMUNITY_MEMBER_ROLES.MODERATOR,
+        COMMUNITY_MEMBER_STATUSES.ACTIVE
+      );
+      await seedCommunityMember(
+        `apex-ai-club_${carolUid}`,
+        "apex-ai-club",
+        carolUid,
+        APEX_CAMPUS_ID,
+        COMMUNITY_MEMBER_ROLES.MEMBER,
+        COMMUNITY_MEMBER_STATUSES.ACTIVE
+      );
+      await seedCommunityMember(
+        `apex-ai-club_${davidUid}`,
+        "apex-ai-club",
+        davidUid,
+        APEX_CAMPUS_ID,
+        COMMUNITY_MEMBER_ROLES.MEMBER,
+        COMMUNITY_MEMBER_STATUSES.ACTIVE
+      );
+      await seedCommunityMember(
+        `st-jude-medical-society_${eveUid}`,
+        "st-jude-medical-society",
+        eveUid,
+        ST_JUDE_CAMPUS_ID,
+        COMMUNITY_MEMBER_ROLES.MODERATOR,
+        COMMUNITY_MEMBER_STATUSES.ACTIVE
+      );
+    });
+
+    describe("Member role & status management", () => {
+      it("member cannot change role", async () => {
+        const carol = contextFor(carolUid);
+        await expectPermissionDenied(() =>
+          communityMemberRef(carol, `apex-ai-club_${carolUid}`).update({
+            role: COMMUNITY_MEMBER_ROLES.MODERATOR,
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("member cannot change another user's status", async () => {
+        const carol = contextFor(carolUid);
+        await expectPermissionDenied(() =>
+          communityMemberRef(carol, `apex-ai-club_${davidUid}`).update({
+            status: COMMUNITY_MEMBER_STATUSES.REMOVED,
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("moderator cannot promote self to admin", async () => {
+        const bob = contextFor(bobUid);
+        await expectPermissionDenied(() =>
+          communityMemberRef(bob, `apex-ai-club_${bobUid}`).update({
+            role: COMMUNITY_MEMBER_ROLES.ADMIN,
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("moderator can perform only permitted actions (e.g. remove regular member)", async () => {
+        const bob = contextFor(bobUid);
+
+        // Permitted: Moderator removes a regular member
+        await assertSucceeds(
+          communityMemberRef(bob, `apex-ai-club_${carolUid}`).update({
+            status: COMMUNITY_MEMBER_STATUSES.REMOVED,
+            updatedAt: serverTimestamp(),
+          })
+        );
+
+        // Permitted: Moderator restores regular member
+        await assertSucceeds(
+          communityMemberRef(bob, `apex-ai-club_${carolUid}`).update({
+            status: COMMUNITY_MEMBER_STATUSES.ACTIVE,
+            updatedAt: serverTimestamp(),
+          })
+        );
+
+        // Forbidden: Moderator attempts to change Carol's role
+        await expectPermissionDenied(() =>
+          communityMemberRef(bob, `apex-ai-club_${carolUid}`).update({
+            role: COMMUNITY_MEMBER_ROLES.MODERATOR,
+            updatedAt: serverTimestamp(),
+          })
+        );
+
+        // Forbidden: Moderator attempts to modify an Admin
+        await expectPermissionDenied(() =>
+          communityMemberRef(bob, `apex-ai-club_${aliceUid}`).update({
+            status: COMMUNITY_MEMBER_STATUSES.REMOVED,
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("admin can perform permitted role management", async () => {
+        const alice = contextFor(aliceUid);
+
+        // Admin promotes regular member to moderator
+        await assertSucceeds(
+          communityMemberRef(alice, `apex-ai-club_${carolUid}`).update({
+            role: COMMUNITY_MEMBER_ROLES.MODERATOR,
+            updatedAt: serverTimestamp(),
+          })
+        );
+
+        // Admin demotes moderator to regular member
+        await assertSucceeds(
+          communityMemberRef(alice, `apex-ai-club_${bobUid}`).update({
+            role: COMMUNITY_MEMBER_ROLES.MEMBER,
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("cross-campus moderation fails", async () => {
+        const eve = contextFor(eveUid); // St. Jude moderator
+        // Eve attempts to remove Carol from Apex AI club
+        await expectPermissionDenied(() =>
+          communityMemberRef(eve, `apex-ai-club_${carolUid}`).update({
+            status: COMMUNITY_MEMBER_STATUSES.REMOVED,
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+    });
+
+    describe("Post moderation", () => {
+      beforeEach(async () => {
+        // David creates a post in apex-ai-club
+        await seedPost("david-ai-post", davidUid, APEX_CAMPUS_ID, "apex-ai-club");
+        // David creates a campus-wide post
+        await seedPost("david-campus-post", davidUid, APEX_CAMPUS_ID, null);
+        // St. Jude post
+        await seedPost("st-jude-post", eveUid, ST_JUDE_CAMPUS_ID, "st-jude-medical-society");
+      });
+
+      it("member cannot moderate another user's community post", async () => {
+        const carol = contextFor(carolUid);
+        await expectPermissionDenied(() =>
+          postRef(carol, "david-ai-post").delete()
+        );
+      });
+
+      it("moderator can moderate community post", async () => {
+        const bob = contextFor(bobUid);
+        await assertSucceeds(
+          postRef(bob, "david-ai-post").delete()
+        );
+      });
+
+      it("admin can moderate community post", async () => {
+        const alice = contextFor(aliceUid);
+        await assertSucceeds(
+          postRef(alice, "david-ai-post").delete()
+        );
+      });
+
+      it("moderator cannot moderate a different campus community post", async () => {
+        const eve = contextFor(eveUid); // St. Jude
+        // Eve attempts to delete David's post on Apex
+        await expectPermissionDenied(() =>
+          postRef(eve, "david-ai-post").delete()
+        );
+
+        const bob = contextFor(bobUid); // Apex
+        // Bob attempts to delete St. Jude post
+        await expectPermissionDenied(() =>
+          postRef(bob, "st-jude-post").delete()
+        );
+      });
+
+      it("community moderator cannot modify campus-wide post behavior", async () => {
+        const bob = contextFor(bobUid); // Apex AI moderator
+        // Bob attempts to delete David's campus-wide post (not in apex-ai-club)
+        await expectPermissionDenied(() =>
+          postRef(bob, "david-campus-post").delete()
+        );
+      });
+    });
+  });
+});

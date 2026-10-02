@@ -20,6 +20,7 @@ import CommunityCategoryBadge from "../components/community/CommunityCategoryBad
 import CommunityMembersPreview from "../components/community/CommunityMembersPreview";
 import CommunityPostComposer from "../components/community/CommunityPostComposer";
 import CommunityPostFeed from "../components/community/CommunityPostFeed";
+import CommunityModerationPanel from "../components/community/CommunityModerationPanel";
 import { CAMPUSES } from "../data/campuses";
 
 export default function CommunityDetail() {
@@ -34,9 +35,12 @@ export default function CommunityDetail() {
   const {
     members,
     isMember,
+    isModerator,
     isAdmin,
     join,
     leave,
+    updateRole,
+    updateStatus,
   } = useCommunityMembers(communityId);
 
   const [isActionLoading, setIsActionLoading] = useState(false);
@@ -252,6 +256,18 @@ export default function CommunityDetail() {
             </div>
           </div>
 
+          {/* Community Moderation Panel (Moderators & Admins Only) */}
+          {isModerator && (
+            <CommunityModerationPanel
+              community={community}
+              members={members}
+              isModerator={isModerator}
+              isAdmin={isAdmin}
+              onUpdateRole={updateRole}
+              onUpdateStatus={updateStatus}
+            />
+          )}
+
           {/* Community Activity Section */}
           <div data-testid="community-activity-section" className="space-y-4 pt-4 border-t border-border-warm/60">
             <div className="flex items-center justify-between">
@@ -270,6 +286,7 @@ export default function CommunityDetail() {
             <CommunityPostFeed
               community={community}
               isMember={isMember}
+              canModerate={isModerator}
             />
           </div>
         </div>

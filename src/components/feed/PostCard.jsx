@@ -21,12 +21,13 @@ function formatTimestamp(timestamp) {
   }).format(date);
 }
 
-function PostCard({ post, currentUserId, onDelete, updatePost }) {
+function PostCard({ post, currentUserId, onDelete, updatePost, canModerate = false }) {
   const [showComments, setShowComments] = useState(false);
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const { isLiked, isPending, toggleLike } = usePostLike(post.id, currentUserId, updatePost);
   const isAuthor = currentUserId === post.authorId;
+  const canDelete = isAuthor || canModerate;
 
   const handleLikeClick = async () => {
     try {
@@ -60,17 +61,20 @@ function PostCard({ post, currentUserId, onDelete, updatePost }) {
           </div>
         </div>
 
-        {isAuthor && (
+        {canDelete && (
           isConfirmingDelete ? (
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs text-ink-muted font-medium">Delete post?</span>
+            <div className="flex items-center gap-1.5" data-testid="post-delete-confirm-group">
+              <span className="text-xs text-ink-muted font-medium">
+                {isAuthor ? "Delete post?" : "Moderate post?"}
+              </span>
               <button
                 type="button"
                 onClick={handleDelete}
                 disabled={isDeleting}
+                data-testid={isAuthor ? "confirm-delete-button" : "confirm-moderate-button"}
                 className="rounded-lg bg-rose-600 px-2.5 py-1 text-xs font-semibold text-white transition hover:bg-rose-700 disabled:opacity-50"
               >
-                {isDeleting ? "Deleting..." : "Delete"}
+                {isDeleting ? "Deleting..." : isAuthor ? "Delete" : "Moderate"}
               </button>
               <button
                 type="button"
@@ -86,10 +90,11 @@ function PostCard({ post, currentUserId, onDelete, updatePost }) {
               variant="ghost"
               size="sm"
               onClick={() => setIsConfirmingDelete(true)}
+              data-testid={isAuthor ? "delete-post-button" : "moderate-post-button"}
               className="text-stone-400 hover:bg-rose-50 hover:text-rose-600"
-              title="Delete post"
+              title={isAuthor ? "Delete post" : "Moderate post"}
             >
-              Delete
+              {isAuthor ? "Delete" : "Moderate"}
             </Button>
           )
         )}

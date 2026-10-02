@@ -136,6 +136,17 @@ export async function deletePost(postId) {
   await deleteDoc(postRef);
 }
 
+/**
+ * Moderates (deletes) a community post.
+ * Backed by post deletion rules in Firestore security rules.
+ *
+ * @param {string} postId
+ * @returns {Promise<void>}
+ */
+export async function moderateCommunityPost(postId) {
+  return deletePost(postId);
+}
+
 export function subscribeToEmptyFeed(callback, onError, campusIdOrOptions = null) {
   const postsRef = collection(requireDb(), "posts");
   const campusId = resolveCampusId(campusIdOrOptions);

@@ -157,7 +157,7 @@ Client-created posts use an auto-generated Firestore document ID and initialize 
 - Community posts are surfaced through the community detail experience (`/communities/:communityId`), where eligible members create community posts via `CommunityPostComposer` and view discussion threads via `CommunityPostFeed`.
 - Authenticated users can read posts from their own campus (`resource.data.campusId == getUserCampusId()`).
 - Authenticated users can create a post when providing valid schema fields (author ID, non-empty content under 2000 characters, zero counters, and server timestamps for both `createdAt` and `updatedAt`).
-- The post author can delete their own post.
+- The post author can delete their own post. For community posts (posts with a valid `communityId`), active community moderators and admins belonging to the same campus can also delete (moderate) posts.
 - The active UI has no post-edit operation.
 
 ### Rule behavior and known limitation
@@ -494,8 +494,10 @@ Example: `apex-ai-club_e2e-student-a`. This deterministic pattern guarantees ide
   - Initial status restricted to `active` or `pending`.
 - **Update Restrictions:**
   - Member self-updates: Owner can modify only `status` and `updatedAt`. The `role` field is strictly immutable for the member (`d.role == r.role`), rejecting self-escalation attempts.
+  - Community moderator updates: Validated active community moderators (`isCommunityModerator(communityId)`) can manage member status (`active`, `removed`) for regular members (`r.role == 'member'`), but cannot alter member roles, modify admins, or escalate privileges.
   - Community admin updates: Validated active community admins (`isCommunityAdmin(communityId)`) can update member roles (`member`, `moderator`, `admin`) and statuses (`active`, `removed`, `pending`).
-  - Arbitrary updates: Unrelated non-admin users cannot alter any membership document.
+  - Tenant boundary isolation: All moderation updates require tenant parity (`r.campusId == getUserCampusId()`); cross-campus moderation is denied.
+  - Arbitrary updates: Unrelated non-moderator/non-admin users cannot alter any membership document.
 - **Deletion:** A student can leave a community by deleting their own membership document (`request.auth.uid == resource.data.userId`), or an active community admin can delete the document.
 
 ## Demo-only metadata

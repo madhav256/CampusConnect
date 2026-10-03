@@ -1,7 +1,9 @@
 /**
  * Milestone 20 — Unit 20.1: Event Domain Model & Fixtures
+ * Post-M20 Hardening — Unit H1: Temporal Fixture Determinism
  *
- * Deterministic event fixtures, identifiers, and domain invariants for multi-tenant campus activities.
+ * Deterministic event fixtures, identifiers, relative temporal offsets, and domain invariants
+ * for multi-tenant campus activities.
  * Enforces root collection pattern: events/{eventId}
  */
 
@@ -17,6 +19,9 @@ import {
   COMMUNITY_APEX_DESIGN,
   COMMUNITY_ST_JUDE_MED,
 } from "./communities.js";
+
+const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * HOUR_MS;
 
 /**
  * Immutable fields for an event document after creation.
@@ -62,8 +67,12 @@ export function getEventTemporalState(event, referenceDate = new Date()) {
   return "completed";
 }
 
-// 1. Apex Institute of Technology - AI & Robotics Hackathon (Tech)
-export const EVENT_AI_HACKATHON = {
+// ---------------------------------------------------------------------------
+// Relative Temporal Event Fixture Definitions (Offsets from Seed Reference Time)
+// ---------------------------------------------------------------------------
+
+// 1. Apex Institute of Technology - AI & Robotics Hackathon (Tech, Upcoming: +3d)
+export const EVENT_AI_HACKATHON_DEF = {
   id: "e2e-event-ai-hackathon",
   campusId: APEX_CAMPUS_ID,
   communityId: COMMUNITY_APEX_AI.id,
@@ -73,19 +82,17 @@ export const EVENT_AI_HACKATHON = {
     "Join us for a 24-hour sprint building autonomous agents, perception pipelines, and embedded machine learning systems. Hardware kits and compute credits provided.",
   category: EVENT_CATEGORIES.TECH,
   location: "Turing Auditorium & Robotics Lab, Tech Block",
-  startAt: "2026-10-15T09:00:00.000Z",
-  endAt: "2026-10-16T09:00:00.000Z",
+  startOffsetMs: 3 * DAY_MS,
+  endOffsetMs: 4 * DAY_MS,
   imageURL: null,
   createdBy: "e2e-student-a",
   organizerName: "Apex AI & Robotics Society",
   status: EVENT_STATUSES.PUBLISHED,
   visibility: EVENT_VISIBILITIES.CAMPUS_PUBLIC,
-  createdAt: "2026-10-01T00:00:00.000Z",
-  updatedAt: "2026-10-01T00:00:00.000Z",
 };
 
-// 2. Apex Institute of Technology - UI/UX Design Sprint (Cultural / Creative)
-export const EVENT_DESIGN_SPRINT = {
+// 2. Apex Institute of Technology - UI/UX Design Sprint (Cultural, Upcoming: +5d)
+export const EVENT_DESIGN_SPRINT_DEF = {
   id: "e2e-event-design-sprint",
   campusId: APEX_CAMPUS_ID,
   communityId: COMMUNITY_APEX_DESIGN.id,
@@ -95,19 +102,17 @@ export const EVENT_DESIGN_SPRINT = {
     "Collaborative intensive sprint on accessible campus interfaces, design tokens, and creative computing prototypes. Open to all students interested in product design.",
   category: EVENT_CATEGORIES.CULTURAL,
   location: "Design Studio 4A, Creative Arts Wing",
-  startAt: "2026-10-18T10:00:00.000Z",
-  endAt: "2026-10-18T17:00:00.000Z",
+  startOffsetMs: 5 * DAY_MS,
+  endOffsetMs: 5 * DAY_MS + 7 * HOUR_MS,
   imageURL: null,
   createdBy: "e2e-student-a",
   organizerName: "Apex Design & Creative Arts",
   status: EVENT_STATUSES.PUBLISHED,
   visibility: EVENT_VISIBILITIES.CAMPUS_PUBLIC,
-  createdAt: "2026-10-01T00:00:00.000Z",
-  updatedAt: "2026-10-01T00:00:00.000Z",
 };
 
-// 3. Apex Institute of Technology - Annual Campus Fest / Showcase (Tech)
-export const EVENT_CAMPUS_FEST = {
+// 3. Apex Institute of Technology - Annual Campus Fest / Showcase (Tech, Upcoming: +7d)
+export const EVENT_CAMPUS_FEST_DEF = {
   id: "e2e-event-campus-fest",
   campusId: APEX_CAMPUS_ID,
   communityId: COMMUNITY_APEX_AI.id,
@@ -117,19 +122,17 @@ export const EVENT_CAMPUS_FEST = {
     "Campus-wide exhibition displaying autonomous robotics projects, student demonstrations, keynote lectures from visiting faculty, and inter-department project showcases.",
   category: EVENT_CATEGORIES.TECH,
   location: "Main Campus Convocation Hall",
-  startAt: "2026-10-25T10:00:00.000Z",
-  endAt: "2026-10-25T18:00:00.000Z",
+  startOffsetMs: 7 * DAY_MS,
+  endOffsetMs: 7 * DAY_MS + 8 * HOUR_MS,
   imageURL: null,
   createdBy: "e2e-student-a",
   organizerName: "Apex AI & Robotics Society",
   status: EVENT_STATUSES.PUBLISHED,
   visibility: EVENT_VISIBILITIES.CAMPUS_PUBLIC,
-  createdAt: "2026-10-01T00:00:00.000Z",
-  updatedAt: "2026-10-01T00:00:00.000Z",
 };
 
-// 4. St. Jude University - Medical Ethics Symposium (Academic)
-export const EVENT_ST_JUDE_SYMPOSIUM = {
+// 4. St. Jude University - Medical Ethics Symposium (Academic, Upcoming: +6d)
+export const EVENT_ST_JUDE_SYMPOSIUM_DEF = {
   id: "e2e-event-st-jude-symposium",
   campusId: ST_JUDE_CAMPUS_ID,
   communityId: COMMUNITY_ST_JUDE_MED.id,
@@ -139,19 +142,17 @@ export const EVENT_ST_JUDE_SYMPOSIUM = {
     "Annual healthcare symposium on clinical research governance, ethics in genomic medicine, patient data protection, and modern bioethics in university hospitals.",
   category: EVENT_CATEGORIES.ACADEMIC,
   location: "Hippocrates Hall, St. Jude Medical Complex",
-  startAt: "2026-10-20T09:30:00.000Z",
-  endAt: "2026-10-20T16:30:00.000Z",
+  startOffsetMs: 6 * DAY_MS,
+  endOffsetMs: 6 * DAY_MS + 7 * HOUR_MS,
   imageURL: null,
   createdBy: "e2e-student-st-jude",
   organizerName: "St. Jude Medical Society",
   status: EVENT_STATUSES.PUBLISHED,
   visibility: EVENT_VISIBILITIES.CAMPUS_PUBLIC,
-  createdAt: "2026-10-01T00:00:00.000Z",
-  updatedAt: "2026-10-01T00:00:00.000Z",
 };
 
-// 5. Apex Institute of Technology - Members-Only Lab Hardware Sync (Community Only)
-export const EVENT_AI_MEMBERS_ONLY = {
+// 5. Apex Institute of Technology - Members-Only Lab Hardware Sync (Community Only, Upcoming: +4d)
+export const EVENT_AI_MEMBERS_ONLY_DEF = {
   id: "e2e-event-ai-members-only",
   campusId: APEX_CAMPUS_ID,
   communityId: COMMUNITY_APEX_AI.id,
@@ -161,24 +162,159 @@ export const EVENT_AI_MEMBERS_ONLY = {
     "Internal planning and compute cluster allocation for autonomous systems and rover hardware testing. Strictly restricted to active society members.",
   category: EVENT_CATEGORIES.TECH,
   location: "Robotics Lab 2, Tech Block",
-  startAt: "2026-10-22T17:00:00.000Z",
-  endAt: "2026-10-22T18:30:00.000Z",
+  startOffsetMs: 4 * DAY_MS,
+  endOffsetMs: 4 * DAY_MS + 90 * 60 * 1000,
   imageURL: null,
   createdBy: "e2e-student-a",
   organizerName: "Apex AI & Robotics Society",
   status: EVENT_STATUSES.PUBLISHED,
   visibility: EVENT_VISIBILITIES.COMMUNITY_ONLY,
-  createdAt: "2026-10-01T00:00:00.000Z",
-  updatedAt: "2026-10-01T00:00:00.000Z",
 };
 
-export const EVENTS = {
-  [EVENT_AI_HACKATHON.id]: EVENT_AI_HACKATHON,
-  [EVENT_DESIGN_SPRINT.id]: EVENT_DESIGN_SPRINT,
-  [EVENT_CAMPUS_FEST.id]: EVENT_CAMPUS_FEST,
-  [EVENT_ST_JUDE_SYMPOSIUM.id]: EVENT_ST_JUDE_SYMPOSIUM,
-  [EVENT_AI_MEMBERS_ONLY.id]: EVENT_AI_MEMBERS_ONLY,
+// 6. Apex Institute of Technology - Ongoing Rover Field Testing (Workshop, Ongoing: -1h to +2h)
+export const EVENT_ONGOING_WORKSHOP_DEF = {
+  id: "e2e-event-ongoing-workshop",
+  campusId: APEX_CAMPUS_ID,
+  communityId: COMMUNITY_APEX_AI.id,
+  title: "Apex Autonomous Rover Live Field Workshop",
+  slug: "autonomous-rover-live-workshop",
+  description:
+    "Live outdoor field telemetry, sensor calibration, and real-time obstacle avoidance testing on autonomous rover prototypes.",
+  category: EVENT_CATEGORIES.WORKSHOP,
+  location: "Robotics Arena & Outdoor Testbed, Tech Block",
+  startOffsetMs: -1 * HOUR_MS,
+  endOffsetMs: 2 * HOUR_MS,
+  imageURL: null,
+  createdBy: "e2e-student-a",
+  organizerName: "Apex AI & Robotics Society",
+  status: EVENT_STATUSES.PUBLISHED,
+  visibility: EVENT_VISIBILITIES.CAMPUS_PUBLIC,
 };
+
+// 7. Apex Institute of Technology - Past Orientation & Welcome Mixer (Social, Past: -3d to -2d)
+export const EVENT_PAST_ORIENTATION_DEF = {
+  id: "e2e-event-past-orientation",
+  campusId: APEX_CAMPUS_ID,
+  communityId: COMMUNITY_APEX_AI.id,
+  title: "Apex AI Society Fall Orientation & Welcome Mixer",
+  slug: "apex-ai-fall-orientation",
+  description:
+    "Welcome orientation for new student inductees, research domain overview, and laboratory compute safety certification.",
+  category: EVENT_CATEGORIES.SOCIAL,
+  location: "Main Campus Convocation Hall",
+  startOffsetMs: -3 * DAY_MS,
+  endOffsetMs: -2 * DAY_MS,
+  createdOffsetMs: -14 * DAY_MS,
+  imageURL: null,
+  createdBy: "e2e-student-a",
+  organizerName: "Apex AI & Robotics Society",
+  status: EVENT_STATUSES.PUBLISHED,
+  visibility: EVENT_VISIBILITIES.CAMPUS_PUBLIC,
+};
+
+// 8. Apex Institute of Technology - Cancelled Guest Lecture (Cultural, Cancelled: +2d)
+export const EVENT_CANCELLED_LECTURE_DEF = {
+  id: "e2e-event-cancelled-lecture",
+  campusId: APEX_CAMPUS_ID,
+  communityId: COMMUNITY_APEX_DESIGN.id,
+  title: "Guest Lecture: Typography in Spatial Computing",
+  slug: "typography-spatial-computing-cancelled",
+  description:
+    "Special guest lecture exploring typographic contrast and readability in spatial interface canvases. Cancelled due to speaker travel disruptions.",
+  category: EVENT_CATEGORIES.CULTURAL,
+  location: "Design Studio 4A, Creative Arts Wing",
+  startOffsetMs: 2 * DAY_MS,
+  endOffsetMs: 2 * DAY_MS + 3 * HOUR_MS,
+  imageURL: null,
+  createdBy: "e2e-student-a",
+  organizerName: "Apex Design & Creative Arts",
+  status: EVENT_STATUSES.CANCELLED,
+  visibility: EVENT_VISIBILITIES.CAMPUS_PUBLIC,
+};
+
+export const EVENT_DEFINITIONS = [
+  EVENT_AI_HACKATHON_DEF,
+  EVENT_DESIGN_SPRINT_DEF,
+  EVENT_CAMPUS_FEST_DEF,
+  EVENT_ST_JUDE_SYMPOSIUM_DEF,
+  EVENT_AI_MEMBERS_ONLY_DEF,
+  EVENT_ONGOING_WORKSHOP_DEF,
+  EVENT_PAST_ORIENTATION_DEF,
+  EVENT_CANCELLED_LECTURE_DEF,
+];
+
+/**
+ * Resolves a single relative event fixture definition into a concrete event object with ISO timestamps.
+ *
+ * @param {object} def - Event fixture definition with startOffsetMs and endOffsetMs
+ * @param {Date|number|string} [referenceDate=new Date()] - Seed or reference point in time
+ * @returns {object} Concrete event document matching the locked 17-field schema
+ */
+export function resolveEventFixture(def, referenceDate = new Date()) {
+  let refMs;
+  if (typeof referenceDate?.toMillis === "function") {
+    refMs = referenceDate.toMillis();
+  } else if (typeof referenceDate?.toDate === "function") {
+    refMs = referenceDate.toDate().getTime();
+  } else if (typeof referenceDate?.seconds === "number") {
+    refMs = referenceDate.seconds * 1000 + Math.floor((referenceDate.nanoseconds || 0) / 1e6);
+  } else {
+    refMs = new Date(referenceDate).getTime();
+  }
+
+  if (isNaN(refMs)) {
+    refMs = Date.now();
+  }
+
+  const startAt = new Date(refMs + def.startOffsetMs).toISOString();
+  const endAt = new Date(refMs + def.endOffsetMs).toISOString();
+  const createdOffsetMs = def.createdOffsetMs ?? -7 * DAY_MS;
+  const createdAt = new Date(refMs + createdOffsetMs).toISOString();
+  const updatedAt = createdAt;
+
+  return {
+    id: def.id,
+    campusId: def.campusId,
+    communityId: def.communityId,
+    title: def.title,
+    slug: def.slug,
+    description: def.description,
+    category: def.category,
+    location: def.location,
+    startAt,
+    endAt,
+    imageURL: def.imageURL ?? null,
+    createdBy: def.createdBy,
+    organizerName: def.organizerName,
+    status: def.status,
+    visibility: def.visibility,
+    createdAt,
+    updatedAt,
+  };
+}
+
+/**
+ * Builds all deterministic event fixtures resolved against a specific reference date.
+ *
+ * @param {Date|number|string} [referenceDate=new Date()] - Reference point in time
+ * @returns {Array<object>}
+ */
+export function buildEventFixtures(referenceDate = new Date()) {
+  return EVENT_DEFINITIONS.map((def) => resolveEventFixture(def, referenceDate));
+}
+
+// ---------------------------------------------------------------------------
+// Default Resolved Exports (evaluated at module import relative to current time)
+// ---------------------------------------------------------------------------
+
+export const EVENT_AI_HACKATHON = resolveEventFixture(EVENT_AI_HACKATHON_DEF);
+export const EVENT_DESIGN_SPRINT = resolveEventFixture(EVENT_DESIGN_SPRINT_DEF);
+export const EVENT_CAMPUS_FEST = resolveEventFixture(EVENT_CAMPUS_FEST_DEF);
+export const EVENT_ST_JUDE_SYMPOSIUM = resolveEventFixture(EVENT_ST_JUDE_SYMPOSIUM_DEF);
+export const EVENT_AI_MEMBERS_ONLY = resolveEventFixture(EVENT_AI_MEMBERS_ONLY_DEF);
+export const EVENT_ONGOING_WORKSHOP = resolveEventFixture(EVENT_ONGOING_WORKSHOP_DEF);
+export const EVENT_PAST_ORIENTATION = resolveEventFixture(EVENT_PAST_ORIENTATION_DEF);
+export const EVENT_CANCELLED_LECTURE = resolveEventFixture(EVENT_CANCELLED_LECTURE_DEF);
 
 export const EVENT_LIST = [
   EVENT_AI_HACKATHON,
@@ -186,4 +322,9 @@ export const EVENT_LIST = [
   EVENT_CAMPUS_FEST,
   EVENT_ST_JUDE_SYMPOSIUM,
   EVENT_AI_MEMBERS_ONLY,
+  EVENT_ONGOING_WORKSHOP,
+  EVENT_PAST_ORIENTATION,
+  EVENT_CANCELLED_LECTURE,
 ];
+
+export const EVENTS = Object.fromEntries(EVENT_LIST.map((e) => [e.id, e]));

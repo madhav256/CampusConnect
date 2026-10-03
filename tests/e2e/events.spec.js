@@ -14,6 +14,7 @@
  * 10. Unauthorized Creation Guard (Non-leader student cannot create events)
  */
 
+import process from "node:process";
 import { test, expect } from "@playwright/test";
 import { E2E_USERS } from "./fixtures/testUsers.js";
 import { loginAs, logout } from "./helpers/auth.js";
@@ -43,8 +44,62 @@ async function cleanupTestEvents() {
   }
 }
 
+// Helper to format dynamic ISO datetime-local input strings relative to test reference time
+function getFutureDateTimeStrings(daysFromNow = 10) {
+  const base = process.env.E2E_SEED_NOW ? new Date(process.env.E2E_SEED_NOW) : new Date();
+  const start = new Date(base.getTime() + daysFromNow * 24 * 60 * 60 * 1000);
+  const end = new Date(start.getTime() + 2 * 60 * 60 * 1000);
+
+  const pad = (n) => String(n).padStart(2, "0");
+  const formatInput = (d) =>
+    `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+
+  return {
+    startStr: formatInput(start),
+    endStr: formatInput(end),
+  };
+}
+
+function getInvertedDateTimeStrings(daysFromNow = 10) {
+  const base = process.env.E2E_SEED_NOW ? new Date(process.env.E2E_SEED_NOW) : new Date();
+  const start = new Date(base.getTime() + daysFromNow * 24 * 60 * 60 * 1000);
+  const end = new Date(start.getTime() - 2 * 60 * 60 * 1000);
+
+  const pad = (n) => String(n).padStart(2, "0");
+  const formatInput = (d) =>
+    `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+
+  return {
+    startStr: formatInput(start),
+    endStr: formatInput(end),
+  };
+}
+
 test.describe("Milestone 20 — Unit 20.6: Campus Events E2E Suite", () => {
-  test.beforeEach(async () => {
+  test.beforeEach(async ({ page }) => {
+    // If seed reference time is overridden via E2E_SEED_NOW, synchronize browser clock deterministically
+    if (process.env.E2E_SEED_NOW) {
+      const seedTime = new Date(process.env.E2E_SEED_NOW).getTime();
+      const timeOffset = seedTime - Date.now();
+      await page.addInitScript((offset) => {
+        const OrigDate = Date;
+        class MockDate extends OrigDate {
+          constructor(...args) {
+            if (args.length === 0) {
+              super(OrigDate.now() + offset);
+            } else {
+              super(...args);
+            }
+          }
+          static now() {
+            return OrigDate.now() + offset;
+          }
+        }
+        MockDate.parse = OrigDate.parse;
+        MockDate.UTC = OrigDate.UTC;
+        window.Date = MockDate;
+      }, timeOffset);
+    }
     await cleanupTestEvents();
   });
 
@@ -67,14 +122,18 @@ test.describe("Milestone 20 — Unit 20.6: Campus Events E2E Suite", () => {
     await expect(campusBadge).toBeVisible();
     await expect(campusBadge).toContainText("Apex Tech");
 
-    // 4. Verify deterministic seeded event cards are rendered
+    // 4. Verify deterministic seeded event cards are rendered in Upcoming tab
     const hackathonCard = page.locator("[data-testid='event-card-e2e-event-ai-hackathon']");
     const sprintCard = page.locator("[data-testid='event-card-e2e-event-design-sprint']");
     const festCard = page.locator("[data-testid='event-card-e2e-event-campus-fest']");
+    const ongoingCard = page.locator("[data-testid='event-card-e2e-event-ongoing-workshop']");
+    const cancelledCard = page.locator("[data-testid='event-card-e2e-event-cancelled-lecture']");
 
     await expect(hackathonCard).toBeVisible();
     await expect(sprintCard).toBeVisible();
     await expect(festCard).toBeVisible();
+    await expect(ongoingCard).toBeVisible();
+    await expect(cancelledCard).toBeVisible();
 
     // 5. Inspect card metadata on hackathon card
     await expect(hackathonCard.locator("[data-testid='event-card-title']")).toContainText(
@@ -91,10 +150,20 @@ test.describe("Milestone 20 — Unit 20.6: Campus Events E2E Suite", () => {
     );
     await expect(hackathonCard.locator("[data-testid='event-card-date']")).toBeVisible();
 
-    // 6. Verify count label displays total public events
+    // Verify temporal status badge on ongoing card
+    await expect(ongoingCard.locator("[data-testid='event-status-badge']")).toContainText(
+      "Ongoing"
+    );
+
+    // Verify cancelled status badge on cancelled card
+    await expect(cancelledCard.locator("[data-testid='event-status-badge']")).toContainText(
+      "Cancelled"
+    );
+
+    // 6. Verify count label displays total public events in upcoming view (5 events)
     const countLabel = page.locator("[data-testid='events-count-label']");
     await expect(countLabel).toBeVisible();
-    await expect(countLabel).toContainText("3 events");
+    await expect(countLabel).toContainText("5 events");
   });
 
   test("2. Category Filtering: filters events by category and resets back to all", async ({
@@ -104,7 +173,7 @@ test.describe("Milestone 20 — Unit 20.6: Campus Events E2E Suite", () => {
     await page.goto("/events");
     await expect(page.getByRole("heading", { name: "Discover Campus Events" })).toBeVisible();
 
-    // Initially all 3 Apex public events are present
+    // Initially Apex public events are present
     const hackathonCard = page.locator("[data-testid='event-card-e2e-event-ai-hackathon']");
     const sprintCard = page.locator("[data-testid='event-card-e2e-event-design-sprint']");
     const festCard = page.locator("[data-testid='event-card-e2e-event-campus-fest']");
@@ -146,22 +215,29 @@ test.describe("Milestone 20 — Unit 20.6: Campus Events E2E Suite", () => {
 
     await expect(upcomingTab).toHaveAttribute("aria-selected", "true");
     const hackathonCard = page.locator("[data-testid='event-card-e2e-event-ai-hackathon']");
+    const pastCard = page.locator("[data-testid='event-card-e2e-event-past-orientation']");
+
     await expect(hackathonCard).toBeVisible();
+    await expect(pastCard).not.toBeVisible();
 
     // Switch to Past Events
     await pastTab.click();
     await expect(pastTab).toHaveAttribute("aria-selected", "true");
 
-    // Since seeded fixtures have future endAt timestamps, no past events exist
+    // Upcoming event is not visible in Past tab; completed event is visible with Completed badge
     await expect(hackathonCard).not.toBeVisible();
-    await expect(page.getByText("No past events found")).toBeVisible();
-    await expect(
-      page.getByText("There are no completed events recorded for your campus.")
-    ).toBeVisible();
+    await expect(pastCard).toBeVisible();
+    await expect(pastCard.locator("[data-testid='event-card-title']")).toContainText(
+      "Apex AI Society Fall Orientation & Welcome Mixer"
+    );
+    await expect(pastCard.locator("[data-testid='event-status-badge']")).toContainText(
+      "Completed"
+    );
 
     // Switch back to Upcoming
     await upcomingTab.click();
     await expect(hackathonCard).toBeVisible();
+    await expect(pastCard).not.toBeVisible();
   });
 
   test("4. Event Detail: navigates to /events/:eventId and verifies metadata and sponsoring community navigation", async ({
@@ -367,9 +443,10 @@ test.describe("Milestone 20 — Unit 20.6: Campus Events E2E Suite", () => {
     // Fill location
     await page.locator("[data-testid='composer-location-input']").fill("Room 101, Science Building");
 
-    // Fill start and end times (future dates)
-    await page.locator("[data-testid='composer-start-at-input']").fill("2026-11-01T10:00");
-    await page.locator("[data-testid='composer-end-at-input']").fill("2026-11-01T12:00");
+    // Fill start and end times (future dates generated dynamically relative to test reference time)
+    const { startStr, endStr } = getFutureDateTimeStrings(10);
+    await page.locator("[data-testid='composer-start-at-input']").fill(startStr);
+    await page.locator("[data-testid='composer-end-at-input']").fill(endStr);
 
     // Fill description
     await page
@@ -404,11 +481,12 @@ test.describe("Milestone 20 — Unit 20.6: Campus Events E2E Suite", () => {
     await page.locator("[data-testid='create-event-btn']").click();
     await expect(page.locator("[data-testid='event-composer-modal']")).toBeVisible();
 
-    // Attempt 1: Submit with endAt before startAt
+    // Attempt 1: Submit with endAt before startAt (generated dynamically)
+    const { startStr: invStart, endStr: invEnd } = getInvertedDateTimeStrings(10);
     await page.locator("[data-testid='composer-title-input']").fill("Validation Test Event");
     await page.locator("[data-testid='composer-location-input']").fill("Lab 3");
-    await page.locator("[data-testid='composer-start-at-input']").fill("2026-11-05T14:00");
-    await page.locator("[data-testid='composer-end-at-input']").fill("2026-11-05T12:00"); // 2 hours earlier
+    await page.locator("[data-testid='composer-start-at-input']").fill(invStart);
+    await page.locator("[data-testid='composer-end-at-input']").fill(invEnd); // 2 hours earlier
 
     await page.locator("[data-testid='composer-submit-btn']").click();
 

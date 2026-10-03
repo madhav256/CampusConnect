@@ -12,16 +12,22 @@ import {
 import {
   EVENTS,
   EVENT_LIST,
+  EVENT_DEFINITIONS,
   EVENT_AI_HACKATHON,
   EVENT_DESIGN_SPRINT,
   EVENT_CAMPUS_FEST,
   EVENT_ST_JUDE_SYMPOSIUM,
   EVENT_AI_MEMBERS_ONLY,
+  EVENT_ONGOING_WORKSHOP,
+  EVENT_PAST_ORIENTATION,
+  EVENT_CANCELLED_LECTURE,
   EVENT_IMMUTABLE_FIELDS,
   getEventTemporalState,
+  resolveEventFixture,
+  buildEventFixtures,
 } from "../../src/data/events.js";
 import { COMMUNITIES } from "../../src/data/communities.js";
-import { seedEvents } from "../../scripts/seedEvents.mjs";
+import { seedEvents, resolveSeedReferenceTime } from "../../scripts/seedEvents.mjs";
 
 describe("Milestone 20 — Unit 20.1: Event Domain Model & Seeding Invariants", () => {
   describe("Event Constants & Enums", () => {
@@ -68,16 +74,19 @@ describe("Milestone 20 — Unit 20.1: Event Domain Model & Seeding Invariants", 
     });
   });
 
-  describe("Event Fixtures & Schema Invariants", () => {
-    it("contains exactly five deterministic fixtures with unique IDs", () => {
-      expect(EVENT_LIST).toHaveLength(5);
+  describe("Event Fixtures & Schema Invariants (Hardening H1: Temporal Fixture Determinism)", () => {
+    it("contains exactly eight deterministic fixtures with unique IDs", () => {
+      expect(EVENT_LIST).toHaveLength(8);
       const ids = EVENT_LIST.map((e) => e.id);
-      expect(new Set(ids).size).toBe(5);
+      expect(new Set(ids).size).toBe(8);
       expect(ids).toContain("e2e-event-ai-hackathon");
       expect(ids).toContain("e2e-event-design-sprint");
       expect(ids).toContain("e2e-event-campus-fest");
       expect(ids).toContain("e2e-event-st-jude-symposium");
       expect(ids).toContain("e2e-event-ai-members-only");
+      expect(ids).toContain("e2e-event-ongoing-workshop");
+      expect(ids).toContain("e2e-event-past-orientation");
+      expect(ids).toContain("e2e-event-cancelled-lecture");
     });
 
     it("EVENTS dictionary indexes each event by its canonical ID", () => {
@@ -86,9 +95,12 @@ describe("Milestone 20 — Unit 20.1: Event Domain Model & Seeding Invariants", 
       expect(EVENTS["e2e-event-campus-fest"]).toEqual(EVENT_CAMPUS_FEST);
       expect(EVENTS["e2e-event-st-jude-symposium"]).toEqual(EVENT_ST_JUDE_SYMPOSIUM);
       expect(EVENTS["e2e-event-ai-members-only"]).toEqual(EVENT_AI_MEMBERS_ONLY);
+      expect(EVENTS["e2e-event-ongoing-workshop"]).toEqual(EVENT_ONGOING_WORKSHOP);
+      expect(EVENTS["e2e-event-past-orientation"]).toEqual(EVENT_PAST_ORIENTATION);
+      expect(EVENTS["e2e-event-cancelled-lecture"]).toEqual(EVENT_CANCELLED_LECTURE);
     });
 
-    it("every event fixture satisfies the locked 17-field schema", () => {
+    it("every event fixture satisfies the locked 17-field schema without extraneous fields", () => {
       const expectedFields = [
         "id",
         "campusId",
@@ -110,9 +122,7 @@ describe("Milestone 20 — Unit 20.1: Event Domain Model & Seeding Invariants", 
       ];
 
       for (const event of EVENT_LIST) {
-        for (const field of expectedFields) {
-          expect(event).toHaveProperty(field);
-        }
+        expect(Object.keys(event).sort()).toEqual([...expectedFields].sort());
 
         // Identifier invariants
         expect(typeof event.id).toBe("string");
@@ -138,7 +148,7 @@ describe("Milestone 20 — Unit 20.1: Event Domain Model & Seeding Invariants", 
         expect(EVENT_CATEGORY_LIST).toContain(event.category);
         expect(typeof event.location).toBe("string");
         expect(event.location.length).toBeGreaterThan(0);
-        expect(event.status).toBe(EVENT_STATUSES.PUBLISHED);
+        expect(EVENT_STATUS_LIST).toContain(event.status);
         expect(EVENT_VISIBILITY_LIST).toContain(event.visibility);
 
         // Creator and organizer
@@ -164,16 +174,118 @@ describe("Milestone 20 — Unit 20.1: Event Domain Model & Seeding Invariants", 
       }
     });
 
-    it("Apex and St. Jude campuses have appropriate representative events", () => {
+    it("Apex and St. Jude campuses have appropriate representative events across categories", () => {
       const apexEvents = EVENT_LIST.filter((e) => e.campusId === APEX_CAMPUS_ID);
       const stJudeEvents = EVENT_LIST.filter((e) => e.campusId === ST_JUDE_CAMPUS_ID);
 
-      expect(apexEvents).toHaveLength(4);
+      expect(apexEvents).toHaveLength(7);
       expect(stJudeEvents).toHaveLength(1);
 
       expect(apexEvents.some((e) => e.category === EVENT_CATEGORIES.TECH)).toBe(true);
       expect(apexEvents.some((e) => e.category === EVENT_CATEGORIES.CULTURAL)).toBe(true);
+      expect(apexEvents.some((e) => e.category === EVENT_CATEGORIES.WORKSHOP)).toBe(true);
+      expect(apexEvents.some((e) => e.category === EVENT_CATEGORIES.SOCIAL)).toBe(true);
       expect(stJudeEvents.some((e) => e.category === EVENT_CATEGORIES.ACADEMIC)).toBe(true);
+    });
+
+    it("includes published fixtures and exactly one cancelled fixture", () => {
+      const published = EVENT_LIST.filter((e) => e.status === EVENT_STATUSES.PUBLISHED);
+      const cancelled = EVENT_LIST.filter((e) => e.status === EVENT_STATUSES.CANCELLED);
+
+      expect(published).toHaveLength(7);
+      expect(cancelled).toHaveLength(1);
+      expect(cancelled[0].id).toBe("e2e-event-cancelled-lecture");
+    });
+  });
+
+  describe("Relative Temporal Offset Determinism (buildEventFixtures & resolveEventFixture)", () => {
+    const fixedSeed = new Date("2026-10-01T12:00:00.000Z");
+    const seedMs = fixedSeed.getTime();
+    const HOUR_MS = 60 * 60 * 1000;
+    const DAY_MS = 24 * HOUR_MS;
+
+    it("resolves all 8 definitions against a designated seed reference time", () => {
+      expect(EVENT_DEFINITIONS).toHaveLength(8);
+      const single = resolveEventFixture(EVENT_DEFINITIONS[0], fixedSeed);
+      expect(single.id).toBe("e2e-event-ai-hackathon");
+
+      const fixtures = buildEventFixtures(fixedSeed);
+      expect(fixtures).toHaveLength(8);
+
+      const byId = Object.fromEntries(fixtures.map((e) => [e.id, e]));
+
+      // 1. Upcoming Hackathon (+3d to +4d)
+      expect(new Date(byId["e2e-event-ai-hackathon"].startAt).getTime()).toBe(seedMs + 3 * DAY_MS);
+      expect(new Date(byId["e2e-event-ai-hackathon"].endAt).getTime()).toBe(seedMs + 4 * DAY_MS);
+      expect(getEventTemporalState(byId["e2e-event-ai-hackathon"], fixedSeed)).toBe("upcoming");
+
+      // 2. Ongoing Workshop (-1h to +2h)
+      expect(new Date(byId["e2e-event-ongoing-workshop"].startAt).getTime()).toBe(seedMs - 1 * HOUR_MS);
+      expect(new Date(byId["e2e-event-ongoing-workshop"].endAt).getTime()).toBe(seedMs + 2 * HOUR_MS);
+      expect(getEventTemporalState(byId["e2e-event-ongoing-workshop"], fixedSeed)).toBe("ongoing");
+
+      // 3. Past Orientation (-3d to -2d)
+      expect(new Date(byId["e2e-event-past-orientation"].startAt).getTime()).toBe(seedMs - 3 * DAY_MS);
+      expect(new Date(byId["e2e-event-past-orientation"].endAt).getTime()).toBe(seedMs - 2 * DAY_MS);
+      expect(getEventTemporalState(byId["e2e-event-past-orientation"], fixedSeed)).toBe("completed");
+
+      // 4. Cancelled Lecture (+2d)
+      expect(new Date(byId["e2e-event-cancelled-lecture"].startAt).getTime()).toBe(seedMs + 2 * DAY_MS);
+      expect(byId["e2e-event-cancelled-lecture"].status).toBe(EVENT_STATUSES.CANCELLED);
+    });
+
+    it("shifting seed reference time by +60 days produces strictly shifted timestamps preserving relative state", () => {
+      const shiftedSeed = new Date(seedMs + 60 * DAY_MS);
+      const fixtures = buildEventFixtures(shiftedSeed);
+      const byId = Object.fromEntries(fixtures.map((e) => [e.id, e]));
+
+      expect(getEventTemporalState(byId["e2e-event-ai-hackathon"], shiftedSeed)).toBe("upcoming");
+      expect(getEventTemporalState(byId["e2e-event-ongoing-workshop"], shiftedSeed)).toBe("ongoing");
+      expect(getEventTemporalState(byId["e2e-event-past-orientation"], shiftedSeed)).toBe("completed");
+    });
+  });
+
+  describe("Seed Reference Time Resolution (resolveSeedReferenceTime)", () => {
+    it("returns current Date when override is empty, null, or undefined", () => {
+      const before = Date.now();
+      const res = resolveSeedReferenceTime();
+      const after = Date.now();
+
+      expect(res).toBeInstanceOf(Date);
+      expect(res.getTime()).toBeGreaterThanOrEqual(before);
+      expect(res.getTime()).toBeLessThanOrEqual(after);
+
+      expect(resolveSeedReferenceTime(null)).toBeInstanceOf(Date);
+      expect(resolveSeedReferenceTime("")).toBeInstanceOf(Date);
+    });
+
+    it("parses valid ISO 8601 string overrides deterministically", () => {
+      const iso = "2026-11-15T08:30:00.000Z";
+      const res = resolveSeedReferenceTime(iso);
+      expect(res.toISOString()).toBe(iso);
+    });
+
+    it("parses numeric millisecond timestamps and numeric strings", () => {
+      const ms = 1793500000000;
+      expect(resolveSeedReferenceTime(ms).getTime()).toBe(ms);
+      expect(resolveSeedReferenceTime(String(ms)).getTime()).toBe(ms);
+    });
+
+    it("passes through valid Date objects", () => {
+      const d = new Date("2026-12-01T00:00:00.000Z");
+      expect(resolveSeedReferenceTime(d)).toEqual(d);
+    });
+
+    it("throws clear errors on invalid date strings or unparseable input", () => {
+      expect(() => resolveSeedReferenceTime("not-a-valid-date")).toThrow(
+        /Invalid E2E_SEED_NOW date format/
+      );
+      expect(() => resolveSeedReferenceTime(new Date("invalid"))).toThrow(
+        /Invalid Date object/
+      );
+      expect(() => resolveSeedReferenceTime({})).toThrow(
+        /Unsupported E2E_SEED_NOW type/
+      );
     });
   });
 

@@ -13,7 +13,7 @@ import { E2E_USERS } from "../tests/e2e/fixtures/testUsers.js";
 import { seedCampuses } from "./seedCampuses.mjs";
 import { seedCommunities } from "./seedCommunities.mjs";
 import { seedCommunityMembers } from "./seedCommunityMembers.mjs";
-import { seedEvents } from "./seedEvents.mjs";
+import { seedEvents, resolveSeedReferenceTime } from "./seedEvents.mjs";
 
 const EMULATOR_PROJECT_ID = process.env.GCLOUD_PROJECT || "demo-campusconnect-rules-test";
 
@@ -39,7 +39,8 @@ const app = existingApp || initializeApp({ projectId: EMULATOR_PROJECT_ID }, "e2
 const db = getFirestore(app);
 const auth = getAuth(app);
 
-const now = Timestamp.now();
+const seedDate = resolveSeedReferenceTime(process.env.E2E_SEED_NOW);
+const now = Timestamp.fromDate(seedDate);
 
 export async function seedE2EData() {
   console.log(`[seedE2E] Seeding deterministic E2E data to emulator (${EMULATOR_PROJECT_ID})...`);

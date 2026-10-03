@@ -150,11 +150,34 @@ export const EVENT_ST_JUDE_SYMPOSIUM = {
   updatedAt: "2026-10-01T00:00:00.000Z",
 };
 
+// 5. Apex Institute of Technology - Members-Only Lab Hardware Sync (Community Only)
+export const EVENT_AI_MEMBERS_ONLY = {
+  id: "e2e-event-ai-members-only",
+  campusId: APEX_CAMPUS_ID,
+  communityId: COMMUNITY_APEX_AI.id,
+  title: "Apex AI Lab Internal Planning & Hardware Sync",
+  slug: "apex-ai-internal-planning",
+  description:
+    "Internal planning and compute cluster allocation for autonomous systems and rover hardware testing. Strictly restricted to active society members.",
+  category: EVENT_CATEGORIES.TECH,
+  location: "Robotics Lab 2, Tech Block",
+  startAt: "2026-10-22T17:00:00.000Z",
+  endAt: "2026-10-22T18:30:00.000Z",
+  imageURL: null,
+  createdBy: "e2e-student-a",
+  organizerName: "Apex AI & Robotics Society",
+  status: EVENT_STATUSES.PUBLISHED,
+  visibility: EVENT_VISIBILITIES.COMMUNITY_ONLY,
+  createdAt: "2026-10-01T00:00:00.000Z",
+  updatedAt: "2026-10-01T00:00:00.000Z",
+};
+
 export const EVENTS = {
   [EVENT_AI_HACKATHON.id]: EVENT_AI_HACKATHON,
   [EVENT_DESIGN_SPRINT.id]: EVENT_DESIGN_SPRINT,
   [EVENT_CAMPUS_FEST.id]: EVENT_CAMPUS_FEST,
   [EVENT_ST_JUDE_SYMPOSIUM.id]: EVENT_ST_JUDE_SYMPOSIUM,
+  [EVENT_AI_MEMBERS_ONLY.id]: EVENT_AI_MEMBERS_ONLY,
 };
 
 export const EVENT_LIST = [
@@ -162,4 +185,5 @@ export const EVENT_LIST = [
   EVENT_DESIGN_SPRINT,
   EVENT_CAMPUS_FEST,
   EVENT_ST_JUDE_SYMPOSIUM,
+  EVENT_AI_MEMBERS_ONLY,
 ];

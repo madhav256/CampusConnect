@@ -13,6 +13,7 @@ import { E2E_USERS } from "../tests/e2e/fixtures/testUsers.js";
 import { seedCampuses } from "./seedCampuses.mjs";
 import { seedCommunities } from "./seedCommunities.mjs";
 import { seedCommunityMembers } from "./seedCommunityMembers.mjs";
+import { seedEvents } from "./seedEvents.mjs";
 
 const EMULATOR_PROJECT_ID = process.env.GCLOUD_PROJECT || "demo-campusconnect-rules-test";
 
@@ -51,6 +52,9 @@ export async function seedE2EData() {
 
   // 1.5 Seed deterministic community members (Milestone 19.2)
   await seedCommunityMembers(db, now);
+
+  // 1.75 Seed deterministic events (Milestone 20)
+  await seedEvents(db, now);
 
   // 2. Establish deterministic Auth users
   for (const user of Object.values(E2E_USERS)) {

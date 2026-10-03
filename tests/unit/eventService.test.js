@@ -407,32 +407,38 @@ describe("Milestone 20 — Unit 20.3: Event Service", () => {
       expect(events[0].id).toBe("comm-event-public");
     });
 
-    it("getEventsByCommunity for active member contains communityId, campusId, and no visibility constraint", async () => {
-      mocks.getDocs.mockResolvedValueOnce({
-        empty: false,
-        docs: [
-          {
-            id: "comm-event-public",
-            data: () => ({
-              title: "Public Meet",
-              communityId: COMMUNITY_APEX_AI.id,
-              campusId: APEX_CAMPUS_ID,
-              visibility: EVENT_VISIBILITIES.CAMPUS_PUBLIC,
-              startAt: new Date("2026-10-15T09:00:00Z"),
-            }),
-          },
-          {
-            id: "comm-event-private",
-            data: () => ({
-              title: "Members Workshop",
-              communityId: COMMUNITY_APEX_AI.id,
-              campusId: APEX_CAMPUS_ID,
-              visibility: EVENT_VISIBILITIES.COMMUNITY_ONLY,
-              startAt: new Date("2026-10-16T09:00:00Z"),
-            }),
-          },
-        ],
-      });
+    it("getEventsByCommunity for active member queries both campus_public and community_only and merges them", async () => {
+      mocks.getDocs
+        .mockResolvedValueOnce({
+          empty: false,
+          docs: [
+            {
+              id: "comm-event-public",
+              data: () => ({
+                title: "Public Meet",
+                communityId: COMMUNITY_APEX_AI.id,
+                campusId: APEX_CAMPUS_ID,
+                visibility: EVENT_VISIBILITIES.CAMPUS_PUBLIC,
+                startAt: new Date("2026-10-15T09:00:00Z"),
+              }),
+            },
+          ],
+        })
+        .mockResolvedValueOnce({
+          empty: false,
+          docs: [
+            {
+              id: "comm-event-private",
+              data: () => ({
+                title: "Members Workshop",
+                communityId: COMMUNITY_APEX_AI.id,
+                campusId: APEX_CAMPUS_ID,
+                visibility: EVENT_VISIBILITIES.COMMUNITY_ONLY,
+                startAt: new Date("2026-10-16T09:00:00Z"),
+              }),
+            },
+          ],
+        });
 
       const events = await getEventsByCommunity(COMMUNITY_APEX_AI.id, {
         campusId: APEX_CAMPUS_ID,
@@ -440,7 +446,8 @@ describe("Milestone 20 — Unit 20.3: Event Service", () => {
       });
       expect(mocks.where).toHaveBeenCalledWith("communityId", "==", COMMUNITY_APEX_AI.id);
       expect(mocks.where).toHaveBeenCalledWith("campusId", "==", APEX_CAMPUS_ID);
-      expect(mocks.where).not.toHaveBeenCalledWith("visibility", "==", expect.anything());
+      expect(mocks.where).toHaveBeenCalledWith("visibility", "==", EVENT_VISIBILITIES.CAMPUS_PUBLIC);
+      expect(mocks.where).toHaveBeenCalledWith("visibility", "==", EVENT_VISIBILITIES.COMMUNITY_ONLY);
       expect(events).toHaveLength(2);
       expect(events.map((e) => e.id)).toEqual(["comm-event-public", "comm-event-private"]);
     });
@@ -526,7 +533,7 @@ describe("Milestone 20 — Unit 20.3: Event Service", () => {
       expect(unsub).toHaveBeenCalled();
     });
 
-    it("subscribeToCommunityEvents for active member contains communityId, campusId, and no visibility filter", () => {
+    it("subscribeToCommunityEvents for active member subscribes to both campus_public and community_only and merges them", () => {
       const unsub = vi.fn();
       mocks.onSnapshot.mockImplementation((_q, onNext) => {
         onNext({
@@ -555,7 +562,8 @@ describe("Milestone 20 — Unit 20.3: Event Service", () => {
 
       expect(mocks.where).toHaveBeenCalledWith("communityId", "==", COMMUNITY_APEX_AI.id);
       expect(mocks.where).toHaveBeenCalledWith("campusId", "==", APEX_CAMPUS_ID);
-      expect(mocks.where).not.toHaveBeenCalledWith("visibility", "==", expect.anything());
+      expect(mocks.where).toHaveBeenCalledWith("visibility", "==", EVENT_VISIBILITIES.CAMPUS_PUBLIC);
+      expect(mocks.where).toHaveBeenCalledWith("visibility", "==", EVENT_VISIBILITIES.COMMUNITY_ONLY);
       expect(callback).toHaveBeenCalledWith(
         expect.arrayContaining([expect.objectContaining({ id: "comm-sub-member" })])
       );

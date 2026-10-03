@@ -16,6 +16,7 @@ import {
   EVENT_DESIGN_SPRINT,
   EVENT_CAMPUS_FEST,
   EVENT_ST_JUDE_SYMPOSIUM,
+  EVENT_AI_MEMBERS_ONLY,
   EVENT_IMMUTABLE_FIELDS,
   getEventTemporalState,
 } from "../../src/data/events.js";
@@ -68,14 +69,15 @@ describe("Milestone 20 — Unit 20.1: Event Domain Model & Seeding Invariants", 
   });
 
   describe("Event Fixtures & Schema Invariants", () => {
-    it("contains exactly four deterministic fixtures with unique IDs", () => {
-      expect(EVENT_LIST).toHaveLength(4);
+    it("contains exactly five deterministic fixtures with unique IDs", () => {
+      expect(EVENT_LIST).toHaveLength(5);
       const ids = EVENT_LIST.map((e) => e.id);
-      expect(new Set(ids).size).toBe(4);
+      expect(new Set(ids).size).toBe(5);
       expect(ids).toContain("e2e-event-ai-hackathon");
       expect(ids).toContain("e2e-event-design-sprint");
       expect(ids).toContain("e2e-event-campus-fest");
       expect(ids).toContain("e2e-event-st-jude-symposium");
+      expect(ids).toContain("e2e-event-ai-members-only");
     });
 
     it("EVENTS dictionary indexes each event by its canonical ID", () => {
@@ -83,6 +85,7 @@ describe("Milestone 20 — Unit 20.1: Event Domain Model & Seeding Invariants", 
       expect(EVENTS["e2e-event-design-sprint"]).toEqual(EVENT_DESIGN_SPRINT);
       expect(EVENTS["e2e-event-campus-fest"]).toEqual(EVENT_CAMPUS_FEST);
       expect(EVENTS["e2e-event-st-jude-symposium"]).toEqual(EVENT_ST_JUDE_SYMPOSIUM);
+      expect(EVENTS["e2e-event-ai-members-only"]).toEqual(EVENT_AI_MEMBERS_ONLY);
     });
 
     it("every event fixture satisfies the locked 17-field schema", () => {
@@ -165,7 +168,7 @@ describe("Milestone 20 — Unit 20.1: Event Domain Model & Seeding Invariants", 
       const apexEvents = EVENT_LIST.filter((e) => e.campusId === APEX_CAMPUS_ID);
       const stJudeEvents = EVENT_LIST.filter((e) => e.campusId === ST_JUDE_CAMPUS_ID);
 
-      expect(apexEvents).toHaveLength(3);
+      expect(apexEvents).toHaveLength(4);
       expect(stJudeEvents).toHaveLength(1);
 
       expect(apexEvents.some((e) => e.category === EVENT_CATEGORIES.TECH)).toBe(true);

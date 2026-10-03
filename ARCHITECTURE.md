@@ -1,6 +1,6 @@
 # CampusConnect Architecture
 
-**Status:** Current implementation reference (Milestone 15 Delivered / Milestone 16 Planned)
+**Status:** Current implementation reference (Milestone 20 Delivered)
 
 This document describes the architecture that exists in the repository today. It does not describe proposed messaging, media storage, search infrastructure, or other deferred work.
 
@@ -37,7 +37,7 @@ The UI does not use a custom HTTP API or server-rendered backend. Firebase Admin
 | Database | Cloud Firestore |
 | Hosting | Firebase Hosting serving the Vite `dist` output |
 | Admin tooling | Firebase Admin SDK seeding script |
-| Quality checks | ESLint; production Vite build; 204 Vitest unit tests (`npm run test:unit`); 154 Firestore Emulator security rules tests (`npm run test:rules`); development-only Firestore security audit panel |
+| Quality checks | ESLint; production Vite build; 497 Vitest unit tests (`npm run test:unit`); 154 Firestore Emulator security rules tests (`npm run test:rules`); Playwright E2E test suite (`npm run test:e2e`); development-only Firestore security audit panel |
 
 Firebase Storage is not part of the active client architecture. The Firebase configuration contains a storage-bucket value because it is part of the standard web configuration shape, but the application does not initialize the Storage SDK or upload files.
 
@@ -55,7 +55,9 @@ Firebase Storage is not part of the active client architecture. The Firebase con
 | `/profile` | Authenticated | Current user's editable profile |
 | `/discover` | Authenticated | Bounded student search |
 | `/communities` | Authenticated | Campus-scoped community discovery |
-| `/communities/:communityId` | Authenticated | Community detail, profile, and community discussion feed |
+| `/communities/:communityId` | Authenticated | Community detail, profile, discussion feed, and events tab |
+| `/events` | Authenticated | Campus-wide event discovery and category/temporal filtering |
+| `/events/:eventId` | Authenticated | Event detail, sponsoring community integration, and lifecycle display |
 | `/users/:uid` | Authenticated | Public profile and connection CTA |
 | `/connections` | Authenticated | Accepted connections and pending requests |
 | `/messages` | Authenticated | 1-to-1 private messaging overview |
@@ -66,7 +68,7 @@ Firebase Storage is not part of the active client architecture. The Firebase con
 
 `ProtectedRoute` waits for authentication initialization and redirects unauthenticated users to `/`, preserving the attempted location for the login flow.
 
-There is no separate route configuration folder, layout router, sidebar system, events route, marketplace route, or admin route in the active application.
+There is no separate route configuration folder, layout router, sidebar system, marketplace route, or admin route in the active application.
 
 ## Source tree
 
@@ -78,6 +80,7 @@ src/
 ├── components/
 │   ├── community/        # CommunityCard, CommunityCategoryBadge, CommunityGrid, CommunityHero, CommunityMembersPreview, CommunityPostComposer, CommunityPostFeed
 │   ├── dev/              # Development-only security audit panel
+│   ├── events/           # EventCard, EventCategoryBadge, EventStatusBadge, EventFilterBar, EventGrid, EventComposerModal
 │   ├── feed/             # Feed, posts, comments, composers
 │   ├── layout/           # Navbar, PageContainer, Section
 │   ├── messages/         # ConversationList, ConversationItem, MessageThread, MessageBubble, MessageComposer, DisconnectedNotice
@@ -85,11 +88,11 @@ src/
 │   ├── search/           # StudentCard
 │   └── ui/               # Button, Card, Avatar, Input, Textarea, EmptyState
 ├── contexts/             # AuthContext and its context value
-├── data/                 # Deterministic demo data and ID whitelists
+├── data/                 # Deterministic demo data, campus/community/event fixtures, and ID whitelists
 ├── firebase/             # Firebase client initialization
-├── hooks/                # Auth and domain hooks (including useConversations, useConversationMessages)
-├── pages/                # Route-level screens (including Messages.jsx)
-├── services/             # Firebase Auth/Firestore operations (including messageService.js)
+├── hooks/                # Auth, campus, community, and event hooks (including useEvents, useEvent, useEligibleCommunities)
+├── pages/                # Route-level screens (including Events.jsx, EventDetail.jsx, CommunityDetail.jsx)
+├── services/             # Firebase Auth/Firestore operations (including eventService.js, communityService.js)
 └── utils/                # Development security test runner
 ```
 
@@ -281,6 +284,67 @@ Campus
    - Creating a child message document requires `conversation.lastMessage` in `getAfter()` to match the message's `id`, `content`, `senderId`, and `createdAt`.
    - Neither standalone message creation nor standalone conversation metadata forging can occur.
 
+### Event Architecture & Domain Model (Milestone 20)
+
+The Event domain introduces first-class campus activities and student gatherings, anchored structurally to university campuses and student communities:
+
+```text
+Campus (Tenant Boundary)
+   │
+   ▼
+Communities (Sponsoring Student Organizations)
+   │
+   ▼
+Community Members / Authority (Moderator/Admin Leadership Gate)
+   │
+   ▼
+Events (events/{eventId})
+```
+
+1. **Campus Tenancy & Storage Structure:**
+   - Events reside in the root `events/{eventId}` collection, matching the flat collection architecture of `posts`, `communities`, and `connections`.
+   - Every event is strictly and permanently bound to a parent campus via `campusId`.
+   - Firestore Security Rules enforce tenant isolation: `resource.data.campusId == getUserCampusId()`. Cross-campus event discovery, detail reads, and creation are strictly denied.
+
+2. **Sponsoring Community Relationship:**
+   - Events are sponsored by a student organization identified by `communityId`.
+   - Security rules require the parent community to exist and verify tenant parity (`get(/communities/$(communityId)).data.campusId == campusId`).
+   - The event detail view integrates bidirectional navigation back to the sponsoring community at `/communities/:communityId`.
+   - Communities surface a dedicated "Events" tab alongside "Discussion" at `/communities/:communityId`, presenting filtered community-specific events.
+
+3. **Two-Tier Visibility Model:**
+   - `campus_public`: Discoverable campus-wide by all authenticated students of the host university on `/events` and `/communities/:communityId`.
+   - `community_only`: Restricted to active members of the sponsoring organization. Non-members cannot read the document via direct lookups or collection queries. Active community membership is verified via `isCommunityActiveMember(communityId)`.
+
+4. **Stored Lifecycle Status vs. Derived Temporal State:**
+   - **Stored Lifecycle (`status`):**
+     - Allowed stored values: `published`, `cancelled`.
+     - Creation requires initial status `published`.
+     - Cancellation is an explicit organizer/moderator action that preserves event metadata for informational transparency while rendering a prominent cancellation banner.
+   - **Derived Temporal State:**
+     - Purely derived client-side from `startAt` and `endAt` timestamps relative to the current reference time:
+       - `upcoming`: `referenceDate < startAt`
+       - `ongoing`: `startAt <= referenceDate <= endAt`
+       - `completed`: `referenceDate > endAt`
+     - No persisted temporal state field exists in Firestore, eliminating synchronization drift, stale status bugs, and maintenance cron dependencies.
+
+5. **Client Service, Hook, and UI Layering:**
+   - **Services Layer (`eventService.js`):** Authoritative data access layer managing normalization (locked 17-field schema), date sorting, pure temporal/category filtering, rule-compatible Firestore collection queries, and lifecycle mutations (`createEvent`, `updateEvent`, `cancelEvent`, `deleteEvent`).
+   - **Hooks Layer (`useEvents.js`, `useEvent.js`, `useEligibleCommunities.js`):** Manages component lifecycle, reactive subscriptions (`onSnapshot`), loading/error state machines, and leadership role detection.
+   - **UI Surfaces:**
+     - `/events`: Campus-wide discovery grid, search bar, temporal tabs (`Upcoming` / `Past Events`), category filter pills, community filter dropdown, and creation action.
+     - `/events/:eventId`: Detailed event overview, date/time, venue location, organizer, category, status badge, visibility indicator, and sponsoring community card.
+     - `/communities/:communityId`: "Events" navigation tab rendering community-scoped events.
+     - `EventComposerModal.jsx`: Accessible modal dialog allowing eligible community leaders to publish new events.
+
+6. **Authority & Creation Gate:**
+   - Event creation is gated strictly to users with active leadership roles (`admin` or `moderator`) within the selected sponsoring community: `isCommunityModeratorOrAdmin(communityId)`.
+   - The UI disables creation affordances for regular non-leader students, and Firestore Security Rules authoritatively reject unauthorized creation attempts.
+   - Five fields are permanently immutable on creation: `id`, `campusId`, `communityId`, `createdBy`, and `createdAt`.
+
+7. **Deferred RSVP Model & Deferred Features:**
+   - RSVP functionality, `eventParticipants` subcollections, capacity limits, waitlists, attendance tracking, QR check-ins, ticketing, payment gateways, calendar synchronization (ICS / Google Calendar), notification triggers, recurring schedules, and event comment threads are explicitly **deferred** from Milestone 20 and not active in the current implementation.
+
 ## Security model
 
 The browser is treated as untrusted. Firestore Rules enforce the active authorization model, including:
@@ -299,7 +363,12 @@ The browser is treated as untrusted. Firestore Rules enforce the active authoriz
 - connection state transitions and notification transaction relationships;
 - connection gate (`status == 'accepted'`) for starting threads and sending messages;
 - immutable conversation participants, creation time, and message history;
-- bidirectional transactional coupling preventing message or conversation summary forgery.
+- bidirectional transactional coupling preventing message or conversation summary forgery;
+- tenant-isolated event reads and creation (`resource.data.campusId == getUserCampusId()`);
+- strict 17-field event document schema with five immutable fields (`id`, `campusId`, `communityId`, `createdBy`, `createdAt`);
+- community leadership gate for event creation (`isCommunityModeratorOrAdmin(communityId)`);
+- two-tier event visibility enforcement (`campus_public` for campus students, `community_only` for active members);
+- strict chronological invariant (`endAt >= startAt`) and allowed stored lifecycle transitions (`published`, `cancelled`).
 
 The development-only `SecurityTestPanel` exercises selected notification and user/settings rejection scenarios. It is not a production test runner and is not a replacement for automated emulator tests.
 
@@ -313,12 +382,13 @@ The recruiter demo uses a normal Firebase Auth account configured through `VITE_
 
 ## Current limitations
 
-- 204 unit tests and 154 Firestore Emulator rules tests are active; service integration tests, end-to-end tests, and a CI pipeline are deferred.
+- 497 unit tests, 154 Firestore Emulator rules tests, and 10 Playwright E2E suites are active.
 - Email verification is not required after sign-up.
 - Non-discoverable students are excluded from `directoryIndex` search queries; authenticated direct public profile reads (`/users/:uid`) remain accessible by design.
 - Notifications are bounded to the newest 30 items rather than cursor-paginated.
 - No media upload or Firebase Storage integration exists.
-- No post editing, post sharing, post search, bookmarks, clubs, events, marketplace, or direct account deletion exists.
+- No post editing, post sharing, post search, bookmarks, marketplace, or direct account deletion exists.
+- Within the Event domain, RSVP tracking, participant subcollections, capacity limits, waitlists, ticketing/payments, calendar sync, notifications, and event comments are deferred.
 - Notification generation currently originates in client connection transactions rather than a trusted background event processor.
 - The parent-only exact comment-counter limitation remains; a future ledger or server-side event model would be needed to prove arbitrary child causality.
 
@@ -326,6 +396,6 @@ The recruiter demo uses a normal Firebase Auth account configured through `VITE_
 
 The following are possible later milestones and should not be treated as active architecture:
 
-- service integration, end-to-end, and CI verification beyond the current unit and emulator Rules suites;
 - trusted server-side event processing for notifications;
-- media storage with separate Storage Rules and lifecycle cleanup.
+- media storage with separate Storage Rules and lifecycle cleanup;
+- RSVP, participant capacity, attendance tracking, and calendar synchronization.

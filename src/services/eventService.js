@@ -413,6 +413,27 @@ export async function getEventsByCommunity(communityId, options = {}) {
   }
 
   const isMember = Boolean(options.isMember);
+
+  // For active members without an explicit visibility filter, fetch both
+  // campus_public and community_only events via rule-compatible queries and merge.
+  if (isMember && !options.visibility) {
+    const [publicEvents, memberEvents] = await Promise.all([
+      getEventsByCommunity(communityId, {
+        ...options,
+        visibility: EVENT_VISIBILITIES.CAMPUS_PUBLIC,
+      }),
+      getEventsByCommunity(communityId, {
+        ...options,
+        visibility: EVENT_VISIBILITIES.COMMUNITY_ONLY,
+      }),
+    ]);
+    const map = new Map();
+    for (const e of publicEvents) map.set(e.id, e);
+    for (const e of memberEvents) map.set(e.id, e);
+    const combined = Array.from(map.values());
+    return filterEvents(sortEventsByDate(combined, options.sortOrder), options);
+  }
+
   const constraints = [
     where("communityId", "==", communityId),
     where("campusId", "==", campusId),
@@ -501,6 +522,50 @@ export function subscribeToCommunityEvents(
   }
 
   const isMember = Boolean(options.isMember);
+
+  // For active members without an explicit visibility filter, subscribe to both
+  // campus_public and community_only streams and merge real-time updates.
+  if (isMember && !options.visibility) {
+    let publicDocs = [];
+    let memberDocs = [];
+    const emit = () => {
+      const map = new Map();
+      for (const e of publicDocs) map.set(e.id, e);
+      for (const e of memberDocs) map.set(e.id, e);
+      const combined = Array.from(map.values());
+      const processed = filterEvents(
+        sortEventsByDate(combined, options.sortOrder),
+        options
+      );
+      if (callback) callback(processed);
+    };
+
+    const unsubPublic = subscribeToCommunityEvents(
+      communityId,
+      { ...options, visibility: EVENT_VISIBILITIES.CAMPUS_PUBLIC },
+      (items) => {
+        publicDocs = items || [];
+        emit();
+      },
+      onError
+    );
+
+    const unsubMember = subscribeToCommunityEvents(
+      communityId,
+      { ...options, visibility: EVENT_VISIBILITIES.COMMUNITY_ONLY },
+      (items) => {
+        memberDocs = items || [];
+        emit();
+      },
+      onError
+    );
+
+    return () => {
+      if (typeof unsubPublic === "function") unsubPublic();
+      if (typeof unsubMember === "function") unsubMember();
+    };
+  }
+
   const constraints = [
     where("communityId", "==", communityId),
     where("campusId", "==", campusId),

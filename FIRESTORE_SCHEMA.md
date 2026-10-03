@@ -1,6 +1,6 @@
 # CampusConnect Firestore Schema
 
-**Status:** Active client schema and Rule reference (Milestone 15 Delivered / Milestone 16 Planned)
+**Status:** Active client schema and Rule reference (Milestone 20 Delivered / Milestone 21 Planned)
 
 This document describes the collections used by the current browser application. Firebase Admin SDK demo seeding can add deterministic metadata outside the client write path; those seeder-only details are called out explicitly.
 
@@ -37,6 +37,7 @@ conversations/{canonicalConversationId}
 campuses/{campusId} (campus authority)
 communities/{communityId} (campus community authority)
 communityMembers/{membershipId} (community membership authority)
+events/{eventId} (campus events & activities authority)
 ```
 
 
@@ -500,6 +501,105 @@ Example: `apex-ai-club_e2e-student-a`. This deterministic pattern guarantees ide
   - Arbitrary updates: Unrelated non-moderator/non-admin users cannot alter any membership document.
 - **Deletion:** A student can leave a community by deleting their own membership document (`request.auth.uid == resource.data.userId`), or an active community admin can delete the document.
 
+## 14. `events/{eventId}` (Campus Events & Activities Authority)
+
+Stores authoritative event and activity records sponsored by campus communities. Serves as the security and authorization authority for event discovery, scheduling, lifecycle status, and visibility boundaries within each university tenant.
+
+### Root Collection Design
+
+`events/{eventId}` is stored as a top-level root collection rather than a subcollection (`communities/{communityId}/events/{eventId}`). This design enables campus-wide cross-community event discovery, category filtering, and date-range queries without requiring complex collection group queries or composite index proliferation.
+
+### Locked 17-Field Schema
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `id` | string | Canonical event identifier; must equal document ID; immutable |
+| `campusId` | string | Tenant campus identifier (`campuses/{campusId}`); immutable |
+| `communityId` | string | Sponsoring community identifier (`communities/{communityId}`); immutable |
+| `title` | string | Event title (3–120 characters) |
+| `slug` | string | URL-safe slug derived from title (lowercase alphanumeric and hyphens) |
+| `description` | string | Detailed event description (10–3000 characters) |
+| `category` | string | Categorical classification enum |
+| `location` | string | Physical venue, room number, or virtual meeting URL (2–200 characters) |
+| `startAt` | timestamp | Event commencement date and time |
+| `endAt` | timestamp | Event conclusion date and time; must be strictly after `startAt` |
+| `imageURL` | string \| null | Optional banner image URL or null |
+| `createdBy` | string | Firebase Auth UID of the creator; immutable |
+| `organizerName` | string | Denormalized display name of sponsoring community at creation |
+| `status` | string | Stored lifecycle status enum (`published`, `cancelled`) |
+| `visibility` | string | Access visibility boundary enum (`campus_public`, `community_only`) |
+| `createdAt` | timestamp | Document creation timestamp (`serverTimestamp()`); immutable |
+| `updatedAt` | timestamp | Last modification timestamp (`serverTimestamp()`) |
+
+### Immutable Fields
+
+The following fields cannot be modified after document creation:
+
+- `id`: Document identifier binding.
+- `campusId`: Permanent tenant isolation anchor.
+- `communityId`: Permanent sponsoring community anchor.
+- `createdBy`: Permanent creator UID provenance.
+- `createdAt`: Permanent creation timestamp.
+
+### Stored Lifecycle Status
+
+The `status` field tracks administrative lifecycle state:
+
+- `published`: Active, visible event.
+- `cancelled`: Event cancelled by organizers or moderators; retains record with cancellation warning.
+
+### Access Visibility
+
+The `visibility` field controls read access scoping:
+
+- `campus_public`: Discoverable and readable by any authenticated student belonging to the tenant campus.
+- `community_only`: Restricted exclusively to verified active members of the sponsoring community (`communityMembers` with `status: "active"`).
+
+### Allowed Categories
+
+Events must belong to exactly one of the 8 canonical categories:
+
+- `academic`: Lectures, study sessions, academic symposia.
+- `tech`: Hackathons, coding workshops, tech talks.
+- `cultural`: Arts, music, theater, campus festivals.
+- `sports`: Tournaments, intramural matches, fitness sessions.
+- `career`: Job fairs, resume reviews, networking nights.
+- `workshop`: Hands-on skill sessions, tutorials, labs.
+- `social`: Mixers, meet-and-greets, game nights.
+- `competition`: Debates, pitch competitions, design challenges.
+
+### Derived Temporal State (Client-Side)
+
+Temporal state is dynamically computed on the client relative to `now` and is **never** persisted in Firestore:
+
+- `upcoming`: `now < startAt`
+- `ongoing`: `now >= startAt && now <= endAt`
+- `completed`: `now > endAt`
+
+This design prevents stale time-based status fields in Firestore and eliminates scheduled database update workers.
+
+### Security Rules Behavior
+
+- **Strict Tenant Boundary:** All reads, queries, creates, and updates require tenant parity (`resource.data.campusId == getUserCampusId()` or `request.resource.data.campusId == getUserCampusId()`). Cross-campus access is rejected with `permission-denied`.
+- **Read Authorization:**
+  - `campus_public`: Readable by any authenticated student of the matching campus.
+  - `community_only`: Readable only by verified active members of the sponsoring community via `isCommunityActiveMember(communityId)`.
+- **Create Authorization:**
+  - Authenticated student with matching campus tenant.
+  - Verified active community leader: creator must be an active `moderator` or `admin` of the sponsoring community via `isCommunityModerator(communityId) || isCommunityAdmin(communityId)`.
+  - Sponsoring community must exist and belong to the same campus.
+  - Strict 17-field schema enforcement (`isValidEventCreate`).
+  - `endAt > startAt` chronological integrity enforced.
+  - `status` must be `published`.
+  - `createdAt` and `updatedAt` must equal `request.time`.
+- **Update Authorization:**
+  - Allowed only by the original creator (`request.auth.uid == resource.data.createdBy`), an active community moderator, or an active community admin.
+  - Strict 17-field schema enforcement (`isValidEventUpdate`).
+  - All immutable fields (`id`, `campusId`, `communityId`, `createdBy`, `createdAt`) are preserved.
+  - Chronological integrity (`endAt > startAt`) preserved.
+  - `updatedAt` must equal `request.time`.
+- **Delete Authorization:** Hard deletion is blocked in security rules. Organisational lifecycle is managed via status update to `cancelled`.
+
 ## Demo-only metadata
 
 `scripts/seedDemoData.mjs` uses Firebase Admin SDK and writes `isDemo: true` on selected seeded profiles, posts, comments, likes, connections, and notifications. It also uses deterministic IDs for demo peers, posts, and relationships.
@@ -512,6 +612,7 @@ The following schemas are not active and must not be used as if they already exi
 
 - `friendRequests` and `friendships`: the active relationship collection is `connections`.
 - `bookmarks`: saved posts are not implemented.
+- `eventParticipants` / `eventRsvps`: event participation, RSVP tracking, ticketing, attendance, QR check-in, and calendar sync are deferred.
 - external search indexes: discovery currently uses a bounded `directoryIndex` projection read and client-side filtering; external search services (e.g. Algolia/Typesense) will be evaluated only when directory size or observed performance demonstrates a concrete need.
 
 Any future schema should be added only alongside its service code, route/component behavior, Rules, seed/test fixtures, and documentation.

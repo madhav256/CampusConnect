@@ -11,6 +11,7 @@ const navItems = [
   { to: "/dashboard", label: "Dashboard" },
   { to: "/discover", label: "Discover" },
   { to: "/communities", label: "Communities" },
+  { to: "/events", label: "Events" },
   { to: "/connections", label: "Connections" },
   { to: "/messages", label: "Messages", hasMessageBadge: true },
   { to: "/notifications", label: "Notifications", hasBadge: true },

@@ -11,6 +11,7 @@ const Profile = lazy(() => import("./pages/Profile"));
 const Discover = lazy(() => import("./pages/Discover"));
 const Communities = lazy(() => import("./pages/Communities"));
 const CommunityDetail = lazy(() => import("./pages/CommunityDetail"));
+const Events = lazy(() => import("./pages/Events"));
 const PublicProfile = lazy(() => import("./pages/PublicProfile"));
 const Connections = lazy(() => import("./pages/Connections"));
 const Notifications = lazy(() => import("./pages/Notifications"));
@@ -75,6 +76,14 @@ function App() {
               element={
                 <ProtectedRoute>
                   <CommunityDetail />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/events"
+              element={
+                <ProtectedRoute>
+                  <Events />
                 </ProtectedRoute>
               }
             />

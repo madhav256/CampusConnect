@@ -5,11 +5,12 @@
  * statistics, membership actions, and member preview.
  */
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useParams, Link } from "react-router-dom";
-import { ArrowLeft, RefreshCw, AlertCircle, Sparkles, Building2 } from "lucide-react";
+import { ArrowLeft, RefreshCw, AlertCircle, Sparkles, Building2, Plus } from "lucide-react";
 import { useCommunity } from "../hooks/useCommunity";
 import { useCommunityMembers } from "../hooks/useCommunityMembers";
+import { useEvents } from "../hooks/useEvents";
 import Navbar from "../components/layout/Navbar";
 import PageContainer from "../components/layout/PageContainer";
 import Card from "../components/ui/Card";
@@ -21,6 +22,8 @@ import CommunityMembersPreview from "../components/community/CommunityMembersPre
 import CommunityPostComposer from "../components/community/CommunityPostComposer";
 import CommunityPostFeed from "../components/community/CommunityPostFeed";
 import CommunityModerationPanel from "../components/community/CommunityModerationPanel";
+import EventGrid from "../components/events/EventGrid";
+import EventComposerModal from "../components/events/EventComposerModal";
 import { CAMPUSES } from "../data/campuses";
 
 export default function CommunityDetail() {
@@ -45,6 +48,24 @@ export default function CommunityDetail() {
 
   const [isActionLoading, setIsActionLoading] = useState(false);
   const [actionError, setActionError] = useState(null);
+  const [activeTab, setActiveTab] = useState("discussion");
+  const [isComposerOpen, setIsComposerOpen] = useState(false);
+
+  const eventQueryOptions = useMemo(
+    () => ({
+      communityId: community?.id || null,
+      campusId: community?.campusId || null,
+      isMember: Boolean(isMember),
+    }),
+    [community?.id, community?.campusId, isMember]
+  );
+
+  const {
+    events: communityEvents = [],
+    isLoading: isEventsLoading,
+    error: eventsError,
+    refetch: refetchEvents,
+  } = useEvents(eventQueryOptions);
 
   const handleJoin = async () => {
     if (!community?.campusId) return;
@@ -268,8 +289,70 @@ export default function CommunityDetail() {
             />
           )}
 
-          {/* Community Activity Section */}
-          <div data-testid="community-activity-section" className="space-y-4 pt-4 border-t border-border-warm/60">
+          {/* Community Navigation Tabs */}
+          <div className="flex items-center justify-between border-b border-border-warm/60 pt-4">
+            <div className="flex gap-6">
+              <button
+                type="button"
+                id="community-tab-discussion"
+                data-testid="community-tab-discussion"
+                onClick={() => setActiveTab("discussion")}
+                className={`relative flex items-center gap-2 border-b-2 pb-3 text-sm font-medium transition ${
+                  activeTab === "discussion"
+                    ? "border-terracotta-600 text-terracotta-700 font-semibold"
+                    : "border-transparent text-ink-muted hover:text-ink"
+                }`}
+              >
+                <span>Discussion</span>
+              </button>
+
+              <button
+                type="button"
+                id="community-tab-events"
+                data-testid="community-tab-events"
+                onClick={() => setActiveTab("events")}
+                className={`relative flex items-center gap-2 border-b-2 pb-3 text-sm font-medium transition ${
+                  activeTab === "events"
+                    ? "border-terracotta-600 text-terracotta-700 font-semibold"
+                    : "border-transparent text-ink-muted hover:text-ink"
+                }`}
+              >
+                <span>Events</span>
+                {communityEvents && communityEvents.length > 0 && (
+                  <span
+                    data-testid="community-events-count-badge"
+                    className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
+                      activeTab === "events"
+                        ? "bg-terracotta-100 text-terracotta-800"
+                        : "bg-stone-100 text-stone-600"
+                    }`}
+                  >
+                    {communityEvents.length}
+                  </span>
+                )}
+              </button>
+            </div>
+
+            {/* Create Event Action for Moderators & Admins */}
+            {activeTab === "events" && (isModerator || isAdmin) && (
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => setIsComposerOpen(true)}
+                data-testid="community-create-event-btn"
+                className="gap-1.5 mb-2"
+              >
+                <Plus className="h-4 w-4" aria-hidden="true" />
+                <span>Create Event</span>
+              </Button>
+            )}
+          </div>
+
+          {/* Community Discussion Section */}
+          <div
+            data-testid="community-activity-section"
+            className={activeTab === "discussion" ? "space-y-4 pt-4" : "hidden"}
+          >
             <div className="flex items-center justify-between">
               <h2 className="font-serif text-xl font-bold tracking-tight text-ink">
                 Community Discussion
@@ -289,6 +372,48 @@ export default function CommunityDetail() {
               canModerate={isModerator}
             />
           </div>
+
+          {/* Community Events Section */}
+          <div
+            data-testid="community-events-section"
+            className={activeTab === "events" ? "space-y-4 pt-4" : "hidden"}
+          >
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="font-serif text-xl font-bold tracking-tight text-ink">
+                  Community Events
+                </h2>
+                <p className="text-xs sm:text-sm text-ink-muted">
+                  Gatherings, sessions, and workshops hosted by {community.name}.
+                </p>
+              </div>
+            </div>
+
+            <EventGrid
+              events={communityEvents || []}
+              isLoading={isEventsLoading}
+              error={eventsError}
+              onRetry={refetchEvents}
+              emptyTitle="No events for this community yet."
+              emptyDescription="This community has not scheduled any upcoming events. Stay tuned or check back soon!"
+            />
+          </div>
+
+          {/* Event Composer Modal */}
+          {(isModerator || isAdmin) && (
+            <EventComposerModal
+              isOpen={isComposerOpen}
+              onClose={() => setIsComposerOpen(false)}
+              onSuccess={() => {
+                setIsComposerOpen(false);
+                if (refetchEvents) {
+                  refetchEvents();
+                }
+              }}
+              initialCommunityId={community.id}
+              eligibleCommunities={[community]}
+            />
+          )}
         </div>
       </PageContainer>
     </div>

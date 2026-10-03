@@ -53,6 +53,7 @@ vi.mock("../../src/hooks/useEvents", () => ({
 }));
 
 vi.mock("react-router-dom", () => ({
+  useNavigate: () => vi.fn(),
   Link: ({ to, children, ...props }) =>
     React.createElement("a", { href: to, to, ...props }, children),
   NavLink: ({ to, children, ...props }) =>

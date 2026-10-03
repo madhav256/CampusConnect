@@ -7,17 +7,26 @@
  */
 
 import { useState, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import { Search, X, Plus } from "lucide-react";
 import { useEvents } from "../hooks/useEvents.js";
 import { useOptionalCampus } from "../hooks/useCampus.js";
+import { useEligibleCommunities } from "../hooks/useEligibleCommunities.js";
 import Navbar from "../components/layout/Navbar.jsx";
 import PageContainer from "../components/layout/PageContainer.jsx";
 import EventFilterBar from "../components/events/EventFilterBar.jsx";
 import EventGrid from "../components/events/EventGrid.jsx";
+import EventComposerModal from "../components/events/EventComposerModal.jsx";
 
 export default function Events() {
+  const navigate = useNavigate();
   const campusContext = useOptionalCampus();
   const campus = campusContext?.campus || null;
+  const campusId = campus?.id || campusContext?.campusId || null;
+
+  const { eligibleCommunities = [], hasEligibleCommunities } =
+    useEligibleCommunities(campusId);
+  const [isComposerOpen, setIsComposerOpen] = useState(false);
 
   // Filter state
   const [timeRange, setTimeRange] = useState("upcoming");
@@ -132,19 +141,31 @@ export default function Events() {
             </p>
           </div>
 
-          {/* Organizer Creation Action Placeholder (M20.5 composer placeholder) */}
+          {/* Organizer Creation Action */}
           <div>
-            <button
-              type="button"
-              disabled
-              data-testid="create-event-placeholder-btn"
-              title="Event creation is coming in Milestone 20.5"
-              className="inline-flex items-center gap-2 rounded-xl bg-terracotta-600/80 px-4 py-2.5 text-sm font-semibold text-white shadow-xs cursor-not-allowed opacity-90"
-              aria-disabled="true"
-            >
-              <Plus className="h-4 w-4" aria-hidden="true" />
-              <span>Create Event</span>
-            </button>
+            {hasEligibleCommunities ? (
+              <button
+                type="button"
+                onClick={() => setIsComposerOpen(true)}
+                data-testid="create-event-btn"
+                className="inline-flex items-center gap-2 rounded-xl bg-terracotta-600 px-4 py-2.5 text-sm font-semibold text-white shadow-xs transition hover:bg-terracotta-700 active:bg-terracotta-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-terracotta-500"
+              >
+                <Plus className="h-4 w-4" aria-hidden="true" />
+                <span>Create Event</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                disabled
+                data-testid="create-event-placeholder-btn"
+                title="Only community administrators and moderators can create events."
+                className="inline-flex items-center gap-2 rounded-xl bg-stone-200 px-4 py-2.5 text-sm font-semibold text-stone-400 shadow-xs cursor-not-allowed"
+                aria-disabled="true"
+              >
+                <Plus className="h-4 w-4" aria-hidden="true" />
+                <span>Create Event</span>
+              </button>
+            )}
           </div>
         </div>
 
@@ -219,6 +240,22 @@ export default function Events() {
           emptyTitle={getEmptyTitle()}
           emptyDescription={getEmptyDescription()}
         />
+
+        {/* Event Creation Modal */}
+        {hasEligibleCommunities && (
+          <EventComposerModal
+            isOpen={isComposerOpen}
+            onClose={() => setIsComposerOpen(false)}
+            onSuccess={(newEventId) => {
+              setIsComposerOpen(false);
+              refetch();
+              if (newEventId) {
+                navigate(`/events/${newEventId}`);
+              }
+            }}
+            eligibleCommunities={eligibleCommunities}
+          />
+        )}
       </PageContainer>
     </div>
   );

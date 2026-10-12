@@ -14,6 +14,7 @@ import { seedCampuses } from "./seedCampuses.mjs";
 import { seedCommunities } from "./seedCommunities.mjs";
 import { seedCommunityMembers } from "./seedCommunityMembers.mjs";
 import { seedEvents, resolveSeedReferenceTime } from "./seedEvents.mjs";
+import { seedEventRsvps } from "./seedEventRsvps.mjs";
 
 const EMULATOR_PROJECT_ID = process.env.GCLOUD_PROJECT || "demo-campusconnect-rules-test";
 
@@ -125,6 +126,9 @@ export async function seedE2EData() {
       }, { merge: true });
     }
   }
+
+  // 2.5 Seed deterministic event RSVPs (Milestone 21.1)
+  await seedEventRsvps(db, now);
 
   // 3. Seed baseline feed post by primary student A (Apex University)
   await db.collection("posts").doc("e2e-seed-post-1").set({

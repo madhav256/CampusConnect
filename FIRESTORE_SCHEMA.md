@@ -38,6 +38,7 @@ campuses/{campusId} (campus authority)
 communities/{communityId} (campus community authority)
 communityMembers/{membershipId} (community membership authority)
 events/{eventId} (campus events & activities authority)
+eventRsvps/{eventId}_{userId} (event participation intent; rules pending M21.2)
 ```
 
 
@@ -603,6 +604,51 @@ This design prevents stale time-based status fields in Firestore and eliminates 
   - `updatedAt` must equal `request.time`.
 - **Delete Authorization:** Hard deletion is blocked in security rules. Organisational lifecycle is managed via status update to `cancelled`.
 
+## 15. `eventRsvps/{eventId}_{userId}` (Event Participation Intent)
+
+Stores student declared intent to attend campus events ("RSVP"). Serves as the domain authority for student event attendance across university tenants.
+
+### Root Collection Design
+
+`eventRsvps/{eventId}_{userId}` is stored as a top-level root collection rather than a subcollection (`events/{eventId}/rsvps/{userId}`). This matches the repository-wide architectural pattern (e.g. `communityMembers`, `posts`, `connections`) and enables global queries across a student's participations (e.g. "My RSVPs" / Going tab across multiple events) without requiring collection group queries or collection group rules.
+
+### Deterministic Document Identifier
+
+Documents are keyed by the deterministic composite ID `{eventId}_{userId}`:
+- Guarantees at most one RSVP per (event, user) tuple.
+- Completely idempotent for writes and seed fixtures.
+- Enables direct O(1) point reads to check whether the current user is attending an event.
+
+### Locked Five-Field Schema
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `id` | string | Canonical composite identifier (`{eventId}_{userId}`); must equal document ID; immutable |
+| `eventId` | string | Identifier of the attended event (`events/{eventId}`); immutable |
+| `campusId` | string | Tenant campus anchor (`campuses/{campusId}`); must match event and student campus; immutable |
+| `userId` | string | Firebase Auth UID of the attending student; immutable |
+| `createdAt` | timestamp | Timestamp recording when the RSVP intent was established; immutable |
+
+### Immutable Intent & Existence-as-State
+
+- **Existence as "Going":** The presence of an `eventRsvps` document indicates the student is registered/going to the event.
+- **Absence as "Not Going":** The absence of an `eventRsvps` document indicates the student is not attending.
+- **Strictly Immutable:** Documents are created upon RSVP and deleted upon cancellation. There is no stored `status` field, mutable state, or update operation.
+- **Exclusions:** The collection explicitly omits counters, waitlists, capacity caps, check-in flags, attendee notes, and reminder notifications. Headcounts and attendee previews are derived from bounded equality queries.
+
+### Seeding & Prerequisites
+
+- **Deterministic Seeding:** Seeded via `scripts/seedEventRsvps.mjs` and integrated into the global E2E seed pipeline via `scripts/seedE2E.mjs` (Step 2.5).
+- **Prerequisites:** The standalone seeder strictly requires parent event documents (`events/{eventId}`) and user profiles (`users/{userId}`, `publicProfiles/{userId}`) to be seeded beforehand. It does not automatically seed parent data.
+- **Validation Before Write:** All RSVP entries (fixtures and explicit overrides) are strictly validated against the 5-field schema and `${eventId}_${userId}` composite ID contract before any document is written to Firestore. Malformed or mismatched entries are rejected immediately.
+
+### Security Rules Status: Pending (Milestone 21.2)
+
+> [!IMPORTANT]
+> Security Rules for `eventRsvps/{eventId}_{userId}` are **PENDING** and scheduled for implementation in Milestone 21.2 (`v21.2.0-event-rsvp-security-rules`).
+> Baseline hardening units H1, H2, and H3 do NOT implement RSVP security rules (H1 addressed temporal fixture determinism, H2 established strict event resolution without fallbacks, and H3 hardened community membership integrity).
+> Client access to `eventRsvps` remains closed until M21.2 introduces the rule match block and hoists `isCommunityActiveMember`.
+
 ## Demo-only metadata
 
 `scripts/seedDemoData.mjs` uses Firebase Admin SDK and writes `isDemo: true` on selected seeded profiles, posts, comments, likes, connections, and notifications. It also uses deterministic IDs for demo peers, posts, and relationships.
@@ -615,7 +661,7 @@ The following schemas are not active and must not be used as if they already exi
 
 - `friendRequests` and `friendships`: the active relationship collection is `connections`.
 - `bookmarks`: saved posts are not implemented.
-- `eventParticipants` / `eventRsvps`: event participation, RSVP tracking, ticketing, attendance, QR check-in, and calendar sync are deferred.
+- `eventParticipants` / advanced ticketing: while `eventRsvps` domain and seeding are introduced in M21.1 (security rules pending in M21.2), ticketing, attendance verification, QR check-in, capacity limits, waitlists, and calendar sync remain deferred.
 - external search indexes: discovery currently uses a bounded `directoryIndex` projection read and client-side filtering; external search services (e.g. Algolia/Typesense) will be evaluated only when directory size or observed performance demonstrates a concrete need.
 
 Any future schema should be added only alongside its service code, route/component behavior, Rules, seed/test fixtures, and documentation.

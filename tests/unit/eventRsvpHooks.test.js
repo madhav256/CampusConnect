@@ -803,5 +803,124 @@ describe("Milestone 21 — Unit 21.3: Event RSVP Hooks", () => {
 
       unmount();
     });
+
+    it("refetch resets error state, sets isLoading, and re-triggers subscription", () => {
+      let errorCallback;
+      let secondCallback;
+      mocks.subscribeToMyRsvps
+        .mockImplementationOnce((_uId, _cId, _cb, errCb) => {
+          errorCallback = errCb;
+          return vi.fn();
+        })
+        .mockImplementationOnce((_uId, _cId, cb) => {
+          secondCallback = cb;
+          return vi.fn();
+        });
+
+      const { result } = renderHook(() => useMyRsvps());
+
+      act(() => {
+        errorCallback(new Error("Connection interrupted"));
+      });
+
+      expect(result.current.error).toBe("Connection interrupted");
+      expect(result.current.isLoading).toBe(false);
+      expect(typeof result.current.refetch).toBe("function");
+
+      act(() => {
+        result.current.refetch();
+      });
+
+      expect(result.current.error).toBeNull();
+      expect(result.current.isLoading).toBe(true);
+
+      act(() => {
+        secondCallback([
+          { id: "e1_refetch", eventId: "event-refetch", userId: "test-user-alice" },
+        ]);
+      });
+
+      expect(result.current.isLoading).toBe(false);
+      expect(result.current.rsvps).toHaveLength(1);
+      expect(result.current.eventIds.has("event-refetch")).toBe(true);
+    });
+
+    it("identity/context switch: immediately stops exposing User A data to User B before User B snapshot arrives, and drops late User A callbacks", () => {
+      let userACallback;
+      let userBCallback;
+
+      mocks.subscribeToMyRsvps
+        .mockImplementationOnce((uId, cId, cb) => {
+          userACallback = cb;
+          return vi.fn();
+        })
+        .mockImplementationOnce((uId, cId, cb) => {
+          userBCallback = cb;
+          return vi.fn();
+        });
+
+      // 1. Start with User A and Campus A; deliver an RSVP snapshot containing an event ID.
+      mocks.useAuth.mockReturnValue({
+        user: { uid: "user-a", email: "user.a@apex.edu" },
+        loading: false,
+      });
+      mocks.useOptionalCampus.mockReturnValue({
+        campusId: APEX_CAMPUS_ID,
+        loading: false,
+      });
+
+      const { result, rerender } = renderHook(() => useMyRsvps());
+
+      act(() => {
+        userACallback([
+          { id: "e1_user-a", eventId: "event-user-a-only", userId: "user-a" },
+        ]);
+      });
+
+      expect(result.current.rsvps).toHaveLength(1);
+      expect(result.current.eventIds.has("event-user-a-only")).toBe(true);
+
+      // 2. Switch the hook to User B and Campus B.
+      mocks.useAuth.mockReturnValue({
+        user: { uid: "user-b", email: "user.b@stjude.edu" },
+        loading: false,
+      });
+      mocks.useOptionalCampus.mockReturnValue({
+        campusId: ST_JUDE_CAMPUS_ID,
+        loading: false,
+      });
+
+      rerender();
+
+      // 3. Before delivering User B's first subscription snapshot, assert that User A's RSVP records and event IDs are no longer exposed to User B.
+      expect(result.current.rsvps).toEqual([]);
+      expect(result.current.eventIds.size).toBe(0);
+      expect(result.current.eventIds.has("event-user-a-only")).toBe(false);
+      expect(result.current.isLoading).toBe(true);
+
+      // 4. Deliver User B's snapshot and verify only User B's records are exposed.
+      act(() => {
+        userBCallback([
+          { id: "e2_user-b", eventId: "event-user-b-only", userId: "user-b" },
+        ]);
+      });
+
+      expect(result.current.isLoading).toBe(false);
+      expect(result.current.rsvps).toHaveLength(1);
+      expect(result.current.eventIds.has("event-user-b-only")).toBe(true);
+      expect(result.current.eventIds.has("event-user-a-only")).toBe(false);
+
+      // 5. Complete a late callback from User A and verify it cannot restore User A's data.
+      act(() => {
+        userACallback([
+          { id: "e1_user-a-late", eventId: "event-user-a-late", userId: "user-a" },
+        ]);
+      });
+
+      expect(result.current.rsvps).toHaveLength(1);
+      expect(result.current.eventIds.has("event-user-b-only")).toBe(true);
+      expect(result.current.eventIds.has("event-user-a-late")).toBe(false);
+      expect(result.current.eventIds.has("event-user-a-only")).toBe(false);
+    });
   });
 });

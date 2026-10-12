@@ -11,6 +11,7 @@ import { Calendar, MapPin } from "lucide-react";
 import Card from "../ui/Card";
 import EventCategoryBadge from "./EventCategoryBadge";
 import EventStatusBadge from "./EventStatusBadge";
+import RsvpStatusBadge from "./RsvpStatusBadge";
 import { EVENT_STATUSES } from "../../constants.js";
 
 function formatEventDate(startAt) {
@@ -33,7 +34,11 @@ function formatEventDate(startAt) {
   return `${dateStr} • ${timeStr}`;
 }
 
-export default function EventCard({ event, "data-testid": testId }) {
+export default function EventCard({
+  event,
+  isGoing = false,
+  "data-testid": testId,
+}) {
   if (!event) return null;
 
   const isCancelled =
@@ -75,6 +80,11 @@ export default function EventCard({ event, "data-testid": testId }) {
           <div className="mb-2 flex flex-wrap items-center gap-1.5">
             <EventCategoryBadge category={event.category} />
             <EventStatusBadge event={event} />
+            {isGoing && (
+              <span data-testid="event-card-going-badge" className="inline-flex">
+                <RsvpStatusBadge state="going" />
+              </span>
+            )}
           </div>
 
           {/* Title */}

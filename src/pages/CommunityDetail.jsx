@@ -11,6 +11,7 @@ import { ArrowLeft, RefreshCw, AlertCircle, Sparkles, Building2, Plus } from "lu
 import { useCommunity } from "../hooks/useCommunity";
 import { useCommunityMembers } from "../hooks/useCommunityMembers";
 import { useEvents } from "../hooks/useEvents";
+import { useMyRsvps } from "../hooks/useMyRsvps";
 import Navbar from "../components/layout/Navbar";
 import PageContainer from "../components/layout/PageContainer";
 import Card from "../components/ui/Card";
@@ -50,6 +51,8 @@ export default function CommunityDetail() {
   const [actionError, setActionError] = useState(null);
   const [activeTab, setActiveTab] = useState("discussion");
   const [isComposerOpen, setIsComposerOpen] = useState(false);
+
+  const { eventIds: myRsvpEventIds } = useMyRsvps();
 
   const eventQueryOptions = useMemo(
     () => ({
@@ -396,6 +399,7 @@ export default function CommunityDetail() {
               onRetry={refetchEvents}
               emptyTitle="No events for this community yet."
               emptyDescription="This community has not scheduled any upcoming events. Stay tuned or check back soon!"
+              rsvpEventIds={myRsvpEventIds}
             />
           </div>
 

@@ -72,6 +72,20 @@ export default function EventFilterBar({
           >
             Past Events
           </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={timeRange === "going"}
+            data-testid="time-tab-going"
+            onClick={() => onTimeRangeChange?.("going")}
+            className={`rounded-lg px-4 py-1.5 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-terracotta-500 ${
+              timeRange === "going"
+                ? "bg-surface text-ink shadow-xs"
+                : "text-stone-600 hover:text-ink"
+            }`}
+          >
+            Going
+          </button>
         </div>
 
         {/* Right controls: Community dropdown + optional Reset */}

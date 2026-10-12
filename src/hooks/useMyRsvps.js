@@ -4,10 +4,12 @@
  * Hook to retrieve and subscribe to all RSVPs of the current authenticated user (Q2).
  */
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import { useAuth } from "./useAuth.js";
 import { useOptionalCampus } from "./useCampus.js";
 import { subscribeToMyRsvps } from "../services/eventRsvpService.js";
+
+const EMPTY_RSVPS = [];
 
 /**
  * Hook providing real-time access to the current authenticated user's RSVPs.
@@ -19,6 +21,7 @@ import { subscribeToMyRsvps } from "../services/eventRsvpService.js";
  *   eventIds: Set<string>,
  *   isLoading: boolean,
  *   error: string|null,
+ *   refetch: () => void,
  * }}
  */
 export function useMyRsvps(options = {}) {
@@ -30,30 +33,50 @@ export function useMyRsvps(options = {}) {
   const limit = options?.limit || 50;
 
   const shouldFetch = Boolean(userId && campusId);
+  const activeContextKey = `${userId || ""}_${campusId || ""}_${limit}`;
 
-  const [rsvps, setRsvps] = useState([]);
+  const [dataState, setDataState] = useState({
+    contextKey: activeContextKey,
+    rsvps: [],
+    error: null,
+  });
+
+  const isCurrentContext = dataState.contextKey === activeContextKey;
+  const rsvps = useMemo(() => {
+    return dataState.contextKey === activeContextKey
+      ? dataState.rsvps
+      : EMPTY_RSVPS;
+  }, [dataState.contextKey, dataState.rsvps, activeContextKey]);
+  const error = isCurrentContext ? dataState.error : null;
+
   const [isLoading, setIsLoading] = useState(shouldFetch);
-  const [error, setError] = useState(null);
+  const [reloadCount, setReloadCount] = useState(0);
 
-  // Synchronously reset state during render when dependencies change
-  const optionsKey = `${userId || ""}_${campusId || ""}_${limit}`;
-  const [prevKey, setPrevKey] = useState(optionsKey);
-  if (optionsKey !== prevKey) {
-    setPrevKey(optionsKey);
-    setRsvps([]);
+  // Synchronously reset loading state when context changes
+  const [prevKey, setPrevKey] = useState(activeContextKey);
+  if (activeContextKey !== prevKey) {
+    setPrevKey(activeContextKey);
     setIsLoading(shouldFetch);
-    setError(null);
   }
+
+  const effectiveLoading = !isCurrentContext && shouldFetch ? true : isLoading;
 
   const eventIds = useMemo(() => {
     return new Set(rsvps.map((r) => r.eventId).filter(Boolean));
   }, [rsvps]);
+
+  const refetch = useCallback(() => {
+    setDataState((prev) => ({ ...prev, error: null }));
+    setIsLoading(shouldFetch);
+    setReloadCount((c) => c + 1);
+  }, [shouldFetch]);
 
   useEffect(() => {
     if (!userId || !campusId) {
       return;
     }
 
+    const currentContext = activeContextKey;
     let isSubscribed = true;
 
     const unsubscribe = subscribeToMyRsvps(
@@ -61,13 +84,21 @@ export function useMyRsvps(options = {}) {
       campusId,
       (nextRsvps) => {
         if (isSubscribed) {
-          setRsvps(nextRsvps || []);
+          setDataState({
+            contextKey: currentContext,
+            rsvps: nextRsvps || [],
+            error: null,
+          });
           setIsLoading(false);
         }
       },
       (err) => {
         if (isSubscribed) {
-          setError(err?.message || "Failed to load RSVPs.");
+          setDataState({
+            contextKey: currentContext,
+            rsvps: [],
+            error: err?.message || "Failed to load RSVPs.",
+          });
           setIsLoading(false);
         }
       },
@@ -80,12 +111,13 @@ export function useMyRsvps(options = {}) {
         unsubscribe();
       }
     };
-  }, [userId, campusId, limit]);
+  }, [userId, campusId, limit, reloadCount, activeContextKey]);
 
   return {
     rsvps,
     eventIds,
-    isLoading,
+    isLoading: effectiveLoading,
     error,
+    refetch,
   };
 }

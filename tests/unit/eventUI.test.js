@@ -295,9 +295,16 @@ describe("Milestone 20 — Unit 20.4: Event Discovery UI & Navigation", () => {
       const pastTab = findByTestId(el, "time-tab-past");
       expect(pastTab.props["aria-selected"]).toBe(false);
 
+      const goingTab = findByTestId(el, "time-tab-going");
+      expect(goingTab.props["aria-selected"]).toBe(false);
+
       // Trigger click on Past Events tab
       pastTab.props.onClick();
       expect(onTimeRangeChange).toHaveBeenCalledWith("past");
+
+      // Trigger click on Going tab
+      goingTab.props.onClick();
+      expect(onTimeRangeChange).toHaveBeenCalledWith("going");
     });
 
     it("renders category pills and calls onCategoryChange when clicked", () => {

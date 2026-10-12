@@ -7,9 +7,11 @@ export default function EmptyState({
   action,
   className = "",
   compact = false,
+  ...props
 }) {
   return (
     <div
+      {...props}
       className={`flex flex-col items-center justify-center text-center ${
         compact
           ? "py-8 px-4"

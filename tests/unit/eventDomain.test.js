@@ -22,6 +22,8 @@ import {
   EVENT_PAST_ORIENTATION,
   EVENT_CANCELLED_LECTURE,
   EVENT_IMMUTABLE_FIELDS,
+  UPCOMING_MUTABLE_FIELDS,
+  ONGOING_MUTABLE_FIELDS,
   getEventTemporalState,
   resolveEventFixture,
   buildEventFixtures,
@@ -289,19 +291,48 @@ describe("Milestone 20 — Unit 20.1: Event Domain Model & Seeding Invariants", 
     });
   });
 
-  describe("Immutability Contract", () => {
-    it("defines the exact five immutable fields per the locked architecture", () => {
+  describe("Immutability & Mutability Contracts", () => {
+    it("defines the exact six immutable fields per the locked Revision 9 architecture", () => {
       expect(EVENT_IMMUTABLE_FIELDS).toEqual([
         "id",
         "campusId",
         "communityId",
         "createdBy",
         "createdAt",
+        "visibility",
       ]);
-      expect(EVENT_IMMUTABLE_FIELDS).toHaveLength(5);
+      expect(EVENT_IMMUTABLE_FIELDS).toHaveLength(6);
+      expect(Object.isFrozen(EVENT_IMMUTABLE_FIELDS)).toBe(true);
     });
 
-    it("all fixtures possess all five immutable fields", () => {
+    it("defines and freezes UPCOMING_MUTABLE_FIELDS allowlist", () => {
+      expect(UPCOMING_MUTABLE_FIELDS).toEqual([
+        "title",
+        "slug",
+        "description",
+        "category",
+        "location",
+        "startAt",
+        "endAt",
+        "imageURL",
+        "organizerName",
+      ]);
+      expect(UPCOMING_MUTABLE_FIELDS).toHaveLength(9);
+      expect(Object.isFrozen(UPCOMING_MUTABLE_FIELDS)).toBe(true);
+    });
+
+    it("defines and freezes ONGOING_MUTABLE_FIELDS allowlist", () => {
+      expect(ONGOING_MUTABLE_FIELDS).toEqual([
+        "location",
+        "description",
+        "imageURL",
+        "endAt",
+      ]);
+      expect(ONGOING_MUTABLE_FIELDS).toHaveLength(4);
+      expect(Object.isFrozen(ONGOING_MUTABLE_FIELDS)).toBe(true);
+    });
+
+    it("all fixtures possess all six immutable fields", () => {
       for (const event of EVENT_LIST) {
         for (const immutableKey of EVENT_IMMUTABLE_FIELDS) {
           expect(event[immutableKey]).toBeDefined();
@@ -317,12 +348,12 @@ describe("Milestone 20 — Unit 20.1: Event Domain Model & Seeding Invariants", 
       endAt: "2026-10-15T18:00:00.000Z",
     };
 
-    it("derives 'upcoming' when reference date is before startAt", () => {
+    it("derives 'upcoming' when reference date is strictly before startAt", () => {
       const beforeStart = new Date("2026-10-15T09:59:59.000Z");
       expect(getEventTemporalState(mockEvent, beforeStart)).toBe("upcoming");
     });
 
-    it("derives 'ongoing' at exact startAt and during event duration", () => {
+    it("derives 'ongoing' at exact startAt, during event duration, and at exact endAt", () => {
       const exactStart = new Date("2026-10-15T10:00:00.000Z");
       const midway = new Date("2026-10-15T14:00:00.000Z");
       const exactEnd = new Date("2026-10-15T18:00:00.000Z");
@@ -332,10 +363,12 @@ describe("Milestone 20 — Unit 20.1: Event Domain Model & Seeding Invariants", 
       expect(getEventTemporalState(mockEvent, exactEnd)).toBe("ongoing");
     });
 
-    it("derives 'completed' immediately after endAt has elapsed", () => {
+    it("derives 'completed' immediately after endAt has elapsed (+1ms boundary)", () => {
+      const atEndPlusOneMs = new Date("2026-10-15T18:00:00.001Z");
       const afterEnd = new Date("2026-10-15T18:00:01.000Z");
       const dayAfter = new Date("2026-10-16T12:00:00.000Z");
 
+      expect(getEventTemporalState(mockEvent, atEndPlusOneMs)).toBe("completed");
       expect(getEventTemporalState(mockEvent, afterEnd)).toBe("completed");
       expect(getEventTemporalState(mockEvent, dayAfter)).toBe("completed");
     });
@@ -347,14 +380,132 @@ describe("Milestone 20 — Unit 20.1: Event Domain Model & Seeding Invariants", 
       };
 
       expect(getEventTemporalState(timestampEvent, 1699999999000)).toBe("upcoming");
+      expect(getEventTemporalState(timestampEvent, 1700000000000)).toBe("ongoing");
       expect(getEventTemporalState(timestampEvent, 1700001000000)).toBe("ongoing");
+      expect(getEventTemporalState(timestampEvent, 1700003600000)).toBe("ongoing");
+      expect(getEventTemporalState(timestampEvent, 1700003600001)).toBe("completed");
       expect(getEventTemporalState(timestampEvent, 1700004000000)).toBe("completed");
     });
 
-    it("falls back gracefully to 'upcoming' if event or timestamps are missing", () => {
-      expect(getEventTemporalState(null)).toBe("upcoming");
-      expect(getEventTemporalState({})).toBe("upcoming");
-      expect(getEventTemporalState({ startAt: null })).toBe("upcoming");
+    it("fails closed (returns null) if event or timestamps are missing, null, or malformed", () => {
+      expect(getEventTemporalState(null)).toBeNull();
+      expect(getEventTemporalState(undefined)).toBeNull();
+      expect(getEventTemporalState("not-an-object")).toBeNull();
+      expect(getEventTemporalState({})).toBeNull();
+      expect(getEventTemporalState({ startAt: null, endAt: "2026-10-15T18:00:00.000Z" })).toBeNull();
+      expect(getEventTemporalState({ startAt: "2026-10-15T10:00:00.000Z", endAt: null })).toBeNull();
+      expect(getEventTemporalState({ startAt: "invalid", endAt: "2026-10-15T18:00:00.000Z" })).toBeNull();
+      expect(getEventTemporalState({ startAt: "2026-10-15T10:00:00.000Z", endAt: "invalid" })).toBeNull();
+    });
+
+    it("fails closed (returns null) if referenceDate is missing or unparseable", () => {
+      expect(getEventTemporalState(mockEvent, null)).toBeNull();
+      expect(getEventTemporalState(mockEvent, "invalid-date-string")).toBeNull();
+      expect(getEventTemporalState(mockEvent, new Date(NaN))).toBeNull();
+    });
+
+    it("handles numeric zero (Unix epoch) as valid timestamps", () => {
+      const epochEvent = { startAt: 0, endAt: 3600000 };
+      expect(getEventTemporalState(epochEvent, -1000)).toBe("upcoming");
+      expect(getEventTemporalState(epochEvent, 0)).toBe("ongoing");
+      expect(getEventTemporalState(epochEvent, 1800000)).toBe("ongoing");
+      expect(getEventTemporalState(epochEvent, 3600000)).toBe("ongoing");
+      expect(getEventTemporalState(epochEvent, 3600001)).toBe("completed");
+    });
+
+    it("fails closed (returns null) for non-finite or out-of-range timestamp methods/properties", () => {
+      expect(getEventTemporalState({ startAt: { toMillis: () => Infinity }, endAt: 1700003600000 }, 1700000000000)).toBeNull();
+      expect(getEventTemporalState({ startAt: 1700000000000, endAt: { toMillis: () => -Infinity } }, 1700000000000)).toBeNull();
+      expect(getEventTemporalState({ startAt: { toMillis: () => NaN }, endAt: 1700003600000 }, 1700000000000)).toBeNull();
+      expect(getEventTemporalState({ startAt: { toDate: () => new Date(NaN) }, endAt: 1700003600000 }, 1700000000000)).toBeNull();
+      expect(getEventTemporalState({ startAt: { seconds: Infinity, nanoseconds: 0 }, endAt: 1700003600000 }, 1700000000000)).toBeNull();
+      expect(getEventTemporalState({ startAt: 1700000000000, endAt: { seconds: 1700003600, nanoseconds: Infinity } }, 1700000000000)).toBeNull();
+      expect(getEventTemporalState({ startAt: 1e25, endAt: 1e26 }, 1700000000000)).toBeNull();
+      expect(getEventTemporalState(mockEvent, { toMillis: () => Infinity })).toBeNull();
+      expect(getEventTemporalState(mockEvent, Infinity)).toBeNull();
+      expect(getEventTemporalState(mockEvent, false)).toBeNull();
+    });
+
+    it("fails closed (returns null) if existing stored chronology is inverted (endAt < startAt)", () => {
+      const invertedEvent = {
+        startAt: "2026-10-15T18:00:00.000Z",
+        endAt: "2026-10-15T10:00:00.000Z",
+      };
+      expect(getEventTemporalState(invertedEvent, new Date("2026-10-15T09:00:00.000Z"))).toBeNull();
+      expect(getEventTemporalState(invertedEvent, new Date("2026-10-15T12:00:00.000Z"))).toBeNull();
+      expect(getEventTemporalState(invertedEvent, new Date("2026-10-15T20:00:00.000Z"))).toBeNull();
+    });
+
+    it("handles valid seconds/nanoseconds representations including omitted nanoseconds, boundaries, and negative seconds", () => {
+      // Omitted nanoseconds
+      const omittedNanoEvent = {
+        startAt: { seconds: 1700000000 },
+        endAt: { seconds: 1700003600 },
+      };
+      expect(getEventTemporalState(omittedNanoEvent, 1699999999000)).toBe("upcoming");
+      expect(getEventTemporalState(omittedNanoEvent, 1700000000000)).toBe("ongoing");
+      expect(getEventTemporalState(omittedNanoEvent, 1700003600000)).toBe("ongoing");
+      expect(getEventTemporalState(omittedNanoEvent, 1700003600001)).toBe("completed");
+
+      // Nanoseconds at boundary values 0 and 999_999_999
+      const boundaryNanoEvent = {
+        startAt: { seconds: 1700000000, nanoseconds: 0 },
+        endAt: { seconds: 1700000000, nanoseconds: 999_999_999 },
+      };
+      expect(getEventTemporalState(boundaryNanoEvent, 1700000000000)).toBe("ongoing");
+      expect(getEventTemporalState(boundaryNanoEvent, 1700000000999)).toBe("ongoing");
+      expect(getEventTemporalState(boundaryNanoEvent, 1700000001000)).toBe("completed");
+
+      // Valid negative seconds with non-negative nanoseconds (pre-epoch)
+      const preEpochEvent = {
+        startAt: { seconds: -100, nanoseconds: 0 }, // -100,000 ms
+        endAt: { seconds: -50, nanoseconds: 500_000_000 }, // -49,500 ms
+      };
+      expect(getEventTemporalState(preEpochEvent, -100001)).toBe("upcoming");
+      expect(getEventTemporalState(preEpochEvent, -100000)).toBe("ongoing");
+      expect(getEventTemporalState(preEpochEvent, -49500)).toBe("ongoing");
+      expect(getEventTemporalState(preEpochEvent, -49499)).toBe("completed");
+    });
+
+    it("fails closed (returns null) for malformed seconds/nanoseconds representations", () => {
+      const validEnd = { seconds: 1700003600, nanoseconds: 0 };
+      const ref = 1700000000000;
+
+      // Fractional seconds
+      expect(getEventTemporalState({ startAt: { seconds: 1700000000.5, nanoseconds: 0 }, endAt: validEnd }, ref)).toBeNull();
+      expect(getEventTemporalState({ startAt: { seconds: 1700000000 }, endAt: { seconds: 1700003600.2 } }, ref)).toBeNull();
+
+      // Fractional nanoseconds
+      expect(getEventTemporalState({ startAt: { seconds: 1700000000, nanoseconds: 100.5 }, endAt: validEnd }, ref)).toBeNull();
+
+      // Negative nanoseconds
+      expect(getEventTemporalState({ startAt: { seconds: 1700000000, nanoseconds: -1 }, endAt: validEnd }, ref)).toBeNull();
+
+      // Out-of-range nanoseconds (>= 1_000_000_000)
+      expect(getEventTemporalState({ startAt: { seconds: 1700000000, nanoseconds: 1_000_000_000 }, endAt: validEnd }, ref)).toBeNull();
+      expect(getEventTemporalState({ startAt: { seconds: 1700000000, nanoseconds: 1_000_000_001 }, endAt: validEnd }, ref)).toBeNull();
+
+      // Explicitly supplied null, string, or boolean nanoseconds
+      expect(getEventTemporalState({ startAt: { seconds: 1700000000, nanoseconds: null }, endAt: validEnd }, ref)).toBeNull();
+      expect(getEventTemporalState({ startAt: { seconds: 1700000000, nanoseconds: "500" }, endAt: validEnd }, ref)).toBeNull();
+      expect(getEventTemporalState({ startAt: { seconds: 1700000000, nanoseconds: false }, endAt: validEnd }, ref)).toBeNull();
+      expect(getEventTemporalState({ startAt: { seconds: 1700000000, nanoseconds: true }, endAt: validEnd }, ref)).toBeNull();
+
+      // Explicitly supplied null, string, or boolean seconds
+      expect(getEventTemporalState({ startAt: { seconds: null, nanoseconds: 0 }, endAt: validEnd }, ref)).toBeNull();
+      expect(getEventTemporalState({ startAt: { seconds: "1700000000", nanoseconds: 0 }, endAt: validEnd }, ref)).toBeNull();
+      expect(getEventTemporalState({ startAt: { seconds: false, nanoseconds: 0 }, endAt: validEnd }, ref)).toBeNull();
+      expect(getEventTemporalState({ startAt: { seconds: true, nanoseconds: 0 }, endAt: validEnd }, ref)).toBeNull();
+
+      // Missing seconds when nanoseconds is present
+      expect(getEventTemporalState({ startAt: { nanoseconds: 0 }, endAt: validEnd }, ref)).toBeNull();
+      expect(getEventTemporalState({ startAt: { nanoseconds: 500 }, endAt: validEnd }, ref)).toBeNull();
+
+      // Malformed seconds/nanoseconds in referenceDate
+      expect(getEventTemporalState(mockEvent, { seconds: 1700000000.5, nanoseconds: 0 })).toBeNull();
+      expect(getEventTemporalState(mockEvent, { seconds: 1700000000, nanoseconds: -1 })).toBeNull();
+      expect(getEventTemporalState(mockEvent, { seconds: 1700000000, nanoseconds: "invalid" })).toBeNull();
+      expect(getEventTemporalState(mockEvent, { nanoseconds: 0 })).toBeNull();
     });
   });
 

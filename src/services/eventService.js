@@ -24,12 +24,13 @@ import { db, isFirebaseConfigured } from "../firebase/config";
 import {
   EVENT_CATEGORY_LIST,
   EVENT_STATUSES,
-  EVENT_STATUS_LIST,
   EVENT_VISIBILITIES,
   EVENT_VISIBILITY_LIST,
 } from "../constants.js";
 import {
   EVENT_IMMUTABLE_FIELDS,
+  UPCOMING_MUTABLE_FIELDS,
+  ONGOING_MUTABLE_FIELDS,
   getEventTemporalState,
 } from "../data/events.js";
 
@@ -65,39 +66,112 @@ export function eventsCollectionRef() {
 }
 
 /**
- * Normalizes Firestore Timestamp, Date, or string into client Date or null.
+ * Normalizes Firestore Timestamp, Date, number, or string into client Date or null.
+ * Rejects non-finite, out-of-range, or malformed values by returning null.
  *
  * @param {any} val
  * @returns {Date|null}
  */
 export function normalizeTimestamp(val) {
-  if (!val) return null;
-  if (typeof val.toDate === "function") return val.toDate();
-  if (typeof val.toMillis === "function") return new Date(val.toMillis());
-  if (val instanceof Date) return val;
-  if (typeof val === "string" || typeof val === "number") {
-    const d = new Date(val);
-    return isNaN(d.getTime()) ? null : d;
+  if (val === null || val === undefined) return null;
+  if (typeof val === "boolean") return null;
+
+  if (val && typeof val === "object" && ("seconds" in val || "nanoseconds" in val)) {
+    const sec = val.seconds;
+    if (typeof sec !== "number" || !Number.isInteger(sec)) {
+      return null;
+    }
+    let nano = 0;
+    if (val.nanoseconds !== undefined) {
+      nano = val.nanoseconds;
+      if (typeof nano !== "number" || !Number.isInteger(nano) || nano < 0 || nano >= 1_000_000_000) {
+        return null;
+      }
+    }
+    const ms = sec * 1000 + Math.floor(nano / 1e6);
+    if (!Number.isFinite(ms) || Math.abs(ms) > 8.64e15) {
+      return null;
+    }
+    if (typeof val.toDate === "function") {
+      try {
+        const d = val.toDate();
+        if (d instanceof Date && Number.isFinite(d.getTime())) {
+          return d;
+        }
+      } catch {
+        return null;
+      }
+    }
+    return new Date(ms);
+  }
+
+  if (typeof val?.toMillis === "function") {
+    try {
+      const ms = val.toMillis();
+      if (typeof ms !== "number" || !Number.isFinite(ms) || Math.abs(ms) > 8.64e15) {
+        return null;
+      }
+      if (typeof val.toDate === "function") {
+        try {
+          const d = val.toDate();
+          if (d instanceof Date && Number.isFinite(d.getTime())) {
+            return d;
+          }
+        } catch {
+          return null;
+        }
+      }
+      return new Date(ms);
+    } catch {
+      return null;
+    }
+  }
+  if (typeof val?.toDate === "function") {
+    try {
+      const d = val.toDate();
+      if (d instanceof Date && Number.isFinite(d.getTime())) {
+        return d;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+  if (val instanceof Date) {
+    return Number.isFinite(val.getTime()) ? val : null;
+  }
+  if (typeof val === "number") {
+    return Number.isFinite(val) && Math.abs(val) <= 8.64e15 ? new Date(val) : null;
+  }
+  if (typeof val === "string") {
+    const trimmed = val.trim();
+    if (!trimmed) return null;
+    const d = new Date(trimmed);
+    return Number.isFinite(d.getTime()) ? d : null;
   }
   return null;
 }
 
 /**
- * Converts a Date, ISO string, or Timestamp to a Firestore Timestamp.
+ * Converts a Date, ISO string, number, or Timestamp to a Firestore Timestamp.
+ * Preserves genuine Timestamp instances directly.
+ * Canonicalizes all other valid supported inputs using Timestamp.fromDate().
+ * Rejects invalid, non-finite, out-of-range, or unparseable inputs.
  *
  * @param {any} val
- * @returns {Timestamp|Date}
+ * @returns {Timestamp|Date|null}
  */
-function toFirestoreTimestamp(val) {
-  if (!val) return null;
-  if (typeof val.toMillis === "function" && typeof val.toDate === "function") return val;
-  if (typeof Timestamp === "function" && val instanceof Timestamp) return val;
-  if (val instanceof Date) {
-    if (isNaN(val.getTime())) throw new Error("Invalid date provided.");
-    return typeof Timestamp?.fromDate === "function" ? Timestamp.fromDate(val) : val;
+export function toFirestoreTimestamp(val) {
+  if (val === null || val === undefined) {
+    return null;
   }
-  const d = new Date(val);
-  if (isNaN(d.getTime())) throw new Error("Invalid date provided.");
+  if (typeof Timestamp === "function" && val instanceof Timestamp) {
+    return val;
+  }
+  const d = normalizeTimestamp(val);
+  if (!d) {
+    throw new Error("Invalid date provided.");
+  }
   return typeof Timestamp?.fromDate === "function" ? Timestamp.fromDate(d) : d;
 }
 
@@ -786,82 +860,230 @@ export async function createEvent(eventData, currentUser = null) {
 }
 
 /**
- * Updates mutable fields of an existing event.
- * Strips and protects immutable fields (id, campusId, communityId, createdBy, createdAt).
+ * Updates mutable fields of an existing event according to Revision 9 lifecycle rules.
+ * Enforces upcoming vs. ongoing allowlists, resulting chronology, and selective
+ * timestamp canonicalization (omitting unchanged dates).
  *
  * @param {string} eventId
  * @param {object} updates
+ * @param {object} currentEvent
+ * @param {Date|number|string} [referenceNow=new Date()]
  * @returns {Promise<void>}
  */
-export async function updateEvent(eventId, updates) {
-  if (!eventId || typeof eventId !== "string") {
+export async function updateEvent(eventId, updates, currentEvent, referenceNow = new Date()) {
+  if (!eventId || typeof eventId !== "string" || !eventId.trim()) {
     throw new Error("Event ID is required to update an event.");
   }
-  if (!updates || typeof updates !== "object") {
+  if (!updates || typeof updates !== "object" || Array.isArray(updates)) {
     throw new Error("Updates object is required.");
   }
+  if (!currentEvent || typeof currentEvent !== "object") {
+    throw new Error("Current event object is required.");
+  }
 
-  const safeUpdates = {};
-  for (const [key, value] of Object.entries(updates)) {
-    if (EVENT_IMMUTABLE_FIELDS.includes(key)) {
-      continue; // Exclude immutable fields from update payload
+  // 1. Status decoupling: updateEvent cannot alter status
+  if (updates.status !== undefined) {
+    throw new Error("Status cannot be modified via updateEvent. Use cancelEvent or republishEvent.");
+  }
+
+  // 2. Reference time validation
+  const refNow = normalizeTimestamp(referenceNow);
+  if (!refNow || isNaN(refNow.getTime())) {
+    throw new Error("Invalid reference time.");
+  }
+
+  // 3. Existing timestamp validation & stored chronological integrity
+  const existingStartAt = normalizeTimestamp(currentEvent.startAt);
+  const existingEndAt = normalizeTimestamp(currentEvent.endAt);
+  if (
+    !existingStartAt ||
+    !existingEndAt ||
+    isNaN(existingStartAt.getTime()) ||
+    isNaN(existingEndAt.getTime()) ||
+    existingEndAt.getTime() < existingStartAt.getTime()
+  ) {
+    throw new Error("Existing event startAt and endAt timestamps violate chronological integrity.");
+  }
+
+  // 4. Status precondition: only published events can receive detail edits
+  if (currentEvent.status !== EVENT_STATUSES.PUBLISHED) {
+    throw new Error("Only published events can be edited. Cancelled events must be republished before editing.");
+  }
+
+  // 5. Derived temporal state evaluation
+  const state = getEventTemporalState(currentEvent, refNow);
+  if (state === null) {
+    throw new Error("Unable to resolve valid event temporal state.");
+  }
+  if (state === "completed") {
+    throw new Error("Completed events are read-only and cannot be modified.");
+  }
+  if (state !== "upcoming" && state !== "ongoing") {
+    throw new Error("Invalid event temporal state.");
+  }
+
+  const safePayload = {};
+
+  // 6. Branch A: Upcoming Events (now < startAt)
+  if (state === "upcoming") {
+    for (const key of Object.keys(updates)) {
+      if (EVENT_IMMUTABLE_FIELDS.includes(key)) {
+        throw new Error(`Cannot modify immutable event field: ${key}`);
+      }
+      if (key === "updatedAt") {
+        throw new Error("updatedAt cannot be supplied by caller.");
+      }
+      if (!UPCOMING_MUTABLE_FIELDS.includes(key)) {
+        throw new Error(`Field '${key}' is not allowed for upcoming event edits.`);
+      }
     }
-    safeUpdates[key] = value;
-  }
 
-  if (safeUpdates.category && !EVENT_CATEGORY_LIST.includes(safeUpdates.category)) {
-    throw new Error(`Invalid event category: ${safeUpdates.category}`);
-  }
-  if (safeUpdates.status && !EVENT_STATUS_LIST.includes(safeUpdates.status)) {
-    throw new Error(`Invalid event status: ${safeUpdates.status}`);
-  }
-  if (safeUpdates.visibility && !EVENT_VISIBILITY_LIST.includes(safeUpdates.visibility)) {
-    throw new Error(`Invalid event visibility: ${safeUpdates.visibility}`);
-  }
+    let resultingStartAt = existingStartAt;
+    let resultingEndAt = existingEndAt;
 
-  if (safeUpdates.startAt) {
-    safeUpdates.startAt = toFirestoreTimestamp(safeUpdates.startAt);
-  }
-  if (safeUpdates.endAt) {
-    safeUpdates.endAt = toFirestoreTimestamp(safeUpdates.endAt);
-  }
+    if (updates.startAt !== undefined) {
+      const newStartAt = normalizeTimestamp(updates.startAt);
+      if (!newStartAt || isNaN(newStartAt.getTime())) {
+        throw new Error("Invalid startAt timestamp.");
+      }
+      if (newStartAt.getTime() <= refNow.getTime()) {
+        throw new Error("Event start time must be strictly in the future.");
+      }
+      resultingStartAt = newStartAt;
+    }
 
-  if (safeUpdates.startAt && safeUpdates.endAt) {
-    const startMs = new Date(
-      typeof safeUpdates.startAt.toDate === "function"
-        ? safeUpdates.startAt.toDate()
-        : safeUpdates.startAt
-    ).getTime();
-    const endMs = new Date(
-      typeof safeUpdates.endAt.toDate === "function"
-        ? safeUpdates.endAt.toDate()
-        : safeUpdates.endAt
-    ).getTime();
-    if (endMs < startMs) {
-      throw new Error("Event end time must be after or equal to start time.");
+    if (updates.endAt !== undefined) {
+      const newEndAt = normalizeTimestamp(updates.endAt);
+      if (!newEndAt || isNaN(newEndAt.getTime())) {
+        throw new Error("Invalid endAt timestamp.");
+      }
+      resultingEndAt = newEndAt;
+    }
+
+    // Chronological sanity across all upcoming edits (including non-date edits)
+    if (resultingEndAt.getTime() < resultingStartAt.getTime()) {
+      throw new Error("End date/time must be at or after start date/time.");
+    }
+
+    // Non-date allowlisted fields
+    if (updates.title !== undefined) safePayload.title = String(updates.title).trim();
+    if (updates.slug !== undefined) safePayload.slug = String(updates.slug).trim();
+    if (updates.description !== undefined) safePayload.description = String(updates.description).trim();
+    if (updates.category !== undefined) {
+      if (!EVENT_CATEGORY_LIST.includes(updates.category)) {
+        throw new Error(`Invalid event category: ${updates.category}`);
+      }
+      safePayload.category = updates.category;
+    }
+    if (updates.location !== undefined) safePayload.location = String(updates.location).trim();
+    if (updates.organizerName !== undefined) safePayload.organizerName = String(updates.organizerName).trim();
+    if (updates.imageURL !== undefined) safePayload.imageURL = updates.imageURL || null;
+
+    // Selective timestamp canonicalization: include in payload ONLY if genuinely modified
+    if (updates.startAt !== undefined && resultingStartAt.getTime() !== existingStartAt.getTime()) {
+      safePayload.startAt = toFirestoreTimestamp(resultingStartAt);
+    }
+    if (updates.endAt !== undefined && resultingEndAt.getTime() !== existingEndAt.getTime()) {
+      safePayload.endAt = toFirestoreTimestamp(resultingEndAt);
     }
   }
 
-  if (safeUpdates.imageURL !== undefined && !safeUpdates.imageURL) {
-    safeUpdates.imageURL = null;
+  // 7. Branch B: Ongoing Events (startAt <= now <= endAt)
+  if (state === "ongoing") {
+    for (const key of Object.keys(updates)) {
+      if (EVENT_IMMUTABLE_FIELDS.includes(key)) {
+        throw new Error(`Cannot modify immutable event field: ${key}`);
+      }
+      if (key === "updatedAt") {
+        throw new Error("updatedAt cannot be supplied by caller.");
+      }
+      if (!ONGOING_MUTABLE_FIELDS.includes(key)) {
+        throw new Error(`Field '${key}' is not allowed for ongoing event edits.`);
+      }
+    }
+
+    if (updates.location !== undefined) safePayload.location = String(updates.location).trim();
+    if (updates.description !== undefined) safePayload.description = String(updates.description).trim();
+    if (updates.imageURL !== undefined) safePayload.imageURL = updates.imageURL || null;
+
+    if (updates.endAt !== undefined) {
+      const newEndAt = normalizeTimestamp(updates.endAt);
+      if (!newEndAt || isNaN(newEndAt.getTime())) {
+        throw new Error("Invalid endAt timestamp.");
+      }
+
+      if (newEndAt.getTime() === existingEndAt.getTime()) {
+        // Unchanged: omit from write payload; enforce inclusive ongoing boundary
+        if (refNow.getTime() > existingEndAt.getTime()) {
+          throw new Error("Completed events are read-only and cannot be modified.");
+        }
+      } else {
+        // Changed: extension only (cannot shorten) and must be strictly in the future
+        if (newEndAt.getTime() < existingEndAt.getTime()) {
+          throw new Error("Ongoing event end time cannot be shortened.");
+        }
+        if (newEndAt.getTime() <= refNow.getTime()) {
+          throw new Error("Extended end time must be in the future.");
+        }
+        safePayload.endAt = toFirestoreTimestamp(newEndAt);
+      }
+    } else {
+      // endAt not supplied: enforce inclusive ongoing boundary (now <= endAt)
+      if (refNow.getTime() > existingEndAt.getTime()) {
+        throw new Error("Completed events are read-only and cannot be modified.");
+      }
+    }
   }
 
-  safeUpdates.updatedAt = serverTimestamp();
+  safePayload.updatedAt = serverTimestamp();
 
   const eRef = eventDocRef(eventId);
-  await updateDoc(eRef, safeUpdates);
+  await updateDoc(eRef, safePayload);
 }
 
 /**
- * Cancels an event by setting its status to 'cancelled'.
+ * Cancels an event by transitioning its status from 'published' to 'cancelled'.
+ * Permitted only while upcoming or ongoing (now <= endAt).
  *
  * @param {string} eventId
+ * @param {object} currentEvent
+ * @param {Date|number|string} [referenceNow=new Date()]
  * @returns {Promise<void>}
  */
-export async function cancelEvent(eventId) {
-  if (!eventId || typeof eventId !== "string") {
+export async function cancelEvent(eventId, currentEvent, referenceNow = new Date()) {
+  if (!eventId || typeof eventId !== "string" || !eventId.trim()) {
     throw new Error("Event ID is required to cancel an event.");
   }
+  if (!currentEvent || typeof currentEvent !== "object") {
+    throw new Error("Current event object is required.");
+  }
+
+  const refNow = normalizeTimestamp(referenceNow);
+  if (!refNow || isNaN(refNow.getTime())) {
+    throw new Error("Invalid reference time.");
+  }
+
+  const existingStartAt = normalizeTimestamp(currentEvent.startAt);
+  const existingEndAt = normalizeTimestamp(currentEvent.endAt);
+  if (
+    !existingStartAt ||
+    !existingEndAt ||
+    isNaN(existingStartAt.getTime()) ||
+    isNaN(existingEndAt.getTime()) ||
+    existingEndAt.getTime() < existingStartAt.getTime()
+  ) {
+    throw new Error("Existing event startAt and endAt timestamps violate chronological integrity.");
+  }
+
+  if (currentEvent.status !== EVENT_STATUSES.PUBLISHED) {
+    throw new Error("Only published events can be cancelled; event is already cancelled.");
+  }
+
+  const state = getEventTemporalState(currentEvent, refNow);
+  if (state === null || state === "completed" || refNow.getTime() > existingEndAt.getTime()) {
+    throw new Error("Completed events cannot be cancelled.");
+  }
+
   const eRef = eventDocRef(eventId);
   await updateDoc(eRef, {
     status: EVENT_STATUSES.CANCELLED,
@@ -870,16 +1092,102 @@ export async function cancelEvent(eventId) {
 }
 
 /**
- * Hard deletes an event document.
- * Subject to authoritative Firestore Rules (creator or community admin).
+ * Republishes a cancelled event by transitioning its status from 'cancelled' to 'published'.
+ * Permitted only while upcoming (now < startAt).
  *
  * @param {string} eventId
+ * @param {object} currentEvent
+ * @param {Date|number|string} [referenceNow=new Date()]
  * @returns {Promise<void>}
  */
-export async function deleteEvent(eventId) {
-  if (!eventId || typeof eventId !== "string") {
+export async function republishEvent(eventId, currentEvent, referenceNow = new Date()) {
+  if (!eventId || typeof eventId !== "string" || !eventId.trim()) {
+    throw new Error("Event ID is required to republish an event.");
+  }
+  if (!currentEvent || typeof currentEvent !== "object") {
+    throw new Error("Current event object is required.");
+  }
+
+  const refNow = normalizeTimestamp(referenceNow);
+  if (!refNow || isNaN(refNow.getTime())) {
+    throw new Error("Invalid reference time.");
+  }
+
+  const existingStartAt = normalizeTimestamp(currentEvent.startAt);
+  const existingEndAt = normalizeTimestamp(currentEvent.endAt);
+  if (
+    !existingStartAt ||
+    !existingEndAt ||
+    isNaN(existingStartAt.getTime()) ||
+    isNaN(existingEndAt.getTime()) ||
+    existingEndAt.getTime() < existingStartAt.getTime()
+  ) {
+    throw new Error("Existing event startAt and endAt timestamps violate chronological integrity.");
+  }
+
+  if (currentEvent.status !== EVENT_STATUSES.CANCELLED) {
+    throw new Error("Only cancelled events can be republished.");
+  }
+
+  const state = getEventTemporalState(currentEvent, refNow);
+  if (state !== "upcoming" || refNow.getTime() >= existingStartAt.getTime()) {
+    throw new Error("Only upcoming cancelled events can be republished.");
+  }
+
+  const eRef = eventDocRef(eventId);
+  await updateDoc(eRef, {
+    status: EVENT_STATUSES.PUBLISHED,
+    updatedAt: serverTimestamp(),
+  });
+}
+
+/**
+ * Hard deletes an event document.
+ * Permitted only while upcoming (now < startAt) and with valid status (published or cancelled).
+ * Authoritative admin role check is enforced by Firestore Security Rules.
+ *
+ * @param {string} eventId
+ * @param {object} currentEvent
+ * @param {Date|number|string} [referenceNow=new Date()]
+ * @returns {Promise<void>}
+ */
+export async function deleteEvent(eventId, currentEvent, referenceNow = new Date()) {
+  if (!eventId || typeof eventId !== "string" || !eventId.trim()) {
     throw new Error("Event ID is required to delete an event.");
   }
+  if (!currentEvent || typeof currentEvent !== "object") {
+    throw new Error("Current event object is required.");
+  }
+
+  const refNow = normalizeTimestamp(referenceNow);
+  if (!refNow || isNaN(refNow.getTime())) {
+    throw new Error("Invalid reference time.");
+  }
+
+  const existingStartAt = normalizeTimestamp(currentEvent.startAt);
+  const existingEndAt = normalizeTimestamp(currentEvent.endAt);
+  if (
+    !existingStartAt ||
+    !existingEndAt ||
+    isNaN(existingStartAt.getTime()) ||
+    isNaN(existingEndAt.getTime()) ||
+    existingEndAt.getTime() < existingStartAt.getTime()
+  ) {
+    throw new Error("Existing event startAt and endAt timestamps violate chronological integrity.");
+  }
+
+  if (
+    currentEvent.status !== EVENT_STATUSES.PUBLISHED &&
+    currentEvent.status !== EVENT_STATUSES.CANCELLED
+  ) {
+    throw new Error("Invalid event status for deletion: status must be published or cancelled.");
+  }
+
+  const state = getEventTemporalState(currentEvent, refNow);
+  if (state !== "upcoming" || refNow.getTime() >= existingStartAt.getTime()) {
+    throw new Error("Only upcoming events can be deleted.");
+  }
+
   const eRef = eventDocRef(eventId);
   await deleteDoc(eRef);
 }

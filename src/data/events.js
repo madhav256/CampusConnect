@@ -27,36 +27,130 @@ const DAY_MS = 24 * HOUR_MS;
  * Immutable fields for an event document after creation.
  * Rules and service layers enforce that these fields cannot be modified.
  */
-export const EVENT_IMMUTABLE_FIELDS = [
+export const EVENT_IMMUTABLE_FIELDS = Object.freeze([
   "id",
   "campusId",
   "communityId",
   "createdBy",
   "createdAt",
-];
+  "visibility",
+]);
+
+/**
+ * Mutable fields allowed for generic detail updates on upcoming events.
+ * Reject any caller-supplied field outside this list before write.
+ */
+export const UPCOMING_MUTABLE_FIELDS = Object.freeze([
+  "title",
+  "slug",
+  "description",
+  "category",
+  "location",
+  "startAt",
+  "endAt",
+  "imageURL",
+  "organizerName",
+]);
+
+/**
+ * Mutable fields allowed for detail updates on ongoing events.
+ * Reject any caller-supplied field outside this list before write.
+ */
+export const ONGOING_MUTABLE_FIELDS = Object.freeze([
+  "location",
+  "description",
+  "imageURL",
+  "endAt",
+]);
+
+/**
+ * Normalizes any timestamp representation (Firestore Timestamp, Date, number, ISO string)
+ * to numeric milliseconds, returning null if invalid, missing, non-finite, out of range, or unparseable.
+ *
+ * @param {any} val
+ * @returns {number|null}
+ */
+function parseTimestampToMs(val) {
+  if (val === null || val === undefined) return null;
+  if (typeof val === "boolean") return null;
+
+  if (val && typeof val === "object" && ("seconds" in val || "nanoseconds" in val)) {
+    const sec = val.seconds;
+    if (typeof sec !== "number" || !Number.isInteger(sec)) {
+      return null;
+    }
+    let nano = 0;
+    if (val.nanoseconds !== undefined) {
+      nano = val.nanoseconds;
+      if (typeof nano !== "number" || !Number.isInteger(nano) || nano < 0 || nano >= 1_000_000_000) {
+        return null;
+      }
+    }
+    const ms = sec * 1000 + Math.floor(nano / 1e6);
+    return Number.isFinite(ms) && Math.abs(ms) <= 8.64e15 ? ms : null;
+  }
+
+  if (typeof val?.toMillis === "function") {
+    try {
+      const ms = val.toMillis();
+      return typeof ms === "number" && Number.isFinite(ms) && Math.abs(ms) <= 8.64e15 ? ms : null;
+    } catch {
+      return null;
+    }
+  }
+  if (typeof val?.toDate === "function") {
+    try {
+      const d = val.toDate();
+      return d instanceof Date && Number.isFinite(d.getTime()) ? d.getTime() : null;
+    } catch {
+      return null;
+    }
+  }
+  if (val instanceof Date) {
+    const ms = val.getTime();
+    return Number.isFinite(ms) ? ms : null;
+  }
+  if (typeof val === "number") {
+    return Number.isFinite(val) && Math.abs(val) <= 8.64e15 ? val : null;
+  }
+  if (typeof val === "string") {
+    const trimmed = val.trim();
+    if (!trimmed) return null;
+    const d = new Date(trimmed);
+    const ms = d.getTime();
+    return Number.isFinite(ms) ? ms : null;
+  }
+  return null;
+}
 
 /**
  * Pure domain helper to calculate the derived temporal state of an event.
  * Avoids storing brittle completion status in the database.
+ * Fails closed by returning null on missing, malformed, or inverted timestamps.
  *
  * @param {object} event - Event object with startAt and endAt timestamps
  * @param {Date|number|string} [referenceDate=new Date()] - Reference point in time
- * @returns {"upcoming" | "ongoing" | "completed"}
+ * @returns {"upcoming" | "ongoing" | "completed" | null}
  */
 export function getEventTemporalState(event, referenceDate = new Date()) {
-  if (!event || !event.startAt || !event.endAt) {
-    return "upcoming";
+  if (!event || typeof event !== "object") {
+    return null;
   }
 
-  const nowMs = new Date(referenceDate).getTime();
-  const startMs =
-    typeof event.startAt?.toMillis === "function"
-      ? event.startAt.toMillis()
-      : new Date(event.startAt).getTime();
-  const endMs =
-    typeof event.endAt?.toMillis === "function"
-      ? event.endAt.toMillis()
-      : new Date(event.endAt).getTime();
+  const nowMs = parseTimestampToMs(referenceDate);
+  if (nowMs === null) {
+    return null;
+  }
+
+  const startMs = parseTimestampToMs(event.startAt);
+  const endMs = parseTimestampToMs(event.endAt);
+  if (startMs === null || endMs === null) {
+    return null;
+  }
+
+  if (endMs < startMs) {
+    return null;
+  }
 
   if (nowMs < startMs) {
     return "upcoming";

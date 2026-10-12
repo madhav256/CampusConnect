@@ -26,6 +26,41 @@ import { useEventRsvp } from "../../hooks/useEventRsvp.js";
  * @param {string} [props.className=""] - Additional CSS classes
  * @returns {React.ReactElement|null}
  */
+/**
+ * Validates that an object satisfies the complete EventResolution contract:
+ * - status: "available" | "inaccessible" | "error"
+ * - fields 'status', 'event', and 'error' must exist
+ * - available: non-null event object and error: null
+ * - inaccessible: event: null and error: null
+ * - error: event: null and an actual Error instance
+ *
+ * @param {any} resolution
+ * @returns {boolean}
+ */
+function isValidEventResolution(resolution) {
+  if (!resolution || typeof resolution !== "object" || Array.isArray(resolution)) {
+    return false;
+  }
+  if (!("status" in resolution) || !("event" in resolution) || !("error" in resolution)) {
+    return false;
+  }
+  if (resolution.status === "available") {
+    return (
+      typeof resolution.event === "object" &&
+      resolution.event !== null &&
+      !Array.isArray(resolution.event) &&
+      resolution.error === null
+    );
+  }
+  if (resolution.status === "inaccessible") {
+    return resolution.event === null && resolution.error === null;
+  }
+  if (resolution.status === "error") {
+    return resolution.event === null && resolution.error instanceof Error;
+  }
+  return false;
+}
+
 export default function RsvpStatusBadge({
   state: propState,
   eventId,
@@ -40,11 +75,7 @@ export default function RsvpStatusBadge({
   const hookResult = useEventRsvp(shouldHook ? eventId : null);
   const resolvedRsvp = propRsvp !== undefined ? propRsvp : hookResult?.rsvp;
 
-  const isValidResolution = Boolean(
-    resolution &&
-      typeof resolution === "object" &&
-      ["available", "inaccessible", "error"].includes(resolution.status)
-  );
+  const isValidResolution = isValidEventResolution(resolution);
 
   const displayState =
     propState ||

@@ -477,6 +477,66 @@ describe("Milestone 21 — Unit 21.4: RSVP Detail Interaction UI", () => {
       expect(badge).toBeTruthy();
       expect(getTextContent(badge)).toContain("Unavailable");
     });
+
+    describe("malformed resolution handling", () => {
+      it("does not call getRsvpDisplayState when passed malformed resolution objects and preserves basic RSVP fallback", () => {
+        const spy = vi.spyOn(eventRsvpsModule, "getRsvpDisplayState");
+        try {
+          const malformedResolutions = [
+            // Missing fields or recognized status alone
+            { status: "available" },
+            { status: "inaccessible" },
+            { status: "error" },
+            // available with null event
+            { status: "available", event: null, error: null },
+            // available with non-null error
+            { status: "available", event: sampleEvent, error: "not-null-error" },
+            // inaccessible with non-null event
+            { status: "inaccessible", event: sampleEvent, error: null },
+            // inaccessible with non-null error
+            { status: "inaccessible", event: null, error: new Error("oops") },
+            // error without an actual Error instance
+            { status: "error", event: null, error: null },
+            { status: "error", event: null, error: "string error" },
+            // error with non-null event
+            { status: "error", event: sampleEvent, error: new Error("oops") },
+            // unrecognized status
+            { status: "unrecognized", event: sampleEvent, error: null },
+            // primitives, arrays, raw events
+            "available",
+            123,
+            [],
+            sampleEvent,
+          ];
+
+          for (const malformed of malformedResolutions) {
+            // When user has an RSVP, renders Going via basic presence without calling getRsvpDisplayState
+            const { result: goingResult } = renderComponent(RsvpStatusBadge, {
+              resolution: malformed,
+              rsvp: sampleRsvp,
+            });
+            const goingBadge = findByTestId(goingResult.current, "rsvp-status-badge");
+            expect(goingBadge).toBeTruthy();
+            expect(getTextContent(goingBadge)).toContain("Going");
+
+            // When user does not have an RSVP, renders Not Going via basic presence without calling getRsvpDisplayState
+            const { result: notGoingResult } = renderComponent(RsvpStatusBadge, {
+              resolution: malformed,
+              rsvp: null,
+              showNotGoing: true,
+            });
+            const notGoingBadge = findByTestId(notGoingResult.current, "rsvp-status-badge");
+            expect(notGoingBadge).toBeTruthy();
+            expect(getTextContent(notGoingBadge)).toContain("Not Going");
+          }
+
+          // In all iterations, getRsvpDisplayState was NEVER called
+          expect(spy).not.toHaveBeenCalled();
+        } finally {
+          spy.mockRestore();
+        }
+      });
+    });
   });
 
   // =========================================================================

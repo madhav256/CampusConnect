@@ -493,13 +493,16 @@ Example: `apex-ai-club_e2e-student-a`. This deterministic pattern guarantees ide
   - User campus parity validated (`campusId == getUserCampusId()`).
   - Initial role restricted to `member` (`d.role == 'member'`), preventing self-assigned privilege escalation to `admin` or `moderator`.
   - Initial status restricted to `active` or `pending`.
-- **Update Restrictions:**
-  - Member self-updates: Owner can modify only `status` and `updatedAt`. The `role` field is strictly immutable for the member (`d.role == r.role`), rejecting self-escalation attempts.
-  - Community moderator updates: Validated active community moderators (`isCommunityModerator(communityId)`) can manage member status (`active`, `removed`) for regular members (`r.role == 'member'`), but cannot alter member roles, modify admins, or escalate privileges.
-  - Community admin updates: Validated active community admins (`isCommunityAdmin(communityId)`) can update member roles (`member`, `moderator`, `admin`) and statuses (`active`, `removed`, `pending`).
+- **Update Restrictions (Membership Integrity — H3):**
+  - Member self-updates: Owners cannot change their membership status to `active` from any status. Owner updates are strictly restricted to voluntary departure from an active membership (`r.status == 'active' && d.status == 'removed'`). Self-reactivation from `removed → active` or `pending → active` is strictly denied. The `role` field and all other document fields remain immutable for the member (`d.role == r.role`, `immutableFieldsPreserved`), rejecting privilege escalation and field tampering.
+  - Community moderator updates: Validated active community moderators (`isCommunityModerator(communityId)`) can manage membership status (`active`, `removed`, `pending`) exclusively for regular members (`r.role == 'member'`) within the same tenant campus (`r.campusId == getUserCampusId()`). Moderators cannot modify roles (`d.role == r.role`), manage fellow moderators or administrators, or escalate privileges.
+  - Community admin updates: Validated active community admins (`isCommunityAdmin(communityId)`) retain full authority to update member roles (`member`, `moderator`, `admin`) and statuses (`active`, `removed`, `pending`), including member reinstatement (`removed → active`) and applicant approval (`pending → active`).
   - Tenant boundary isolation: All moderation updates require tenant parity (`r.campusId == getUserCampusId()`); cross-campus moderation is denied.
   - Arbitrary updates: Unrelated non-moderator/non-admin users cannot alter any membership document.
-- **Deletion:** A student can leave a community by deleting their own membership document (`request.auth.uid == resource.data.userId`), or an active community admin can delete the document.
+- **Deletion & Anti-Self-Reactivation (H3):**
+  - Owner-initiated deletion is restricted to active memberships (`request.auth.uid == resource.data.userId && resource.data.status == 'active'`), supporting voluntary departure. Owners cannot delete membership documents whose current status is `removed` or `pending`.
+  - Together with the deterministic document ID (`{communityId}_{userId}`), an existing non-active document (`removed` or `pending`) permanently blocks self-recreation or overwriting until an authorized administrator intervenes.
+  - Active community administrators (`isCommunityAdmin(communityId)`) retain authority to delete any membership document regardless of status.
 
 ## 14. `events/{eventId}` (Campus Events & Activities Authority)
 

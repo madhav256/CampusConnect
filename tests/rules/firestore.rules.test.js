@@ -3588,12 +3588,20 @@ describe("Milestone 18 — Unit 18.2: Campuses & Multi-Tenancy Rules", () => {
           "apex-ai-club",
           TEST_UIDS.alice,
           APEX_CAMPUS_ID,
-          COMMUNITY_MEMBER_ROLES.MEMBER
+          COMMUNITY_MEMBER_ROLES.MEMBER,
+          COMMUNITY_MEMBER_STATUSES.ACTIVE
         );
 
         await assertSucceeds(
           communityMemberRef(alice, membershipId).delete()
         );
+
+        // Verify document is absent after successful deletion
+        let snapshot;
+        await testEnvironment.withSecurityRulesDisabled(async (context) => {
+          snapshot = await context.firestore().collection("communityMembers").doc(membershipId).get();
+        });
+        expect(snapshot.exists).toBe(false);
       });
 
       it("allows community admin to update another user's role and status", async () => {
@@ -3625,6 +3633,283 @@ describe("Milestone 18 — Unit 18.2: Campuses & Multi-Tenancy Rules", () => {
             updatedAt: serverTimestamp(),
           })
         );
+      });
+
+      describe("H3: Community Membership Integrity & Anti-Self-Reactivation", () => {
+        const alice = contextFor(TEST_UIDS.alice);
+        const aliceMembershipId = `apex-ai-club_${TEST_UIDS.alice}`;
+
+        it("allows active member to voluntarily leave by updating status to removed", async () => {
+          await seedCommunityMember(
+            aliceMembershipId,
+            "apex-ai-club",
+            TEST_UIDS.alice,
+            APEX_CAMPUS_ID,
+            COMMUNITY_MEMBER_ROLES.MEMBER,
+            COMMUNITY_MEMBER_STATUSES.ACTIVE
+          );
+
+          await assertSucceeds(
+            communityMemberRef(alice, aliceMembershipId).update({
+              status: COMMUNITY_MEMBER_STATUSES.REMOVED,
+              updatedAt: serverTimestamp(),
+            })
+          );
+        });
+
+        it("denies owner from updating status to active when currently removed", async () => {
+          await seedCommunityMember(
+            aliceMembershipId,
+            "apex-ai-club",
+            TEST_UIDS.alice,
+            APEX_CAMPUS_ID,
+            COMMUNITY_MEMBER_ROLES.MEMBER,
+            COMMUNITY_MEMBER_STATUSES.REMOVED
+          );
+
+          await expectPermissionDenied(() =>
+            communityMemberRef(alice, aliceMembershipId).update({
+              status: COMMUNITY_MEMBER_STATUSES.ACTIVE,
+              updatedAt: serverTimestamp(),
+            })
+          );
+        });
+
+        it("denies owner from updating status to active when currently pending", async () => {
+          await seedCommunityMember(
+            aliceMembershipId,
+            "apex-ai-club",
+            TEST_UIDS.alice,
+            APEX_CAMPUS_ID,
+            COMMUNITY_MEMBER_ROLES.MEMBER,
+            COMMUNITY_MEMBER_STATUSES.PENDING
+          );
+
+          await expectPermissionDenied(() =>
+            communityMemberRef(alice, aliceMembershipId).update({
+              status: COMMUNITY_MEMBER_STATUSES.ACTIVE,
+              updatedAt: serverTimestamp(),
+            })
+          );
+        });
+
+        it("denies owner from altering protected fields while attempting update", async () => {
+          await seedCommunityMember(
+            aliceMembershipId,
+            "apex-ai-club",
+            TEST_UIDS.alice,
+            APEX_CAMPUS_ID,
+            COMMUNITY_MEMBER_ROLES.MEMBER,
+            COMMUNITY_MEMBER_STATUSES.ACTIVE
+          );
+
+          // Attempting to change role along with status to removed
+          await expectPermissionDenied(() =>
+            communityMemberRef(alice, aliceMembershipId).update({
+              role: COMMUNITY_MEMBER_ROLES.MODERATOR,
+              status: COMMUNITY_MEMBER_STATUSES.REMOVED,
+              updatedAt: serverTimestamp(),
+            })
+          );
+
+          // Attempting to change campusId
+          await expectPermissionDenied(() =>
+            communityMemberRef(alice, aliceMembershipId).update({
+              campusId: ST_JUDE_CAMPUS_ID,
+              status: COMMUNITY_MEMBER_STATUSES.REMOVED,
+              updatedAt: serverTimestamp(),
+            })
+          );
+        });
+
+        it("denies owner from deleting their own removed membership", async () => {
+          await seedCommunityMember(
+            aliceMembershipId,
+            "apex-ai-club",
+            TEST_UIDS.alice,
+            APEX_CAMPUS_ID,
+            COMMUNITY_MEMBER_ROLES.MEMBER,
+            COMMUNITY_MEMBER_STATUSES.REMOVED
+          );
+
+          await expectPermissionDenied(() =>
+            communityMemberRef(alice, aliceMembershipId).delete()
+          );
+        });
+
+        it("denies owner from deleting their own pending membership", async () => {
+          await seedCommunityMember(
+            aliceMembershipId,
+            "apex-ai-club",
+            TEST_UIDS.alice,
+            APEX_CAMPUS_ID,
+            COMMUNITY_MEMBER_ROLES.MEMBER,
+            COMMUNITY_MEMBER_STATUSES.PENDING
+          );
+
+          await expectPermissionDenied(() =>
+            communityMemberRef(alice, aliceMembershipId).delete()
+          );
+        });
+
+        it("denies owner from recreating or overwriting an existing non-active document as active", async () => {
+          await seedCommunityMember(
+            aliceMembershipId,
+            "apex-ai-club",
+            TEST_UIDS.alice,
+            APEX_CAMPUS_ID,
+            COMMUNITY_MEMBER_ROLES.MEMBER,
+            COMMUNITY_MEMBER_STATUSES.REMOVED
+          );
+
+          // Attempting to overwrite the existing removed document via set()
+          await expectPermissionDenied(() =>
+            communityMemberRef(alice, aliceMembershipId).set({
+              id: aliceMembershipId,
+              communityId: "apex-ai-club",
+              userId: TEST_UIDS.alice,
+              campusId: APEX_CAMPUS_ID,
+              role: COMMUNITY_MEMBER_ROLES.MEMBER,
+              status: COMMUNITY_MEMBER_STATUSES.ACTIVE,
+              joinedAt: serverTimestamp(),
+              updatedAt: serverTimestamp(),
+            })
+          );
+        });
+
+        it("allows legitimate fresh join when no membership document exists", async () => {
+          const carol = contextFor(TEST_UIDS.carol);
+          const carolMembershipId = `apex-ai-club_${TEST_UIDS.carol}`;
+
+          await assertSucceeds(
+            communityMemberRef(carol, carolMembershipId).set({
+              id: carolMembershipId,
+              communityId: "apex-ai-club",
+              userId: TEST_UIDS.carol,
+              campusId: APEX_CAMPUS_ID,
+              role: COMMUNITY_MEMBER_ROLES.MEMBER,
+              status: COMMUNITY_MEMBER_STATUSES.ACTIVE,
+              joinedAt: serverTimestamp(),
+              updatedAt: serverTimestamp(),
+            })
+          );
+        });
+
+        it("allows community administrator to reinstate a removed member", async () => {
+          const carol = contextFor(TEST_UIDS.carol);
+          const carolMembershipId = `apex-ai-club_${TEST_UIDS.carol}`;
+
+          // Carol is active admin
+          await seedCommunityMember(
+            carolMembershipId,
+            "apex-ai-club",
+            TEST_UIDS.carol,
+            APEX_CAMPUS_ID,
+            COMMUNITY_MEMBER_ROLES.ADMIN,
+            COMMUNITY_MEMBER_STATUSES.ACTIVE
+          );
+          // Alice is removed member
+          await seedCommunityMember(
+            aliceMembershipId,
+            "apex-ai-club",
+            TEST_UIDS.alice,
+            APEX_CAMPUS_ID,
+            COMMUNITY_MEMBER_ROLES.MEMBER,
+            COMMUNITY_MEMBER_STATUSES.REMOVED
+          );
+
+          // Admin reinstates Alice: removed -> active
+          await assertSucceeds(
+            communityMemberRef(carol, aliceMembershipId).update({
+              status: COMMUNITY_MEMBER_STATUSES.ACTIVE,
+              updatedAt: serverTimestamp(),
+            })
+          );
+        });
+
+        it("allows community administrator to approve a pending member", async () => {
+          const carol = contextFor(TEST_UIDS.carol);
+          const carolMembershipId = `apex-ai-club_${TEST_UIDS.carol}`;
+
+          // Carol is active admin
+          await seedCommunityMember(
+            carolMembershipId,
+            "apex-ai-club",
+            TEST_UIDS.carol,
+            APEX_CAMPUS_ID,
+            COMMUNITY_MEMBER_ROLES.ADMIN,
+            COMMUNITY_MEMBER_STATUSES.ACTIVE
+          );
+          // Alice is pending member
+          await seedCommunityMember(
+            aliceMembershipId,
+            "apex-ai-club",
+            TEST_UIDS.alice,
+            APEX_CAMPUS_ID,
+            COMMUNITY_MEMBER_ROLES.MEMBER,
+            COMMUNITY_MEMBER_STATUSES.PENDING
+          );
+
+          // Admin approves Alice: pending -> active
+          await assertSucceeds(
+            communityMemberRef(carol, aliceMembershipId).update({
+              status: COMMUNITY_MEMBER_STATUSES.ACTIVE,
+              updatedAt: serverTimestamp(),
+            })
+          );
+        });
+
+        it("allows community administrator to delete a removed or pending membership", async () => {
+          const carol = contextFor(TEST_UIDS.carol);
+          const carolMembershipId = `apex-ai-club_${TEST_UIDS.carol}`;
+          const bobMembershipId = `apex-ai-club_${TEST_UIDS.bob}`;
+
+          // Carol is active admin
+          await seedCommunityMember(
+            carolMembershipId,
+            "apex-ai-club",
+            TEST_UIDS.carol,
+            APEX_CAMPUS_ID,
+            COMMUNITY_MEMBER_ROLES.ADMIN,
+            COMMUNITY_MEMBER_STATUSES.ACTIVE
+          );
+
+          // 1. Admin deletes removed member (Alice)
+          await seedCommunityMember(
+            aliceMembershipId,
+            "apex-ai-club",
+            TEST_UIDS.alice,
+            APEX_CAMPUS_ID,
+            COMMUNITY_MEMBER_ROLES.MEMBER,
+            COMMUNITY_MEMBER_STATUSES.REMOVED
+          );
+          await assertSucceeds(
+            communityMemberRef(carol, aliceMembershipId).delete()
+          );
+          let removedSnapshot;
+          await testEnvironment.withSecurityRulesDisabled(async (context) => {
+            removedSnapshot = await context.firestore().collection("communityMembers").doc(aliceMembershipId).get();
+          });
+          expect(removedSnapshot.exists).toBe(false);
+
+          // 2. Admin deletes pending member (Bob)
+          await seedCommunityMember(
+            bobMembershipId,
+            "apex-ai-club",
+            TEST_UIDS.bob,
+            APEX_CAMPUS_ID,
+            COMMUNITY_MEMBER_ROLES.MEMBER,
+            COMMUNITY_MEMBER_STATUSES.PENDING
+          );
+          await assertSucceeds(
+            communityMemberRef(carol, bobMembershipId).delete()
+          );
+          let pendingSnapshot;
+          await testEnvironment.withSecurityRulesDisabled(async (context) => {
+            pendingSnapshot = await context.firestore().collection("communityMembers").doc(bobMembershipId).get();
+          });
+          expect(pendingSnapshot.exists).toBe(false);
+        });
       });
 
       it("same-campus community member read succeeds, cross-campus read fails", async () => {

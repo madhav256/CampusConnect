@@ -876,7 +876,8 @@ service cloud.firestore {
           immutableFieldsPreserved &&
           d.role == r.role &&
           d.diff(r).affectedKeys().hasOnly(['status', 'updatedAt']) &&
-          d.status in ['active', 'removed', 'pending'];
+          r.status == 'active' &&
+          d.status == 'removed';
 
         let validAdminUpdate =
           isAdmin &&
@@ -906,7 +907,7 @@ service cloud.firestore {
       allow update: if isAuthenticated() && isValidCommunityMemberUpdate(membershipId);
 
       allow delete: if isAuthenticated() && (
-        request.auth.uid == resource.data.userId ||
+        (request.auth.uid == resource.data.userId && resource.data.status == 'active') ||
         isCommunityAdmin(resource.data.communityId)
       );
     }

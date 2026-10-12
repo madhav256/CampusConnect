@@ -105,9 +105,11 @@ vi.mock("../../src/hooks/useEligibleCommunities", () => ({
 vi.mock("../../src/services/eventService", () => ({
   createEvent: (...args) => mocks.createEvent(...args),
   getEventById: vi.fn(),
+  resolveEvent: vi.fn(),
   getEventsByCampus: vi.fn(),
   getEventsByCommunity: vi.fn(),
   subscribeToEvent: vi.fn(() => vi.fn()),
+  subscribeToEventResolution: vi.fn(() => vi.fn()),
   subscribeToCampusEvents: vi.fn(() => vi.fn()),
   subscribeToCommunityEvents: vi.fn(() => vi.fn()),
 }));

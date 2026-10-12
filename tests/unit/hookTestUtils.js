@@ -26,6 +26,8 @@ export function renderHook(hookFn, { initialProps } = {}) {
   const states = [];
   let effectIndex = 0;
   const effects = [];
+  let layoutEffectIndex = 0;
+  const layoutEffects = [];
   let memoIndex = 0;
   const memos = [];
   let refIndex = 0;
@@ -53,6 +55,7 @@ export function renderHook(hookFn, { initialProps } = {}) {
 
     stateIndex = 0;
     effectIndex = 0;
+    layoutEffectIndex = 0;
     memoIndex = 0;
     refIndex = 0;
     currentProps = props;
@@ -84,6 +87,21 @@ export function renderHook(hookFn, { initialProps } = {}) {
           !deps ||
           deps.some((d, idx) => !Object.is(d, prev.deps[idx]));
         effects[i] = {
+          effectFn,
+          deps,
+          hasChanged,
+          cleanup: prev?.cleanup,
+        };
+      },
+
+      useLayoutEffect(effectFn, deps) {
+        const i = layoutEffectIndex++;
+        const prev = layoutEffects[i];
+        const hasChanged =
+          !prev ||
+          !deps ||
+          deps.some((d, idx) => !Object.is(d, prev.deps[idx]));
+        layoutEffects[i] = {
           effectFn,
           deps,
           hasChanged,
@@ -132,7 +150,18 @@ export function renderHook(hookFn, { initialProps } = {}) {
 
     result.current = hookFn(currentProps);
 
-    // Run active effects whose dependencies changed
+    // Run active layout effects synchronously in commit phase
+    for (const eff of layoutEffects) {
+      if (eff.hasChanged) {
+        if (typeof eff.cleanup === "function") {
+          eff.cleanup();
+        }
+        eff.cleanup = eff.effectFn();
+        eff.hasChanged = false;
+      }
+    }
+
+    // Run active passive effects whose dependencies changed
     for (const eff of effects) {
       if (eff.hasChanged) {
         if (typeof eff.cleanup === "function") {
@@ -158,6 +187,12 @@ export function renderHook(hookFn, { initialProps } = {}) {
     rerender: (newProps) => executeRender(newProps),
     unmount: () => {
       isMounted = false;
+      for (const eff of layoutEffects) {
+        if (typeof eff?.cleanup === "function") {
+          eff.cleanup();
+          eff.cleanup = null;
+        }
+      }
       for (const eff of effects) {
         if (typeof eff?.cleanup === "function") {
           eff.cleanup();

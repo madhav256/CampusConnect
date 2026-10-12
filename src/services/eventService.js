@@ -31,8 +31,6 @@ import {
 import {
   EVENT_IMMUTABLE_FIELDS,
   getEventTemporalState,
-  EVENTS,
-  EVENT_LIST,
 } from "../data/events.js";
 
 function requireDb() {
@@ -105,12 +103,26 @@ function toFirestoreTimestamp(val) {
 
 /**
  * Normalizes a raw Firestore event document into the locked 17-field event contract.
+ * Supports both (eventId, data) and (documentSnapshot) or (documentObject) signatures.
  *
- * @param {string} eventId
- * @param {object|null} data
+ * @param {string|import("firebase/firestore").DocumentSnapshot|object} eventIdOrDoc
+ * @param {object|null} [maybeData]
  * @returns {object|null}
  */
-export function normalizeEvent(eventId, data) {
+export function normalizeEvent(eventIdOrDoc, maybeData) {
+  let eventId = eventIdOrDoc;
+  let data = maybeData;
+
+  if (eventIdOrDoc && typeof eventIdOrDoc === "object") {
+    if (typeof eventIdOrDoc.data === "function") {
+      eventId = eventIdOrDoc.id;
+      data = eventIdOrDoc.data();
+    } else if (!maybeData) {
+      eventId = eventIdOrDoc.id;
+      data = eventIdOrDoc;
+    }
+  }
+
   if (!data) return null;
 
   return {
@@ -133,6 +145,7 @@ export function normalizeEvent(eventId, data) {
     updatedAt: normalizeTimestamp(data.updatedAt),
   };
 }
+
 
 /**
  * Sorts normalized events by startAt date.
@@ -210,8 +223,140 @@ function normalizeQueryArgs(optionsOrCallback, maybeCallback, maybeOnError) {
 }
 
 /**
+ * @typedef {Object} EventResolution
+ * @property {"available" | "inaccessible" | "error"} status
+ * @property {object | null} event
+ * @property {Error | null} error
+ */
+
+/**
+ * Maps a Firestore document snapshot to an EventResolution.
+ *
+ * @param {import("firebase/firestore").DocumentSnapshot} snap
+ * @returns {EventResolution}
+ */
+export function mapSnapshotToResolution(snap) {
+  if (snap && typeof snap.exists === "function" && snap.exists()) {
+    return {
+      status: "available",
+      event: normalizeEvent(snap.id, snap.data()),
+      error: null,
+    };
+  }
+  return {
+    status: "inaccessible",
+    event: null,
+    error: null,
+  };
+}
+
+/**
+ * Maps a Firestore error to an EventResolution.
+ * Permission-denied errors map to 'inaccessible', while unexpected errors map to 'error'.
+ *
+ * @param {any} err
+ * @returns {EventResolution}
+ */
+export function mapErrorToResolution(err) {
+  const code = err?.code;
+  const message = err?.message || "";
+  if (
+    code === "permission-denied" ||
+    code === "permission_denied" ||
+    message.includes("permission-denied") ||
+    message.includes("Missing or insufficient permissions")
+  ) {
+    return {
+      status: "inaccessible",
+      event: null,
+      error: null,
+    };
+  }
+  return {
+    status: "error",
+    event: null,
+    error: err instanceof Error ? err : new Error(String(err || "Unknown Firestore error")),
+  };
+}
+
+/**
+ * Authoritative single event resolution from Firestore (§12.4).
+ * Strictly queries Firestore with zero local fixture fallback.
+ * Maps:
+ * - snapshot exists -> { status: "available", event: NormalizedEvent, error: null }
+ * - snapshot does not exist -> { status: "inaccessible", event: null, error: null }
+ * - permission-denied -> { status: "inaccessible", event: null, error: null }
+ * - other errors -> { status: "error", event: null, error: Error }
+ *
+ * @param {string} eventId
+ * @returns {Promise<EventResolution>}
+ */
+export async function resolveEvent(eventId) {
+  if (!eventId || typeof eventId !== "string") {
+    return {
+      status: "inaccessible",
+      event: null,
+      error: null,
+    };
+  }
+
+  try {
+    const eRef = eventDocRef(eventId);
+    const snap = await getDoc(eRef);
+    return mapSnapshotToResolution(snap);
+  } catch (err) {
+    return mapErrorToResolution(err);
+  }
+}
+
+/**
+ * Subscribes in real-time to authoritative single event resolution (§12.4).
+ * Emits EventResolution objects ("available" | "inaccessible" | "error").
+ *
+ * @param {string} eventId
+ * @param {(resolution: EventResolution) => void} callback
+ * @returns {() => void} Unsubscribe function
+ */
+export function subscribeToEventResolution(eventId, callback) {
+  if (!eventId || typeof eventId !== "string") {
+    if (typeof callback === "function") {
+      callback({
+        status: "inaccessible",
+        event: null,
+        error: null,
+      });
+    }
+    return () => {};
+  }
+
+  try {
+    const eRef = eventDocRef(eventId);
+    return onSnapshot(
+      eRef,
+      (snap) => {
+        if (typeof callback === "function") {
+          callback(mapSnapshotToResolution(snap));
+        }
+      },
+      (err) => {
+        if (typeof callback === "function") {
+          callback(mapErrorToResolution(err));
+        }
+      }
+    );
+  } catch (err) {
+    if (typeof callback === "function") {
+      callback(mapErrorToResolution(err));
+    }
+    return () => {};
+  }
+}
+
+/**
+ * Legacy getter for backward compatibility.
  * Fetches an individual event by document ID.
- * Returns null if the event is not found.
+ * Returns null if the event document does not exist.
+ * Propagates errors without fixture fallback.
  *
  * @param {string} eventId
  * @returns {Promise<object|null>}
@@ -221,31 +366,21 @@ export async function getEventById(eventId) {
     return null;
   }
 
-  try {
-    const eRef = eventDocRef(eventId);
-    const snap = await getDoc(eRef);
+  const eRef = eventDocRef(eventId);
+  const snap = await getDoc(eRef);
 
-    if (!snap.exists()) {
-      if (EVENTS[eventId]) {
-        return normalizeEvent(eventId, EVENTS[eventId]);
-      }
-      return null;
-    }
-
-    return normalizeEvent(snap.id, snap.data());
-  } catch (err) {
-    if (EVENTS[eventId]) {
-      return normalizeEvent(eventId, EVENTS[eventId]);
-    }
-    throw err;
+  if (!snap.exists()) {
+    return null;
   }
+
+  return normalizeEvent(snap.id, snap.data());
 }
 
-/** Alias for getEventById */
+/** Legacy alias for getEventById */
 export const getEvent = getEventById;
 
 /**
- * Subscribes in real-time to a single event document.
+ * Subscribes in real-time to a single event document (legacy contract).
  *
  * @param {string} eventId
  * @param {function} callback
@@ -264,9 +399,9 @@ export function subscribeToEvent(eventId, callback, onError) {
       eRef,
       (snap) => {
         if (snap.exists()) {
-          callback(normalizeEvent(snap.id, snap.data()));
+          if (callback) callback(normalizeEvent(snap.id, snap.data()));
         } else {
-          callback(null);
+          if (callback) callback(null);
         }
       },
       (err) => {
@@ -302,31 +437,16 @@ export async function getEventsByCampus(campusId, options = {}) {
     constraints.push(where("category", "==", options.category));
   }
 
-  try {
-    const colRef = eventsCollectionRef();
-    const q = query(colRef, ...constraints);
-    const snap = await getDocs(q);
+  const colRef = eventsCollectionRef();
+  const q = query(colRef, ...constraints);
+  const snap = await getDocs(q);
 
-    if (snap.empty) {
-      const fallback = EVENT_LIST.filter(
-        (e) => e.campusId === campusId && e.visibility === visibility
-      );
-      const normalized = fallback.map((e) => normalizeEvent(e.id, e));
-      return filterEvents(sortEventsByDate(normalized, options.sortOrder), options);
-    }
-
-    const items = snap.docs.map((d) => normalizeEvent(d.id, d.data()));
-    return filterEvents(sortEventsByDate(items, options.sortOrder), options);
-  } catch (err) {
-    const fallback = EVENT_LIST.filter(
-      (e) => e.campusId === campusId && e.visibility === visibility
-    );
-    if (fallback.length > 0) {
-      const normalized = fallback.map((e) => normalizeEvent(e.id, e));
-      return filterEvents(sortEventsByDate(normalized, options.sortOrder), options);
-    }
-    throw err;
+  if (snap.empty) {
+    return [];
   }
+
+  const items = snap.docs.map((d) => normalizeEvent(d.id, d.data()));
+  return filterEvents(sortEventsByDate(items, options.sortOrder), options);
 }
 
 /**
@@ -452,45 +572,16 @@ export async function getEventsByCommunity(communityId, options = {}) {
     constraints.push(where("status", "==", options.status));
   }
 
-  try {
-    const colRef = eventsCollectionRef();
-    const q = query(colRef, ...constraints);
-    const snap = await getDocs(q);
+  const colRef = eventsCollectionRef();
+  const q = query(colRef, ...constraints);
+  const snap = await getDocs(q);
 
-    if (snap.empty) {
-      let fallback = EVENT_LIST.filter(
-        (e) => e.communityId === communityId && e.campusId === campusId
-      );
-      if (options.visibility) {
-        fallback = fallback.filter((e) => e.visibility === options.visibility);
-      } else if (!isMember) {
-        fallback = fallback.filter(
-          (e) => e.visibility === EVENT_VISIBILITIES.CAMPUS_PUBLIC
-        );
-      }
-      const normalized = fallback.map((e) => normalizeEvent(e.id, e));
-      return filterEvents(sortEventsByDate(normalized, options.sortOrder), options);
-    }
-
-    const items = snap.docs.map((d) => normalizeEvent(d.id, d.data()));
-    return filterEvents(sortEventsByDate(items, options.sortOrder), options);
-  } catch (err) {
-    let fallback = EVENT_LIST.filter(
-      (e) => e.communityId === communityId && e.campusId === campusId
-    );
-    if (options.visibility) {
-      fallback = fallback.filter((e) => e.visibility === options.visibility);
-    } else if (!isMember) {
-      fallback = fallback.filter(
-        (e) => e.visibility === EVENT_VISIBILITIES.CAMPUS_PUBLIC
-      );
-    }
-    if (fallback.length > 0) {
-      const normalized = fallback.map((e) => normalizeEvent(e.id, e));
-      return filterEvents(sortEventsByDate(normalized, options.sortOrder), options);
-    }
-    throw err;
+  if (snap.empty) {
+    return [];
   }
+
+  const items = snap.docs.map((d) => normalizeEvent(d.id, d.data()));
+  return filterEvents(sortEventsByDate(items, options.sortOrder), options);
 }
 
 /**

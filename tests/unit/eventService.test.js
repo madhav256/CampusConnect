@@ -68,9 +68,13 @@ import {
   eventsCollectionRef,
   normalizeTimestamp,
   normalizeEvent,
+  mapSnapshotToResolution,
+  mapErrorToResolution,
   sortEventsByDate,
   filterEvents,
   getEventById,
+  resolveEvent,
+  subscribeToEventResolution,
   getEvent,
   subscribeToEvent,
   getEventsByCampus,
@@ -152,6 +156,42 @@ describe("Milestone 20 — Unit 20.3: Event Service", () => {
         createdAt: null,
         updatedAt: null,
       });
+    });
+
+    it("normalizeEvent extracts id and data from a Firestore DocumentSnapshot object", () => {
+      const mockSnap = {
+        id: "snap-event-101",
+        data: () => ({
+          campusId: APEX_CAMPUS_ID,
+          title: "Snapshot Event",
+          category: EVENT_CATEGORIES.SOCIAL,
+          startAt: new Date("2026-10-20T10:00:00Z"),
+          endAt: new Date("2026-10-20T12:00:00Z"),
+        }),
+      };
+
+      const normalized = normalizeEvent(mockSnap);
+      expect(normalized).not.toBeNull();
+      expect(normalized.id).toBe("snap-event-101");
+      expect(normalized.title).toBe("Snapshot Event");
+      expect(normalized.category).toBe(EVENT_CATEGORIES.SOCIAL);
+      expect(normalized.status).toBe(EVENT_STATUSES.PUBLISHED);
+      expect(normalized.visibility).toBe(EVENT_VISIBILITIES.CAMPUS_PUBLIC);
+    });
+
+    it("normalizeEvent accepts a single document object without second argument", () => {
+      const docObj = {
+        id: "obj-event-202",
+        campusId: APEX_CAMPUS_ID,
+        title: "Object Event",
+        category: EVENT_CATEGORIES.ACADEMIC,
+      };
+
+      const normalized = normalizeEvent(docObj);
+      expect(normalized).not.toBeNull();
+      expect(normalized.id).toBe("obj-event-202");
+      expect(normalized.title).toBe("Object Event");
+      expect(normalized.category).toBe(EVENT_CATEGORIES.ACADEMIC);
     });
   });
 
@@ -240,23 +280,21 @@ describe("Milestone 20 — Unit 20.3: Event Service", () => {
       expect(event.title).toBe("Hackathon");
     });
 
-    it("getEventById falls back to deterministic EVENTS fixture when document not found in Firestore", async () => {
+    it("getEventById returns null without falling back to fixture when document does not exist in Firestore", async () => {
       mocks.getDoc.mockResolvedValueOnce({
         exists: () => false,
       });
 
       const event = await getEventById(EVENT_AI_HACKATHON.id);
-      expect(event).not.toBeNull();
-      expect(event.id).toBe(EVENT_AI_HACKATHON.id);
-      expect(event.title).toBe(EVENT_AI_HACKATHON.title);
+      expect(event).toBeNull();
     });
 
-    it("getEventById falls back to deterministic fixture on Firestore read error", async () => {
-      mocks.getDoc.mockRejectedValueOnce(new Error("Network error"));
+    it("getEventById throws error without falling back to fixture on Firestore read error", async () => {
+      mocks.getDoc.mockRejectedValueOnce(new Error("Permission denied"));
 
-      const event = await getEventById(EVENT_AI_HACKATHON.id);
-      expect(event).not.toBeNull();
-      expect(event.id).toBe(EVENT_AI_HACKATHON.id);
+      await expect(getEventById(EVENT_AI_HACKATHON.id)).rejects.toThrow(
+        "Permission denied"
+      );
     });
 
     it("getEvent is an alias to getEventById", async () => {
@@ -297,6 +335,245 @@ describe("Milestone 20 — Unit 20.3: Event Service", () => {
     });
   });
 
+  describe("Strict Event Resolution Service (§12.4)", () => {
+    it("mapSnapshotToResolution resolves real Firestore snapshot with Timestamps into complete 17-field normalized event with document id", () => {
+      const mockTimestampStart = {
+        toDate: () => new Date("2026-10-18T14:00:00Z"),
+        toMillis: () => new Date("2026-10-18T14:00:00Z").getTime(),
+      };
+      const mockTimestampEnd = {
+        toDate: () => new Date("2026-10-18T16:00:00Z"),
+        toMillis: () => new Date("2026-10-18T16:00:00Z").getTime(),
+      };
+      const mockTimestampCreated = {
+        toDate: () => new Date("2026-10-10T10:00:00Z"),
+        toMillis: () => new Date("2026-10-10T10:00:00Z").getTime(),
+      };
+
+      const snap = {
+        exists: () => true,
+        id: "real-firestore-doc-id",
+        data: () => ({
+          campusId: APEX_CAMPUS_ID,
+          communityId: COMMUNITY_APEX_AI.id,
+          title: "Real Snapshot Event",
+          description: "Full resolution description",
+          category: EVENT_CATEGORIES.TECH,
+          location: "Hall B",
+          startAt: mockTimestampStart,
+          endAt: mockTimestampEnd,
+          imageURL: "https://example.com/banner.png",
+          createdBy: "student-apex-1",
+          organizerName: "Apex AI Organizers",
+          status: EVENT_STATUSES.PUBLISHED,
+          visibility: EVENT_VISIBILITIES.COMMUNITY_ONLY,
+          createdAt: mockTimestampCreated,
+          updatedAt: mockTimestampCreated,
+        }),
+      };
+
+      const resolution = mapSnapshotToResolution(snap);
+      expect(resolution.status).toBe("available");
+      expect(resolution.error).toBeNull();
+      expect(resolution.event).toEqual({
+        id: "real-firestore-doc-id",
+        campusId: APEX_CAMPUS_ID,
+        communityId: COMMUNITY_APEX_AI.id,
+        title: "Real Snapshot Event",
+        slug: "real-firestore-doc-id",
+        description: "Full resolution description",
+        category: EVENT_CATEGORIES.TECH,
+        location: "Hall B",
+        startAt: new Date("2026-10-18T14:00:00Z"),
+        endAt: new Date("2026-10-18T16:00:00Z"),
+        imageURL: "https://example.com/banner.png",
+        createdBy: "student-apex-1",
+        organizerName: "Apex AI Organizers",
+        status: EVENT_STATUSES.PUBLISHED,
+        visibility: EVENT_VISIBILITIES.COMMUNITY_ONLY,
+        createdAt: new Date("2026-10-10T10:00:00Z"),
+        updatedAt: new Date("2026-10-10T10:00:00Z"),
+      });
+      expect(resolution.event.startAt instanceof Date).toBe(true);
+      expect(resolution.event.endAt instanceof Date).toBe(true);
+    });
+
+    it("mapSnapshotToResolution resolves nonexistent snapshot to inaccessible", () => {
+      const snap = { exists: () => false };
+      expect(mapSnapshotToResolution(snap)).toEqual({
+        status: "inaccessible",
+        event: null,
+        error: null,
+      });
+    });
+
+    it("mapErrorToResolution maps permission-denied to inaccessible and unexpected to error", () => {
+      const permErr = new Error("Permission denied");
+      permErr.code = "permission-denied";
+      expect(mapErrorToResolution(permErr)).toEqual({
+        status: "inaccessible",
+        event: null,
+        error: null,
+      });
+
+      const unavailErr = new Error("Firestore unavailable");
+      unavailErr.code = "unavailable";
+      expect(mapErrorToResolution(unavailErr)).toEqual({
+        status: "error",
+        event: null,
+        error: unavailErr,
+      });
+    });
+
+    it("resolveEvent maps existing document to available without returning fixture data", async () => {
+      mocks.getDoc.mockResolvedValueOnce({
+        exists: () => true,
+        id: "e-avail",
+        data: () => ({
+          title: "Authorized Workshop",
+          campusId: APEX_CAMPUS_ID,
+          communityId: COMMUNITY_APEX_AI.id,
+          category: EVENT_CATEGORIES.TECH,
+        }),
+      });
+
+      const res = await resolveEvent("e-avail");
+      expect(res).toEqual({
+        status: "available",
+        event: expect.objectContaining({ id: "e-avail", title: "Authorized Workshop" }),
+        error: null,
+      });
+    });
+
+    it("resolveEvent maps missing document to inaccessible without fixture fallback", async () => {
+      mocks.getDoc.mockResolvedValueOnce({
+        exists: () => false,
+      });
+
+      const res = await resolveEvent(EVENT_AI_HACKATHON.id);
+      expect(res).toEqual({
+        status: "inaccessible",
+        event: null,
+        error: null,
+      });
+    });
+
+    it("resolveEvent maps permission-denied error to inaccessible without fixture fallback", async () => {
+      const err = new Error("Missing or insufficient permissions.");
+      err.code = "permission-denied";
+      mocks.getDoc.mockRejectedValueOnce(err);
+
+      const res = await resolveEvent(EVENT_AI_HACKATHON.id);
+      expect(res).toEqual({
+        status: "inaccessible",
+        event: null,
+        error: null,
+      });
+    });
+
+    it("resolveEvent maps unexpected Firestore error to error status without fixture fallback", async () => {
+      const err = new Error("Internal server connection error");
+      err.code = "unavailable";
+      mocks.getDoc.mockRejectedValueOnce(err);
+
+      const res = await resolveEvent(EVENT_AI_HACKATHON.id);
+      expect(res.status).toBe("error");
+      expect(res.event).toBeNull();
+      expect(res.error).toBe(err);
+    });
+
+    it("resolveEvent handles invalid or empty eventId as inaccessible", async () => {
+      expect(await resolveEvent("")).toEqual({
+        status: "inaccessible",
+        event: null,
+        error: null,
+      });
+      expect(await resolveEvent(null)).toEqual({
+        status: "inaccessible",
+        event: null,
+        error: null,
+      });
+    });
+
+    it("subscribeToEventResolution emits available on existing snapshot and cleans up with unsubscribe", () => {
+      const unsub = vi.fn();
+      mocks.onSnapshot.mockImplementation((_ref, onNext) => {
+        onNext({
+          exists: () => true,
+          id: "e-sub",
+          data: () => ({ title: "Live Event", campusId: APEX_CAMPUS_ID }),
+        });
+        return unsub;
+      });
+
+      const cb = vi.fn();
+      const cleanup = subscribeToEventResolution("e-sub", cb);
+
+      expect(cb).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: "available",
+          event: expect.objectContaining({ id: "e-sub", title: "Live Event" }),
+          error: null,
+        })
+      );
+      expect(typeof cleanup).toBe("function");
+      cleanup();
+      expect(unsub).toHaveBeenCalled();
+    });
+
+    it("subscribeToEventResolution emits inaccessible on missing document", () => {
+      mocks.onSnapshot.mockImplementation((_ref, onNext) => {
+        onNext({ exists: () => false });
+        return vi.fn();
+      });
+
+      const cb = vi.fn();
+      subscribeToEventResolution("e-missing", cb);
+
+      expect(cb).toHaveBeenCalledWith({
+        status: "inaccessible",
+        event: null,
+        error: null,
+      });
+    });
+
+    it("subscribeToEventResolution emits inaccessible on permission-denied error", () => {
+      const err = new Error("Permission denied");
+      err.code = "permission-denied";
+      mocks.onSnapshot.mockImplementation((_ref, _onNext, onError) => {
+        onError(err);
+        return vi.fn();
+      });
+
+      const cb = vi.fn();
+      subscribeToEventResolution("e-denied", cb);
+
+      expect(cb).toHaveBeenCalledWith({
+        status: "inaccessible",
+        event: null,
+        error: null,
+      });
+    });
+
+    it("subscribeToEventResolution emits error on unexpected Firestore error", () => {
+      const err = new Error("Backend timeout");
+      err.code = "deadline-exceeded";
+      mocks.onSnapshot.mockImplementation((_ref, _onNext, onError) => {
+        onError(err);
+        return vi.fn();
+      });
+
+      const cb = vi.fn();
+      subscribeToEventResolution("e-fail", cb);
+
+      expect(cb).toHaveBeenCalledWith({
+        status: "error",
+        event: null,
+        error: err,
+      });
+    });
+  });
+
   describe("Campus Events Query & Subscription", () => {
     it("getEventsByCampus returns empty array on missing campusId", async () => {
       expect(await getEventsByCampus("")).toEqual([]);
@@ -326,18 +603,22 @@ describe("Milestone 20 — Unit 20.3: Event Service", () => {
       expect(events[0].id).toBe("e-camp-1");
     });
 
-    it("getEventsByCampus falls back to deterministic fixtures when Firestore returns empty", async () => {
+    it("getEventsByCampus returns empty array without falling back to fixtures when Firestore returns empty", async () => {
       mocks.getDocs.mockResolvedValueOnce({
         empty: true,
         docs: [],
       });
 
       const events = await getEventsByCampus(APEX_CAMPUS_ID);
-      expect(events.length).toBeGreaterThan(0);
-      events.forEach((e) => {
-        expect(e.campusId).toBe(APEX_CAMPUS_ID);
-        expect(e.visibility).toBe(EVENT_VISIBILITIES.CAMPUS_PUBLIC);
-      });
+      expect(events).toEqual([]);
+    });
+
+    it("getEventsByCampus propagates error without falling back to fixtures on Firestore read failure", async () => {
+      mocks.getDocs.mockRejectedValueOnce(new Error("Permission denied"));
+
+      await expect(getEventsByCampus(APEX_CAMPUS_ID)).rejects.toThrow(
+        "Permission denied"
+      );
     });
 
     it("subscribeToCampusEvents registers listener with campus and visibility filters", () => {
@@ -478,6 +759,28 @@ describe("Milestone 20 — Unit 20.3: Event Service", () => {
       expect(mocks.where).toHaveBeenCalledWith("communityId", "==", COMMUNITY_APEX_AI.id);
       expect(mocks.where).toHaveBeenCalledWith("campusId", "==", APEX_CAMPUS_ID);
       expect(mocks.where).toHaveBeenCalledWith("visibility", "==", EVENT_VISIBILITIES.COMMUNITY_ONLY);
+    });
+
+    it("getEventsByCommunity returns empty array without falling back to fixtures when Firestore returns empty", async () => {
+      mocks.getDocs.mockResolvedValueOnce({
+        empty: true,
+        docs: [],
+      });
+
+      const events = await getEventsByCommunity(COMMUNITY_APEX_AI.id, {
+        campusId: APEX_CAMPUS_ID,
+      });
+      expect(events).toEqual([]);
+    });
+
+    it("getEventsByCommunity propagates error without falling back to fixtures on Firestore read failure", async () => {
+      mocks.getDocs.mockRejectedValueOnce(new Error("Permission denied"));
+
+      await expect(
+        getEventsByCommunity(COMMUNITY_APEX_AI.id, {
+          campusId: APEX_CAMPUS_ID,
+        })
+      ).rejects.toThrow("Permission denied");
     });
 
     it("subscribeToCommunityEvents returns empty and no-op when campusId is missing", () => {

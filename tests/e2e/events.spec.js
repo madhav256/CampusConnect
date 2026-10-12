@@ -12,6 +12,7 @@
  * 8. Event Creation Journey (Authorized leader creates event via EventComposerModal, navigates to detail)
  * 9. Form Validation (endAt < startAt rejection, required field enforcement)
  * 10. Unauthorized Creation Guard (Non-leader student cannot create events)
+ * 11. Strict Event Resolution Regression (Inaccessible or missing events never fall back to fixture data)
  */
 
 import process from "node:process";
@@ -355,6 +356,15 @@ test.describe("Milestone 20 — Unit 20.6: Campus Events E2E Suite", () => {
     await expect(page.getByText("Unable to Load Event")).toBeVisible();
     await expect(page.locator("[data-testid='event-detail-title']")).not.toBeVisible();
 
+    // Verify Retry action re-queries Firestore strictly and never falls back to fixture
+    const retryBtn = page.getByRole("button", { name: "Retry" });
+    await retryBtn.click();
+    await expect(page.locator("[data-testid='event-detail-error']")).toBeVisible();
+    await expect(page.locator("[data-testid='event-detail-title']")).not.toBeVisible();
+    await expect(
+      page.getByText("St. Jude Clinical Research & Medical Ethics Symposium")
+    ).not.toBeVisible();
+
     // 5. Sign out and log in as St. Jude student
     await logout(page);
     await loginAs(page, E2E_USERS.studentStJude);
@@ -415,6 +425,14 @@ test.describe("Milestone 20 — Unit 20.6: Campus Events E2E Suite", () => {
     await expect(page.locator("[data-testid='event-detail-error']")).toBeVisible();
     await expect(page.getByText("Unable to Load Event")).toBeVisible();
     await expect(page.locator("[data-testid='event-detail-title']")).not.toBeVisible();
+
+    // Verify Retry action on community-denied event does not fall back to fixture
+    await page.getByRole("button", { name: "Retry" }).click();
+    await expect(page.locator("[data-testid='event-detail-error']")).toBeVisible();
+    await expect(page.locator("[data-testid='event-detail-title']")).not.toBeVisible();
+    await expect(
+      page.getByText("Apex AI Lab Internal Planning & Hardware Sync")
+    ).not.toBeVisible();
   });
 
   test("8. Event Creation Journey: eligible leader creates an event and verifies detail rendering", async ({
@@ -526,5 +544,54 @@ test.describe("Milestone 20 — Unit 20.6: Campus Events E2E Suite", () => {
 
     // Modal cannot be opened
     await expect(page.locator("[data-testid='event-composer-modal']")).not.toBeVisible();
+  });
+
+  test("11. Strict Event Resolution Regression: denied or inaccessible events never fall back to local fixture data", async ({
+    page,
+  }) => {
+    // 1. Authenticate as Apex student A
+    await loginAs(page, E2E_USERS.studentA);
+
+    // 2. Direct navigation to cross-tenant event that exists in fixture definitions (e2e-event-st-jude-symposium)
+    await page.goto("/events/e2e-event-st-jude-symposium");
+
+    // 3. Verify error state rendered and fixture title is strictly absent
+    await expect(page.locator("[data-testid='event-detail-error']")).toBeVisible();
+    await expect(page.getByText("Unable to Load Event")).toBeVisible();
+    await expect(page.locator("[data-testid='event-detail-title']")).not.toBeVisible();
+    await expect(
+      page.getByText("St. Jude Clinical Research & Medical Ethics Symposium")
+    ).not.toBeVisible();
+
+    // 4. Click Retry: verify Firestore error is re-thrown and no fixture data appears
+    await page.getByRole("button", { name: "Retry" }).click();
+    await expect(page.locator("[data-testid='event-detail-error']")).toBeVisible();
+    await expect(page.locator("[data-testid='event-detail-title']")).not.toBeVisible();
+    await expect(
+      page.getByText("St. Jude Clinical Research & Medical Ethics Symposium")
+    ).not.toBeVisible();
+
+    // 5. Authenticate as studentC (non-member of apex-ai-club)
+    await logout(page);
+    await loginAs(page, E2E_USERS.studentC);
+
+    // 6. Navigate to community_only event that exists in fixture definitions (e2e-event-ai-members-only)
+    await page.goto("/events/e2e-event-ai-members-only");
+
+    // 7. Verify denied error state rendered and members-only fixture title is strictly absent
+    await expect(page.locator("[data-testid='event-detail-error']")).toBeVisible();
+    await expect(page.getByText("Unable to Load Event")).toBeVisible();
+    await expect(page.locator("[data-testid='event-detail-title']")).not.toBeVisible();
+    await expect(
+      page.getByText("Apex AI Lab Internal Planning & Hardware Sync")
+    ).not.toBeVisible();
+
+    // 8. Click Retry: verify Firestore error is re-thrown and fixture remains strictly inaccessible
+    await page.getByRole("button", { name: "Retry" }).click();
+    await expect(page.locator("[data-testid='event-detail-error']")).toBeVisible();
+    await expect(page.locator("[data-testid='event-detail-title']")).not.toBeVisible();
+    await expect(
+      page.getByText("Apex AI Lab Internal Planning & Hardware Sync")
+    ).not.toBeVisible();
   });
 });

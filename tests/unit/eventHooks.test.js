@@ -10,7 +10,9 @@ const mocks = vi.hoisted(() => ({
   getEventsByCommunity: vi.fn(),
   subscribeToCommunityEvents: vi.fn(),
   getEventById: vi.fn(),
+  resolveEvent: vi.fn(),
   subscribeToEvent: vi.fn(),
+  subscribeToEventResolution: vi.fn(),
 }));
 
 vi.mock("../../src/hooks/useCampus.js", () => ({
@@ -24,7 +26,9 @@ vi.mock("../../src/services/eventService.js", () => ({
   getEventsByCommunity: mocks.getEventsByCommunity,
   subscribeToCommunityEvents: mocks.subscribeToCommunityEvents,
   getEventById: mocks.getEventById,
+  resolveEvent: mocks.resolveEvent,
   subscribeToEvent: mocks.subscribeToEvent,
+  subscribeToEventResolution: mocks.subscribeToEventResolution,
 }));
 
 import { useEvents } from "../../src/hooks/useEvents.js";
@@ -39,6 +43,7 @@ describe("Milestone 20 — Unit 20.3: Event Hooks", () => {
     mocks.subscribeToCampusEvents.mockReturnValue(vi.fn());
     mocks.subscribeToCommunityEvents.mockReturnValue(vi.fn());
     mocks.subscribeToEvent.mockReturnValue(vi.fn());
+    mocks.subscribeToEventResolution.mockReturnValue(vi.fn());
   });
 
   describe("useEvents Hook", () => {
@@ -347,37 +352,40 @@ describe("Milestone 20 — Unit 20.3: Event Hooks", () => {
     });
   });
 
-  describe("useEvent Hook", () => {
-    it("subscribes to a single event and updates state upon emission", () => {
+  describe("useEvent Hook (§12.4 Strict Resolution)", () => {
+    it("subscribes via subscribeToEventResolution and updates available state upon emission", () => {
       let callback;
-      mocks.subscribeToEvent.mockImplementationOnce((_id, cb) => {
+      mocks.subscribeToEventResolution.mockImplementationOnce((_id, cb) => {
         callback = cb;
         return vi.fn();
       });
 
       const { result } = renderHook(() => useEvent("event-hackathon"));
       expect(result.current.isLoading).toBe(true);
+      expect(result.current.loading).toBe(true);
       expect(result.current.event).toBeNull();
+      expect(result.current.availability).toBeNull();
 
-      expect(mocks.subscribeToEvent).toHaveBeenCalledWith(
+      expect(mocks.subscribeToEventResolution).toHaveBeenCalledWith(
         "event-hackathon",
-        expect.any(Function),
         expect.any(Function)
       );
 
       const eventData = { id: "event-hackathon", title: "Annual Hackathon" };
       act(() => {
-        callback(eventData);
+        callback({ status: "available", event: eventData, error: null });
       });
 
       expect(result.current.isLoading).toBe(false);
+      expect(result.current.loading).toBe(false);
       expect(result.current.event).toEqual(eventData);
+      expect(result.current.availability).toBe("available");
       expect(result.current.error).toBeNull();
     });
 
-    it("handles not-found event when snapshot returns null", () => {
+    it("handles inaccessible resolution by setting availability to inaccessible and clearing event", () => {
       let callback;
-      mocks.subscribeToEvent.mockImplementationOnce((_id, cb) => {
+      mocks.subscribeToEventResolution.mockImplementationOnce((_id, cb) => {
         callback = cb;
         return vi.fn();
       });
@@ -385,71 +393,105 @@ describe("Milestone 20 — Unit 20.3: Event Hooks", () => {
       const { result } = renderHook(() => useEvent("nonexistent-event"));
 
       act(() => {
-        callback(null);
+        callback({ status: "inaccessible", event: null, error: null });
       });
 
       expect(result.current.isLoading).toBe(false);
+      expect(result.current.loading).toBe(false);
       expect(result.current.event).toBeNull();
+      expect(result.current.availability).toBe("inaccessible");
+      expect(result.current.error).toBe("This event is inaccessible or does not exist.");
     });
 
-    it("handles error during single event subscription", () => {
-      let errHandler;
-      mocks.subscribeToEvent.mockImplementationOnce((_id, _cb, onErr) => {
-        errHandler = onErr;
+    it("handles unexpected resolution error by setting availability to error and surfacing error message", () => {
+      let callback;
+      mocks.subscribeToEventResolution.mockImplementationOnce((_id, cb) => {
+        callback = cb;
         return vi.fn();
       });
 
       const { result } = renderHook(() => useEvent("event-error"));
 
       act(() => {
-        errHandler(new Error("Document access denied"));
+        callback({
+          status: "error",
+          event: null,
+          error: new Error("Network timeout"),
+        });
       });
 
       expect(result.current.isLoading).toBe(false);
-      expect(result.current.error).toBe("Document access denied");
+      expect(result.current.loading).toBe(false);
+      expect(result.current.event).toBeNull();
+      expect(result.current.availability).toBe("error");
+      expect(result.current.error).toBe("Network timeout");
     });
 
     it("handles null or missing eventId by resetting to non-loading null state", () => {
       const { result } = renderHook(() => useEvent(null));
 
       expect(result.current.isLoading).toBe(false);
+      expect(result.current.loading).toBe(false);
       expect(result.current.event).toBeNull();
-      expect(mocks.subscribeToEvent).not.toHaveBeenCalled();
+      expect(result.current.availability).toBeNull();
+      expect(mocks.subscribeToEventResolution).not.toHaveBeenCalled();
     });
 
-    it("cleans up previous subscription when eventId changes or on unmount", () => {
+    it("cleans up previous subscription and prevents stale emissions when eventId changes or on unmount", () => {
+      let callbackFirst;
       const unsubFirst = vi.fn();
       const unsubSecond = vi.fn();
-      mocks.subscribeToEvent
-        .mockReturnValueOnce(unsubFirst)
-        .mockReturnValueOnce(unsubSecond);
+      mocks.subscribeToEventResolution
+        .mockImplementationOnce((_id, cb) => {
+          callbackFirst = cb;
+          return unsubFirst;
+        })
+        .mockImplementationOnce(() => unsubSecond);
 
-      const { rerender, unmount } = renderHook(
+      const { result, rerender, unmount } = renderHook(
         (props) => useEvent(props.id),
         { initialProps: { id: "event-1" } }
       );
 
-      expect(mocks.subscribeToEvent).toHaveBeenCalledWith(
+      expect(mocks.subscribeToEventResolution).toHaveBeenCalledWith(
         "event-1",
-        expect.any(Function),
         expect.any(Function)
       );
 
+      // Transition to event-2: state should immediately reset without showing stale data
       rerender({ id: "event-2" });
 
       expect(unsubFirst).toHaveBeenCalledTimes(1);
-      expect(mocks.subscribeToEvent).toHaveBeenLastCalledWith(
+      expect(result.current.event).toBeNull();
+      expect(result.current.availability).toBeNull();
+      expect(result.current.isLoading).toBe(true);
+      expect(result.current.loading).toBe(true);
+      expect(mocks.subscribeToEventResolution).toHaveBeenLastCalledWith(
         "event-2",
-        expect.any(Function),
         expect.any(Function)
       );
+
+      // Stale emission from old event-1 listener must be ignored
+      act(() => {
+        callbackFirst({
+          status: "available",
+          event: { id: "event-1", title: "Old Stale Event" },
+          error: null,
+        });
+      });
+      expect(result.current.event).toBeNull();
+      expect(result.current.availability).toBeNull();
 
       unmount();
       expect(unsubSecond).toHaveBeenCalledTimes(1);
     });
 
-    it("supports manual refetch for individual event", async () => {
-      mocks.getEventById.mockResolvedValueOnce({ id: "event-refetch", title: "Design Sprint" });
+    it("supports manual refetch for individual event via resolveEvent", async () => {
+      mocks.resolveEvent.mockResolvedValueOnce({
+        status: "available",
+        event: { id: "event-refetch", title: "Design Sprint" },
+        error: null,
+      });
 
       const { result } = renderHook(() => useEvent("event-refetch"));
 
@@ -457,8 +499,107 @@ describe("Milestone 20 — Unit 20.3: Event Hooks", () => {
         await result.current.refetch();
       });
 
-      expect(mocks.getEventById).toHaveBeenCalledWith("event-refetch");
+      expect(mocks.resolveEvent).toHaveBeenCalledWith("event-refetch");
       expect(result.current.event).toEqual({ id: "event-refetch", title: "Design Sprint" });
+      expect(result.current.availability).toBe("available");
+      expect(result.current.error).toBeNull();
+    });
+
+    it("refetch on inaccessible event sets availability to inaccessible without fixture fallback", async () => {
+      mocks.resolveEvent.mockResolvedValueOnce({
+        status: "inaccessible",
+        event: null,
+        error: null,
+      });
+
+      const { result } = renderHook(() => useEvent("missing-event-id"));
+
+      await act(async () => {
+        await result.current.refetch();
+      });
+
+      expect(mocks.resolveEvent).toHaveBeenCalledWith("missing-event-id");
+      expect(result.current.event).toBeNull();
+      expect(result.current.availability).toBe("inaccessible");
+      expect(result.current.error).toBe("This event is inaccessible or does not exist.");
+    });
+
+    it("refetch on unexpected error sets error state and availability without fixture fallback", async () => {
+      mocks.resolveEvent.mockResolvedValueOnce({
+        status: "error",
+        event: null,
+        error: new Error("Unavailable cluster."),
+      });
+
+      const { result } = renderHook(() => useEvent("inaccessible-event-id"));
+
+      await act(async () => {
+        await result.current.refetch();
+      });
+
+      expect(mocks.resolveEvent).toHaveBeenCalledWith("inaccessible-event-id");
+      expect(result.current.event).toBeNull();
+      expect(result.current.availability).toBe("error");
+      expect(result.current.error).toBe("Unavailable cluster.");
+    });
+
+    it("refetch ignores stale resolution if eventId changes during fetch", async () => {
+      let resolveFirst;
+      mocks.resolveEvent.mockImplementationOnce(() => {
+        return new Promise((resolve) => {
+          resolveFirst = resolve;
+        });
+      });
+
+      let subCallbackB;
+      mocks.subscribeToEventResolution.mockImplementation((id, cb) => {
+        if (id === "event-b") {
+          subCallbackB = cb;
+        }
+        return vi.fn();
+      });
+
+      const { result, rerender } = renderHook(
+        (props) => useEvent(props.id),
+        { initialProps: { id: "event-a" } }
+      );
+
+      // Trigger refetch for event-a
+      let refetchPromise;
+      act(() => {
+        refetchPromise = result.current.refetch();
+      });
+
+      // Switch to event-b while event-a's refetch is still pending
+      rerender({ id: "event-b" });
+      expect(result.current.event).toBeNull();
+      expect(result.current.availability).toBeNull();
+      expect(result.current.isLoading).toBe(true);
+
+      // Event-b emits its own authorized data
+      act(() => {
+        subCallbackB?.({
+          status: "available",
+          event: { id: "event-b", title: "Authorized Event B" },
+          error: null,
+        });
+      });
+      expect(result.current.event).toEqual({ id: "event-b", title: "Authorized Event B" });
+      expect(result.current.availability).toBe("available");
+
+      // Now resolve event-a's stale in-flight refetch
+      await act(async () => {
+        resolveFirst({
+          status: "available",
+          event: { id: "event-a", title: "Stale Event A" },
+          error: null,
+        });
+        await refetchPromise;
+      });
+
+      // State must retain Event B and NOT have been overwritten by stale Event A data
+      expect(result.current.event).toEqual({ id: "event-b", title: "Authorized Event B" });
+      expect(result.current.availability).toBe("available");
     });
   });
 });

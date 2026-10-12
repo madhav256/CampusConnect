@@ -4388,6 +4388,11 @@ describe("Milestone 18 — Unit 18.2: Campuses & Multi-Tenancy Rules", () => {
         // Can read cancelled community_only event
         await assertSucceeds(eventRef(carol, "apex-cancelled-comm").get());
       });
+
+      it("get of nonexistent event is denied", async () => {
+        const david = contextFor(davidUid);
+        await expectPermissionDenied(() => eventRef(david, "nonexistent-event-id").get());
+      });
     });
 
     describe("Creator Authority (Create Rules)", () => {

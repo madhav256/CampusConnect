@@ -307,6 +307,22 @@ export function eventFixture(
   };
 }
 
+export function eventRsvpFixture(
+  eventId = "event-test-1",
+  userId = TEST_UIDS.alice,
+  campusId = APEX_CAMPUS_ID,
+  overrides = {}
+) {
+  const id = overrides.id || `${eventId}_${userId}`;
+  return {
+    id,
+    eventId,
+    campusId,
+    userId,
+    createdAt: timestamp,
+    ...overrides,
+  };
+}
 
 export async function seedBaseData(testEnvironment) {
   await testEnvironment.withSecurityRulesDisabled(async (context) => {

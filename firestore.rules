@@ -187,6 +187,13 @@ service cloud.firestore {
              (get(mPath).data.role == 'admin' || get(mPath).data.role == 'moderator');
     }
 
+    function isCommunityActiveMember(communityId) {
+      let mPath = /databases/$(database)/documents/communityMembers/$(communityId + '_' + request.auth.uid);
+      return exists(mPath) &&
+             get(mPath).data.status == 'active' &&
+             get(mPath).data.campusId == getUserCampusId();
+    }
+
     function isValidPostCreate() {
       let d = request.resource.data;
       return d.keys().hasOnly([
@@ -922,13 +929,6 @@ service cloud.firestore {
                get(adminMembershipPath).data.campusId == getUserCampusId();
       }
 
-      function isCommunityActiveMember(communityId) {
-        let mPath = /databases/$(database)/documents/communityMembers/$(communityId + '_' + request.auth.uid);
-        return exists(mPath) &&
-               get(mPath).data.status == 'active' &&
-               get(mPath).data.campusId == getUserCampusId();
-      }
-
       function isValidEventCreate(eId) {
         let d = request.resource.data;
         let communityPath = /databases/$(database)/documents/communities/$(d.communityId);
@@ -1057,6 +1057,71 @@ service cloud.firestore {
           isCommunityAdmin(resource.data.communityId)
         )
       );
+    }
+
+    // 10. Event RSVPs collection (Milestone 21 - Unit 21.2: RSVP Security Authority & Rules)
+    match /eventRsvps/{rsvpId} {
+      function isParentEventReadable(eventId) {
+        let eventPath = /databases/$(database)/documents/events/$(eventId);
+        return exists(eventPath) &&
+               get(eventPath).data.campusId == getUserCampusId() &&
+               (
+                 get(eventPath).data.visibility == 'campus_public' ||
+                 (
+                   get(eventPath).data.visibility == 'community_only' &&
+                   isCommunityActiveMember(get(eventPath).data.communityId)
+                 )
+               );
+      }
+
+      function isValidRsvpCreate(rId) {
+        let d = request.resource.data;
+        let eventPath = /databases/$(database)/documents/events/$(d.eventId);
+        return d.keys().hasOnly(['id', 'eventId', 'campusId', 'userId', 'createdAt']) &&
+               d.keys().hasAll(['id', 'eventId', 'campusId', 'userId', 'createdAt']) &&
+               d.id == rId &&
+               d.id is string &&
+               d.eventId is string &&
+               d.campusId is string &&
+               d.userId is string &&
+               d.createdAt is timestamp &&
+               d.userId == request.auth.uid &&
+               d.id == d.eventId + '_' + d.userId &&
+               getUserCampusId() != null &&
+               d.campusId == getUserCampusId() &&
+               d.createdAt == request.time &&
+               exists(eventPath) &&
+               get(eventPath).data.campusId == d.campusId &&
+               get(eventPath).data.status == 'published' &&
+               request.time < get(eventPath).data.startAt &&
+               (
+                 get(eventPath).data.visibility == 'campus_public' ||
+                 (
+                   get(eventPath).data.visibility == 'community_only' &&
+                   isCommunityActiveMember(get(eventPath).data.communityId)
+                 )
+               );
+      }
+
+      allow get: if isAuthenticated() && (
+        (resource == null && rsvpId.matches('^.+_' + request.auth.uid + '$')) ||
+        (resource != null && resource.data.campusId == getUserCampusId() && (
+          resource.data.userId == request.auth.uid ||
+          isParentEventReadable(resource.data.eventId)
+        ))
+      );
+
+      allow list: if isAuthenticated() && resource.data.campusId == getUserCampusId() && (
+        resource.data.userId == request.auth.uid ||
+        isParentEventReadable(resource.data.eventId)
+      );
+
+      allow create: if isAuthenticated() && isValidRsvpCreate(rsvpId);
+
+      allow update: if false;
+
+      allow delete: if isAuthenticated() &&
+                    resource.data.userId == request.auth.uid;
     }
   }
 }

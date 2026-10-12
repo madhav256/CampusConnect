@@ -31,6 +31,7 @@ import {
   communityFixture,
   communityMemberFixture,
   eventFixture,
+  eventRsvpFixture,
 } from "./fixtures.js";
 
 const serverTimestamp = () => firebase.firestore.FieldValue.serverTimestamp();
@@ -60,6 +61,10 @@ function communityMemberRef(context, membershipId) {
 
 function eventRef(context, eventId) {
   return context.firestore().collection("events").doc(eventId);
+}
+
+function eventRsvpRef(context, rsvpId) {
+  return context.firestore().collection("eventRsvps").doc(rsvpId);
 }
 
 
@@ -5201,6 +5206,1053 @@ describe("Milestone 18 — Unit 18.2: Campuses & Multi-Tenancy Rules", () => {
           .where("visibility", "==", "community_only");
 
         await expectPermissionDenied(() => q.get());
+      });
+    });
+  });
+
+  describe("Milestone 21 — Unit 21.2: RSVP Security Authority & Firestore Rules", () => {
+    async function seedUserWithCampus(uid, campusId) {
+      await testEnvironment.withSecurityRulesDisabled(async (context) => {
+        const db = context.firestore();
+        await db.collection("users").doc(uid).set(userFixture(uid, { campusId }));
+        await db.collection("publicProfiles").doc(uid).set(publicProfileFixture(uid, { campusId }));
+        await db.collection("directoryIndex").doc(uid).set(directoryIndexFixture(uid, { campusId }));
+      });
+    }
+
+    async function seedCommunity(communityId, campusId, overrides = {}) {
+      await testEnvironment.withSecurityRulesDisabled(async (context) => {
+        const db = context.firestore();
+        await db
+          .collection("communities")
+          .doc(communityId)
+          .set(communityFixture(communityId, { campusId, ...overrides }));
+      });
+    }
+
+    async function seedCommunityMember(
+      membershipId,
+      communityId,
+      userId,
+      campusId,
+      role = COMMUNITY_MEMBER_ROLES.MEMBER,
+      status = COMMUNITY_MEMBER_STATUSES.ACTIVE,
+      overrides = {}
+    ) {
+      await testEnvironment.withSecurityRulesDisabled(async (context) => {
+        const db = context.firestore();
+        await db
+          .collection("communityMembers")
+          .doc(membershipId)
+          .set(
+            communityMemberFixture(communityId, userId, {
+              id: membershipId,
+              campusId,
+              role,
+              status,
+              ...overrides,
+            })
+          );
+      });
+    }
+
+    async function seedEvent(eventId, creatorId, campusId, communityId, overrides = {}) {
+      await testEnvironment.withSecurityRulesDisabled(async (context) => {
+        const db = context.firestore();
+        await db
+          .collection("events")
+          .doc(eventId)
+          .set(
+            eventFixture(eventId, creatorId, communityId, {
+              campusId,
+              ...overrides,
+            })
+          );
+      });
+    }
+
+    async function seedEventRsvp(rsvpId, eventId, userId, campusId, overrides = {}) {
+      await testEnvironment.withSecurityRulesDisabled(async (context) => {
+        const db = context.firestore();
+        await db
+          .collection("eventRsvps")
+          .doc(rsvpId)
+          .set(
+            eventRsvpFixture(eventId, userId, campusId, {
+              id: rsvpId,
+              ...overrides,
+            })
+          );
+      });
+    }
+
+    const aliceUid = TEST_UIDS.alice; // Apex student, admin of apex-ai-club
+    const bobUid = TEST_UIDS.bob; // Apex student, moderator of apex-ai-club
+    const carolUid = TEST_UIDS.carol; // Apex student, active member of apex-ai-club
+    const davidUid = "test-uid-david"; // Apex student, non-member of apex-ai-club
+    const frankUid = "test-uid-frank"; // Apex student, removed member of apex-ai-club
+    const graceUid = "test-uid-grace"; // Apex student, pending member of apex-ai-club
+    const eveUid = "test-uid-eve"; // St. Jude student (cross-campus)
+    const harryUid = "test-uid-harry"; // Student without campus
+
+    // Relative temporal anchors
+    const nowMs = Date.now();
+    const upcomingStart = firebase.firestore.Timestamp.fromMillis(nowMs + 24 * 60 * 60 * 1000);
+    const upcomingEnd = firebase.firestore.Timestamp.fromMillis(nowMs + 26 * 60 * 60 * 1000);
+    const ongoingStart = firebase.firestore.Timestamp.fromMillis(nowMs - 60 * 60 * 1000);
+    const ongoingEnd = firebase.firestore.Timestamp.fromMillis(nowMs + 60 * 60 * 1000);
+    const pastStart = firebase.firestore.Timestamp.fromMillis(nowMs - 48 * 60 * 60 * 1000);
+    const pastEnd = firebase.firestore.Timestamp.fromMillis(nowMs - 46 * 60 * 60 * 1000);
+
+    beforeEach(async () => {
+      await seedUserWithCampus(aliceUid, APEX_CAMPUS_ID);
+      await seedUserWithCampus(bobUid, APEX_CAMPUS_ID);
+      await seedUserWithCampus(carolUid, APEX_CAMPUS_ID);
+      await seedUserWithCampus(davidUid, APEX_CAMPUS_ID);
+      await seedUserWithCampus(frankUid, APEX_CAMPUS_ID);
+      await seedUserWithCampus(graceUid, APEX_CAMPUS_ID);
+      await seedUserWithCampus(eveUid, ST_JUDE_CAMPUS_ID);
+
+      // Seed user without campus
+      await testEnvironment.withSecurityRulesDisabled(async (context) => {
+        const db = context.firestore();
+        await db.collection("users").doc(harryUid).set(userFixture(harryUid, { campusId: null }));
+        await db.collection("publicProfiles").doc(harryUid).set(publicProfileFixture(harryUid, { campusId: null }));
+      });
+
+      await seedCommunity("apex-ai-club", APEX_CAMPUS_ID);
+      await seedCommunity("st-jude-medical-society", ST_JUDE_CAMPUS_ID);
+
+      await seedCommunityMember(
+        `apex-ai-club_${aliceUid}`,
+        "apex-ai-club",
+        aliceUid,
+        APEX_CAMPUS_ID,
+        COMMUNITY_MEMBER_ROLES.ADMIN,
+        COMMUNITY_MEMBER_STATUSES.ACTIVE
+      );
+      await seedCommunityMember(
+        `apex-ai-club_${bobUid}`,
+        "apex-ai-club",
+        bobUid,
+        APEX_CAMPUS_ID,
+        COMMUNITY_MEMBER_ROLES.MODERATOR,
+        COMMUNITY_MEMBER_STATUSES.ACTIVE
+      );
+      await seedCommunityMember(
+        `apex-ai-club_${carolUid}`,
+        "apex-ai-club",
+        carolUid,
+        APEX_CAMPUS_ID,
+        COMMUNITY_MEMBER_ROLES.MEMBER,
+        COMMUNITY_MEMBER_STATUSES.ACTIVE
+      );
+      await seedCommunityMember(
+        `apex-ai-club_${frankUid}`,
+        "apex-ai-club",
+        frankUid,
+        APEX_CAMPUS_ID,
+        COMMUNITY_MEMBER_ROLES.MEMBER,
+        COMMUNITY_MEMBER_STATUSES.REMOVED
+      );
+      await seedCommunityMember(
+        `apex-ai-club_${graceUid}`,
+        "apex-ai-club",
+        graceUid,
+        APEX_CAMPUS_ID,
+        COMMUNITY_MEMBER_ROLES.MEMBER,
+        COMMUNITY_MEMBER_STATUSES.PENDING
+      );
+      await seedCommunityMember(
+        `st-jude-medical-society_${eveUid}`,
+        "st-jude-medical-society",
+        eveUid,
+        ST_JUDE_CAMPUS_ID,
+        COMMUNITY_MEMBER_ROLES.ADMIN,
+        COMMUNITY_MEMBER_STATUSES.ACTIVE
+      );
+
+      // Seed default events
+      await seedEvent("pub-event-1", aliceUid, APEX_CAMPUS_ID, "apex-ai-club", {
+        visibility: "campus_public",
+        startAt: upcomingStart,
+        endAt: upcomingEnd,
+      });
+      await seedEvent("comm-event-1", aliceUid, APEX_CAMPUS_ID, "apex-ai-club", {
+        visibility: "community_only",
+        startAt: upcomingStart,
+        endAt: upcomingEnd,
+      });
+    });
+
+    describe("Authentication Rules", () => {
+      beforeEach(async () => {
+        await seedEventRsvp(`pub-event-1_${aliceUid}`, "pub-event-1", aliceUid, APEX_CAMPUS_ID);
+      });
+
+      it("unauthenticated get of an existing RSVP is denied", async () => {
+        await expectPermissionDenied(() => eventRsvpRef(unauthenticated(), `pub-event-1_${aliceUid}`).get());
+      });
+
+      it("unauthenticated get of an absent RSVP is denied", async () => {
+        await expectPermissionDenied(() => eventRsvpRef(unauthenticated(), `pub-event-1_absent-user`).get());
+      });
+
+      it("unauthenticated list/query is denied", async () => {
+        const q = unauthenticated()
+          .firestore()
+          .collection("eventRsvps")
+          .where("campusId", "==", APEX_CAMPUS_ID)
+          .where("eventId", "==", "pub-event-1");
+        await expectPermissionDenied(() => q.get());
+      });
+
+      it("unauthenticated create is denied", async () => {
+        await expectPermissionDenied(() =>
+          eventRsvpRef(unauthenticated(), `pub-event-1_anon`).set({
+            id: `pub-event-1_anon`,
+            eventId: "pub-event-1",
+            campusId: APEX_CAMPUS_ID,
+            userId: "anon",
+            createdAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("unauthenticated update is denied", async () => {
+        await expectPermissionDenied(() =>
+          eventRsvpRef(unauthenticated(), `pub-event-1_${aliceUid}`).update({
+            createdAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("unauthenticated delete is denied", async () => {
+        await expectPermissionDenied(() => eventRsvpRef(unauthenticated(), `pub-event-1_${aliceUid}`).delete());
+      });
+    });
+
+    describe("Read Authorization (Point Reads - Get)", () => {
+      beforeEach(async () => {
+        await seedEventRsvp(`pub-event-1_${aliceUid}`, "pub-event-1", aliceUid, APEX_CAMPUS_ID);
+        await seedEventRsvp(`comm-event-1_${carolUid}`, "comm-event-1", carolUid, APEX_CAMPUS_ID);
+      });
+
+      it("owner get of an existing RSVP allowed", async () => {
+        const alice = contextFor(aliceUid);
+        const snap = await assertSucceeds(eventRsvpRef(alice, `pub-event-1_${aliceUid}`).get());
+        expect(snap.exists).toBe(true);
+      });
+
+      it("owner get of their own absent deterministic ID allowed", async () => {
+        const alice = contextFor(aliceUid);
+        const aliceAbsentSnap = await assertSucceeds(eventRsvpRef(alice, `comm-event-1_${aliceUid}`).get());
+        expect(aliceAbsentSnap.exists).toBe(false);
+      });
+
+      it("authenticated user whose campus profile is missing can still read their own absent deterministic RSVP ID", async () => {
+        const harry = contextFor(harryUid);
+        const harryAbsentSnap = await assertSucceeds(eventRsvpRef(harry, `pub-event-1_${harryUid}`).get());
+        expect(harryAbsentSnap.exists).toBe(false);
+      });
+
+      it("authenticated user with completely absent user document can read their own absent deterministic RSVP ID", async () => {
+        const noUserUid = "test-uid-unseeded-user";
+        const unseededUser = contextFor(noUserUid);
+        const absentRsvpId = `pub-event-1_${noUserUid}`;
+        const snap = await assertSucceeds(eventRsvpRef(unseededUser, absentRsvpId).get());
+        expect(snap.exists).toBe(false);
+      });
+
+      it("get of another user's absent RSVP is denied", async () => {
+        const david = contextFor(davidUid);
+        await expectPermissionDenied(() => eventRsvpRef(david, `comm-event-1_${aliceUid}`).get());
+      });
+
+      it("owner can still point-read their own existing RSVP if parent event is deleted", async () => {
+        await seedEvent("temp-event", aliceUid, APEX_CAMPUS_ID, "apex-ai-club", {
+          visibility: "campus_public",
+          startAt: upcomingStart,
+          endAt: upcomingEnd,
+        });
+        await seedEventRsvp(`temp-event_${aliceUid}`, "temp-event", aliceUid, APEX_CAMPUS_ID);
+        await testEnvironment.withSecurityRulesDisabled(async (context) => {
+          await context.firestore().collection("events").doc("temp-event").delete();
+        });
+
+        const alice = contextFor(aliceUid);
+        const snap = await assertSucceeds(eventRsvpRef(alice, `temp-event_${aliceUid}`).get());
+        expect(snap.exists).toBe(true);
+      });
+
+      it("owner can still point-read their own absent RSVP even if parent event does not exist", async () => {
+        const alice = contextFor(aliceUid);
+        const snap = await assertSucceeds(eventRsvpRef(alice, `nonexistent-event_${aliceUid}`).get());
+        expect(snap.exists).toBe(false);
+      });
+
+      it("same-campus non-owner can read RSVP for a campus_public event", async () => {
+        const david = contextFor(davidUid);
+        const snap = await assertSucceeds(eventRsvpRef(david, `pub-event-1_${aliceUid}`).get());
+        expect(snap.exists).toBe(true);
+      });
+
+      it("active sponsoring-community member can read RSVP for a community_only event", async () => {
+        const bob = contextFor(bobUid);
+        const snap = await assertSucceeds(eventRsvpRef(bob, `comm-event-1_${carolUid}`).get());
+        expect(snap.exists).toBe(true);
+      });
+
+      it("non-member cannot read RSVP for a community_only event", async () => {
+        const david = contextFor(davidUid);
+        await expectPermissionDenied(() => eventRsvpRef(david, `comm-event-1_${carolUid}`).get());
+      });
+
+      it("removed community member cannot read RSVP for a community_only event", async () => {
+        const frank = contextFor(frankUid);
+        await expectPermissionDenied(() => eventRsvpRef(frank, `comm-event-1_${carolUid}`).get());
+      });
+
+      it("pending community member cannot read RSVP for a community_only event", async () => {
+        const grace = contextFor(graceUid);
+        await expectPermissionDenied(() => eventRsvpRef(grace, `comm-event-1_${carolUid}`).get());
+      });
+
+      it("cross-campus reader cannot read RSVP for a campus_public event", async () => {
+        const eve = contextFor(eveUid);
+        await expectPermissionDenied(() => eventRsvpRef(eve, `pub-event-1_${aliceUid}`).get());
+      });
+
+      it("non-owner cannot read RSVP if parent event has been deleted", async () => {
+        await seedEvent("temp-event-2", aliceUid, APEX_CAMPUS_ID, "apex-ai-club", {
+          visibility: "campus_public",
+          startAt: upcomingStart,
+          endAt: upcomingEnd,
+        });
+        await seedEventRsvp(`temp-event-2_${aliceUid}`, "temp-event-2", aliceUid, APEX_CAMPUS_ID);
+        await testEnvironment.withSecurityRulesDisabled(async (context) => {
+          await context.firestore().collection("events").doc("temp-event-2").delete();
+        });
+
+        const david = contextFor(davidUid);
+        await expectPermissionDenied(() => eventRsvpRef(david, `temp-event-2_${aliceUid}`).get());
+      });
+    });
+
+    describe("Query Authorization (List - Q2 and Q3)", () => {
+      beforeEach(async () => {
+        await seedEventRsvp(`pub-event-1_${aliceUid}`, "pub-event-1", aliceUid, APEX_CAMPUS_ID);
+        await seedEventRsvp(`pub-event-1_${bobUid}`, "pub-event-1", bobUid, APEX_CAMPUS_ID);
+        await seedEventRsvp(`comm-event-1_${carolUid}`, "comm-event-1", carolUid, APEX_CAMPUS_ID);
+      });
+
+      it("Q2 (My RSVPs): owner query with correct userId and campusId succeeds", async () => {
+        const alice = contextFor(aliceUid);
+        const q = alice
+          .firestore()
+          .collection("eventRsvps")
+          .where("userId", "==", aliceUid)
+          .where("campusId", "==", APEX_CAMPUS_ID)
+          .limit(50);
+        const snap = await assertSucceeds(q.get());
+        expect(snap.docs.length).toBe(1);
+        expect(snap.docs[0].id).toBe(`pub-event-1_${aliceUid}`);
+      });
+
+      it("Q2 (My RSVPs): owner query with wrong campusId is denied", async () => {
+        const alice = contextFor(aliceUid);
+        const q = alice
+          .firestore()
+          .collection("eventRsvps")
+          .where("userId", "==", aliceUid)
+          .where("campusId", "==", ST_JUDE_CAMPUS_ID)
+          .limit(50);
+        await expectPermissionDenied(() => q.get());
+      });
+
+      it("Q2 (My RSVPs): owner query omitting campusId equality constraint is denied", async () => {
+        const alice = contextFor(aliceUid);
+        const q = alice
+          .firestore()
+          .collection("eventRsvps")
+          .where("userId", "==", aliceUid)
+          .limit(50);
+        await expectPermissionDenied(() => q.get());
+      });
+
+      it("Q2 (My RSVPs): query attempting to list another user's RSVPs is denied", async () => {
+        const david = contextFor(davidUid);
+        const q = david
+          .firestore()
+          .collection("eventRsvps")
+          .where("userId", "==", aliceUid)
+          .where("campusId", "==", APEX_CAMPUS_ID)
+          .limit(50);
+        await expectPermissionDenied(() => q.get());
+      });
+
+      it("Q2 (My RSVPs): owner can list their own RSVPs even if a parent event has been deleted", async () => {
+        await seedEvent("temp-event-q2", aliceUid, APEX_CAMPUS_ID, "apex-ai-club", {
+          visibility: "campus_public",
+          startAt: upcomingStart,
+          endAt: upcomingEnd,
+        });
+        await seedEventRsvp(`temp-event-q2_${aliceUid}`, "temp-event-q2", aliceUid, APEX_CAMPUS_ID);
+        await testEnvironment.withSecurityRulesDisabled(async (context) => {
+          await context.firestore().collection("events").doc("temp-event-q2").delete();
+        });
+
+        const alice = contextFor(aliceUid);
+        const q = alice
+          .firestore()
+          .collection("eventRsvps")
+          .where("userId", "==", aliceUid)
+          .where("campusId", "==", APEX_CAMPUS_ID)
+          .limit(50);
+        const snap = await assertSucceeds(q.get());
+        expect(snap.docs.length).toBeGreaterThanOrEqual(1);
+      });
+
+      it("Q3 (Attendees): same-campus reader on campus_public event succeeds", async () => {
+        const david = contextFor(davidUid);
+        const q = david
+          .firestore()
+          .collection("eventRsvps")
+          .where("eventId", "==", "pub-event-1")
+          .where("campusId", "==", APEX_CAMPUS_ID)
+          .limit(51);
+        const snap = await assertSucceeds(q.get());
+        expect(snap.docs.length).toBe(2);
+      });
+
+      it("Q3 (Attendees): active sponsoring-community member on community_only event succeeds", async () => {
+        const carol = contextFor(carolUid);
+        const q = carol
+          .firestore()
+          .collection("eventRsvps")
+          .where("eventId", "==", "comm-event-1")
+          .where("campusId", "==", APEX_CAMPUS_ID)
+          .limit(51);
+        const snap = await assertSucceeds(q.get());
+        expect(snap.docs.length).toBe(1);
+        expect(snap.docs[0].id).toBe(`comm-event-1_${carolUid}`);
+      });
+
+      it("Q3 (Attendees): non-member on community_only event is denied", async () => {
+        const david = contextFor(davidUid);
+        const q = david
+          .firestore()
+          .collection("eventRsvps")
+          .where("eventId", "==", "comm-event-1")
+          .where("campusId", "==", APEX_CAMPUS_ID)
+          .limit(51);
+        await expectPermissionDenied(() => q.get());
+      });
+
+      it("Q3 (Attendees): removed member on community_only event is denied", async () => {
+        const frank = contextFor(frankUid);
+        const q = frank
+          .firestore()
+          .collection("eventRsvps")
+          .where("eventId", "==", "comm-event-1")
+          .where("campusId", "==", APEX_CAMPUS_ID)
+          .limit(51);
+        await expectPermissionDenied(() => q.get());
+      });
+
+      it("Q3 (Attendees): pending member on community_only event is denied", async () => {
+        const grace = contextFor(graceUid);
+        const q = grace
+          .firestore()
+          .collection("eventRsvps")
+          .where("eventId", "==", "comm-event-1")
+          .where("campusId", "==", APEX_CAMPUS_ID)
+          .limit(51);
+        await expectPermissionDenied(() => q.get());
+      });
+
+      it("Q3 (Attendees): cross-campus reader is denied", async () => {
+        const eve = contextFor(eveUid);
+        const q = eve
+          .firestore()
+          .collection("eventRsvps")
+          .where("eventId", "==", "pub-event-1")
+          .where("campusId", "==", APEX_CAMPUS_ID)
+          .limit(51);
+        await expectPermissionDenied(() => q.get());
+      });
+
+      it("Q3 (Attendees): query omitting campusId equality constraint is denied", async () => {
+        const david = contextFor(davidUid);
+        const q = david
+          .firestore()
+          .collection("eventRsvps")
+          .where("eventId", "==", "pub-event-1")
+          .limit(51);
+        await expectPermissionDenied(() => q.get());
+      });
+
+      it("Q3 (Attendees): non-owner query is denied if parent event has been deleted", async () => {
+        await seedEvent("temp-event-q3", aliceUid, APEX_CAMPUS_ID, "apex-ai-club", {
+          visibility: "campus_public",
+          startAt: upcomingStart,
+          endAt: upcomingEnd,
+        });
+        await seedEventRsvp(`temp-event-q3_${aliceUid}`, "temp-event-q3", aliceUid, APEX_CAMPUS_ID);
+        await testEnvironment.withSecurityRulesDisabled(async (context) => {
+          await context.firestore().collection("events").doc("temp-event-q3").delete();
+        });
+
+        const david = contextFor(davidUid);
+        const q = david
+          .firestore()
+          .collection("eventRsvps")
+          .where("eventId", "==", "temp-event-q3")
+          .where("campusId", "==", APEX_CAMPUS_ID)
+          .limit(51);
+        await expectPermissionDenied(() => q.get());
+      });
+
+      it("Q3 (Attendees): authorization dynamically follows parent event visibility change", async () => {
+        await seedEvent("dyn-event-1", aliceUid, APEX_CAMPUS_ID, "apex-ai-club", {
+          visibility: "campus_public",
+          startAt: upcomingStart,
+          endAt: upcomingEnd,
+        });
+        await seedEventRsvp(`dyn-event-1_${aliceUid}`, "dyn-event-1", aliceUid, APEX_CAMPUS_ID);
+
+        const david = contextFor(davidUid);
+        const carol = contextFor(carolUid);
+
+        const qDavid = david
+          .firestore()
+          .collection("eventRsvps")
+          .where("eventId", "==", "dyn-event-1")
+          .where("campusId", "==", APEX_CAMPUS_ID)
+          .limit(51);
+
+        const snap1 = await assertSucceeds(qDavid.get());
+        expect(snap1.docs.length).toBe(1);
+
+        await testEnvironment.withSecurityRulesDisabled(async (context) => {
+          await context.firestore().collection("events").doc("dyn-event-1").update({
+            visibility: "community_only",
+          });
+        });
+
+        await expectPermissionDenied(() => qDavid.get());
+
+        const qCarol = carol
+          .firestore()
+          .collection("eventRsvps")
+          .where("eventId", "==", "dyn-event-1")
+          .where("campusId", "==", APEX_CAMPUS_ID)
+          .limit(51);
+        const snap2 = await assertSucceeds(qCarol.get());
+        expect(snap2.docs.length).toBe(1);
+      });
+
+      it("Broad collection query on eventRsvps without eventId or userId is denied", async () => {
+        const david = contextFor(davidUid);
+        const q = david
+          .firestore()
+          .collection("eventRsvps")
+          .where("campusId", "==", APEX_CAMPUS_ID);
+        await expectPermissionDenied(() => q.get());
+      });
+    });
+
+    describe("RSVP Creation (Create Authority & Schema Enforcement)", () => {
+      it("same-campus user creates RSVP for upcoming published campus_public event", async () => {
+        const david = contextFor(davidUid);
+        const rsvpId = `pub-event-1_${davidUid}`;
+        await assertSucceeds(
+          eventRsvpRef(david, rsvpId).set({
+            id: rsvpId,
+            eventId: "pub-event-1",
+            campusId: APEX_CAMPUS_ID,
+            userId: davidUid,
+            createdAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("active community member creates RSVP for upcoming published community_only event", async () => {
+        const carol = contextFor(carolUid);
+        const rsvpId = `comm-event-1_${carolUid}`;
+        await assertSucceeds(
+          eventRsvpRef(carol, rsvpId).set({
+            id: rsvpId,
+            eventId: "comm-event-1",
+            campusId: APEX_CAMPUS_ID,
+            userId: carolUid,
+            createdAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("create denied when parent event does not exist", async () => {
+        const alice = contextFor(aliceUid);
+        const rsvpId = `nonexistent-event_${aliceUid}`;
+        await expectPermissionDenied(() =>
+          eventRsvpRef(alice, rsvpId).set({
+            id: rsvpId,
+            eventId: "nonexistent-event",
+            campusId: APEX_CAMPUS_ID,
+            userId: aliceUid,
+            createdAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("create denied when parent event is cancelled", async () => {
+        await seedEvent("cancelled-event", aliceUid, APEX_CAMPUS_ID, "apex-ai-club", {
+          visibility: "campus_public",
+          status: "cancelled",
+          startAt: upcomingStart,
+          endAt: upcomingEnd,
+        });
+        const david = contextFor(davidUid);
+        const rsvpId = `cancelled-event_${davidUid}`;
+        await expectPermissionDenied(() =>
+          eventRsvpRef(david, rsvpId).set({
+            id: rsvpId,
+            eventId: "cancelled-event",
+            campusId: APEX_CAMPUS_ID,
+            userId: davidUid,
+            createdAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("create denied when parent event is ongoing (request.time >= startAt)", async () => {
+        await seedEvent("ongoing-event", aliceUid, APEX_CAMPUS_ID, "apex-ai-club", {
+          visibility: "campus_public",
+          status: "published",
+          startAt: ongoingStart,
+          endAt: ongoingEnd,
+        });
+        const david = contextFor(davidUid);
+        const rsvpId = `ongoing-event_${davidUid}`;
+        await expectPermissionDenied(() =>
+          eventRsvpRef(david, rsvpId).set({
+            id: rsvpId,
+            eventId: "ongoing-event",
+            campusId: APEX_CAMPUS_ID,
+            userId: davidUid,
+            createdAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("create denied when parent event has ended (request.time >= endAt)", async () => {
+        await seedEvent("ended-event", aliceUid, APEX_CAMPUS_ID, "apex-ai-club", {
+          visibility: "campus_public",
+          status: "published",
+          startAt: pastStart,
+          endAt: pastEnd,
+        });
+        const david = contextFor(davidUid);
+        const rsvpId = `ended-event_${davidUid}`;
+        await expectPermissionDenied(() =>
+          eventRsvpRef(david, rsvpId).set({
+            id: rsvpId,
+            eventId: "ended-event",
+            campusId: APEX_CAMPUS_ID,
+            userId: davidUid,
+            createdAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("create denied for community_only event when user is not a community member", async () => {
+        const david = contextFor(davidUid);
+        const rsvpId = `comm-event-1_${davidUid}`;
+        await expectPermissionDenied(() =>
+          eventRsvpRef(david, rsvpId).set({
+            id: rsvpId,
+            eventId: "comm-event-1",
+            campusId: APEX_CAMPUS_ID,
+            userId: davidUid,
+            createdAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("create denied for community_only event when user is removed member", async () => {
+        const frank = contextFor(frankUid);
+        const rsvpId = `comm-event-1_${frankUid}`;
+        await expectPermissionDenied(() =>
+          eventRsvpRef(frank, rsvpId).set({
+            id: rsvpId,
+            eventId: "comm-event-1",
+            campusId: APEX_CAMPUS_ID,
+            userId: frankUid,
+            createdAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("create denied for community_only event when user is pending member", async () => {
+        const grace = contextFor(graceUid);
+        const rsvpId = `comm-event-1_${graceUid}`;
+        await expectPermissionDenied(() =>
+          eventRsvpRef(grace, rsvpId).set({
+            id: rsvpId,
+            eventId: "comm-event-1",
+            campusId: APEX_CAMPUS_ID,
+            userId: graceUid,
+            createdAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("create denied when event has invalid/unrecognized visibility", async () => {
+        await seedEvent("invalid-vis-event", aliceUid, APEX_CAMPUS_ID, "apex-ai-club", {
+          visibility: "archived",
+          status: "published",
+          startAt: upcomingStart,
+          endAt: upcomingEnd,
+        });
+        const david = contextFor(davidUid);
+        const rsvpId = `invalid-vis-event_${davidUid}`;
+        await expectPermissionDenied(() =>
+          eventRsvpRef(david, rsvpId).set({
+            id: rsvpId,
+            eventId: "invalid-vis-event",
+            campusId: APEX_CAMPUS_ID,
+            userId: davidUid,
+            createdAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("create denied when user campus does not match event campus (cross-campus user)", async () => {
+        const eve = contextFor(eveUid);
+        const rsvpId = `pub-event-1_${eveUid}`;
+        await expectPermissionDenied(() =>
+          eventRsvpRef(eve, rsvpId).set({
+            id: rsvpId,
+            eventId: "pub-event-1",
+            campusId: APEX_CAMPUS_ID,
+            userId: eveUid,
+            createdAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("create denied when parent event campus does not match RSVP campus (event campus mismatch)", async () => {
+        // Seed upcoming published campus_public event on ST_JUDE_CAMPUS_ID
+        await seedEvent("st-jude-pub-event", eveUid, ST_JUDE_CAMPUS_ID, "st-jude-medical-society", {
+          visibility: "campus_public",
+          status: "published",
+          startAt: upcomingStart,
+          endAt: upcomingEnd,
+        });
+
+        // David is an Apex student (APEX_CAMPUS_ID) submitting campusId == APEX_CAMPUS_ID
+        const david = contextFor(davidUid);
+        const rsvpId = `st-jude-pub-event_${davidUid}`;
+        await expectPermissionDenied(() =>
+          eventRsvpRef(david, rsvpId).set({
+            id: rsvpId,
+            eventId: "st-jude-pub-event",
+            campusId: APEX_CAMPUS_ID,
+            userId: davidUid,
+            createdAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("create denied when submitted campusId does not match user campus", async () => {
+        const david = contextFor(davidUid);
+        const rsvpId = `pub-event-1_${davidUid}`;
+        await expectPermissionDenied(() =>
+          eventRsvpRef(david, rsvpId).set({
+            id: rsvpId,
+            eventId: "pub-event-1",
+            campusId: ST_JUDE_CAMPUS_ID,
+            userId: davidUid,
+            createdAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("create denied when user has no campus assigned", async () => {
+        const harry = contextFor(harryUid);
+        const rsvpId = `pub-event-1_${harryUid}`;
+        await expectPermissionDenied(() =>
+          eventRsvpRef(harry, rsvpId).set({
+            id: rsvpId,
+            eventId: "pub-event-1",
+            campusId: APEX_CAMPUS_ID,
+            userId: harryUid,
+            createdAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("create denied when userId does not match request.auth.uid", async () => {
+        const alice = contextFor(aliceUid);
+        const rsvpId = `pub-event-1_${bobUid}`;
+        await expectPermissionDenied(() =>
+          eventRsvpRef(alice, rsvpId).set({
+            id: rsvpId,
+            eventId: "pub-event-1",
+            campusId: APEX_CAMPUS_ID,
+            userId: bobUid,
+            createdAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("create denied when id does not match rsvpId (document path mismatch)", async () => {
+        const david = contextFor(davidUid);
+        const rsvpId = `pub-event-1_${davidUid}`;
+        await expectPermissionDenied(() =>
+          eventRsvpRef(david, rsvpId).set({
+            id: "mismatched-id",
+            eventId: "pub-event-1",
+            campusId: APEX_CAMPUS_ID,
+            userId: davidUid,
+            createdAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("create denied when id does not equal eventId_userId", async () => {
+        const david = contextFor(davidUid);
+        const malformedId = `other_${davidUid}`;
+        await expectPermissionDenied(() =>
+          eventRsvpRef(david, malformedId).set({
+            id: malformedId,
+            eventId: "pub-event-1",
+            campusId: APEX_CAMPUS_ID,
+            userId: davidUid,
+            createdAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("create denied when missing required field (createdAt)", async () => {
+        const david = contextFor(davidUid);
+        const rsvpId = `pub-event-1_${davidUid}`;
+        await expectPermissionDenied(() =>
+          eventRsvpRef(david, rsvpId).set({
+            id: rsvpId,
+            eventId: "pub-event-1",
+            campusId: APEX_CAMPUS_ID,
+            userId: davidUid,
+          })
+        );
+      });
+
+      it("create denied when missing required field (eventId)", async () => {
+        const david = contextFor(davidUid);
+        const rsvpId = `pub-event-1_${davidUid}`;
+        await expectPermissionDenied(() =>
+          eventRsvpRef(david, rsvpId).set({
+            id: rsvpId,
+            campusId: APEX_CAMPUS_ID,
+            userId: davidUid,
+            createdAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("create denied when extra field is present (status)", async () => {
+        const david = contextFor(davidUid);
+        const rsvpId = `pub-event-1_${davidUid}`;
+        await expectPermissionDenied(() =>
+          eventRsvpRef(david, rsvpId).set({
+            id: rsvpId,
+            eventId: "pub-event-1",
+            campusId: APEX_CAMPUS_ID,
+            userId: davidUid,
+            createdAt: serverTimestamp(),
+            status: "going",
+          })
+        );
+      });
+
+      it("create denied when field has invalid type (createdAt as numeric timestamp)", async () => {
+        const david = contextFor(davidUid);
+        const rsvpId = `pub-event-1_${davidUid}`;
+        await expectPermissionDenied(() =>
+          eventRsvpRef(david, rsvpId).set({
+            id: rsvpId,
+            eventId: "pub-event-1",
+            campusId: APEX_CAMPUS_ID,
+            userId: davidUid,
+            createdAt: Date.now(),
+          })
+        );
+      });
+
+      it("create denied when createdAt does not equal request.time (hardcoded timestamp)", async () => {
+        const david = contextFor(davidUid);
+        const rsvpId = `pub-event-1_${davidUid}`;
+        await expectPermissionDenied(() =>
+          eventRsvpRef(david, rsvpId).set({
+            id: rsvpId,
+            eventId: "pub-event-1",
+            campusId: APEX_CAMPUS_ID,
+            userId: davidUid,
+            createdAt: timestamp,
+          })
+        );
+      });
+    });
+
+    describe("Immutability & Update Prohibitions", () => {
+      const rsvpId = `pub-event-1_${aliceUid}`;
+
+      beforeEach(async () => {
+        await seedEventRsvp(rsvpId, "pub-event-1", aliceUid, APEX_CAMPUS_ID);
+      });
+
+      it("update attempting to modify id is denied", async () => {
+        const alice = contextFor(aliceUid);
+        await expectPermissionDenied(() =>
+          eventRsvpRef(alice, rsvpId).update({ id: "new-id" })
+        );
+      });
+
+      it("update attempting to modify eventId is denied", async () => {
+        const alice = contextFor(aliceUid);
+        await expectPermissionDenied(() =>
+          eventRsvpRef(alice, rsvpId).update({ eventId: "new-event-id" })
+        );
+      });
+
+      it("update attempting to modify campusId is denied", async () => {
+        const alice = contextFor(aliceUid);
+        await expectPermissionDenied(() =>
+          eventRsvpRef(alice, rsvpId).update({ campusId: ST_JUDE_CAMPUS_ID })
+        );
+      });
+
+      it("update attempting to modify userId is denied", async () => {
+        const alice = contextFor(aliceUid);
+        await expectPermissionDenied(() =>
+          eventRsvpRef(alice, rsvpId).update({ userId: bobUid })
+        );
+      });
+
+      it("update attempting to modify createdAt is denied", async () => {
+        const alice = contextFor(aliceUid);
+        await expectPermissionDenied(() =>
+          eventRsvpRef(alice, rsvpId).update({ createdAt: serverTimestamp() })
+        );
+      });
+
+      it("update attempting to add new fields (e.g. status) is denied", async () => {
+        const alice = contextFor(aliceUid);
+        await expectPermissionDenied(() =>
+          eventRsvpRef(alice, rsvpId).update({ status: "cancelled" })
+        );
+      });
+    });
+
+    describe("Deletion Authority", () => {
+      const rsvpId = `pub-event-1_${aliceUid}`;
+
+      beforeEach(async () => {
+        await seedEventRsvp(rsvpId, "pub-event-1", aliceUid, APEX_CAMPUS_ID);
+      });
+
+      it("owner can delete their own existing RSVP with a normal matching campus", async () => {
+        const alice = contextFor(aliceUid);
+        await assertSucceeds(eventRsvpRef(alice, rsvpId).delete());
+      });
+
+      it("owner deletion remains allowed if the owner's campus profile is absent", async () => {
+        const harryRsvpId = `pub-event-1_${harryUid}`;
+        await seedEventRsvp(harryRsvpId, "pub-event-1", harryUid, APEX_CAMPUS_ID);
+        const harry = contextFor(harryUid);
+        await assertSucceeds(eventRsvpRef(harry, harryRsvpId).delete());
+      });
+
+      it("owner deletion remains allowed when the owner user document is completely absent", async () => {
+        const noUserUid = "test-uid-unseeded-delete-user";
+        const unseededRsvpId = `pub-event-1_${noUserUid}`;
+        await seedEventRsvp(unseededRsvpId, "pub-event-1", noUserUid, APEX_CAMPUS_ID);
+
+        const unseededUser = contextFor(noUserUid);
+        await assertSucceeds(eventRsvpRef(unseededUser, unseededRsvpId).delete());
+      });
+
+      it("owner deletion remains allowed if the owner's campus profile no longer matches the RSVP campus", async () => {
+        // Eve is on ST_JUDE_CAMPUS_ID, but holds an RSVP anchored to APEX_CAMPUS_ID
+        const eveRsvpId = `pub-event-1_${eveUid}`;
+        await seedEventRsvp(eveRsvpId, "pub-event-1", eveUid, APEX_CAMPUS_ID);
+        const eve = contextFor(eveUid);
+        await assertSucceeds(eventRsvpRef(eve, eveRsvpId).delete());
+      });
+
+      it("owner can delete their own RSVP after event is cancelled", async () => {
+        await seedEvent("canc-del-event", aliceUid, APEX_CAMPUS_ID, "apex-ai-club", {
+          visibility: "campus_public",
+          status: "cancelled",
+          startAt: upcomingStart,
+          endAt: upcomingEnd,
+        });
+        const cancRsvpId = `canc-del-event_${aliceUid}`;
+        await seedEventRsvp(cancRsvpId, "canc-del-event", aliceUid, APEX_CAMPUS_ID);
+
+        const alice = contextFor(aliceUid);
+        await assertSucceeds(eventRsvpRef(alice, cancRsvpId).delete());
+      });
+
+      it("owner can delete their own RSVP after event has ended", async () => {
+        await seedEvent("ended-del-event", aliceUid, APEX_CAMPUS_ID, "apex-ai-club", {
+          visibility: "campus_public",
+          status: "published",
+          startAt: pastStart,
+          endAt: pastEnd,
+        });
+        const endedRsvpId = `ended-del-event_${aliceUid}`;
+        await seedEventRsvp(endedRsvpId, "ended-del-event", aliceUid, APEX_CAMPUS_ID);
+
+        const alice = contextFor(aliceUid);
+        await assertSucceeds(eventRsvpRef(alice, endedRsvpId).delete());
+      });
+
+      it("owner can delete their own RSVP after parent event has been deleted", async () => {
+        await seedEvent("deleted-parent-event", aliceUid, APEX_CAMPUS_ID, "apex-ai-club", {
+          visibility: "campus_public",
+          startAt: upcomingStart,
+          endAt: upcomingEnd,
+        });
+        const delRsvpId = `deleted-parent-event_${aliceUid}`;
+        await seedEventRsvp(delRsvpId, "deleted-parent-event", aliceUid, APEX_CAMPUS_ID);
+        await testEnvironment.withSecurityRulesDisabled(async (context) => {
+          await context.firestore().collection("events").doc("deleted-parent-event").delete();
+        });
+
+        const alice = contextFor(aliceUid);
+        await assertSucceeds(eventRsvpRef(alice, delRsvpId).delete());
+      });
+
+      it("other student cannot delete RSVP", async () => {
+        const david = contextFor(davidUid);
+        await expectPermissionDenied(() => eventRsvpRef(david, rsvpId).delete());
+      });
+
+      it("community moderator cannot delete another user's RSVP", async () => {
+        const bob = contextFor(bobUid);
+        await expectPermissionDenied(() => eventRsvpRef(bob, rsvpId).delete());
+      });
+
+      it("community admin cannot delete another user's RSVP", async () => {
+        await seedEventRsvp(`pub-event-1_${carolUid}`, "pub-event-1", carolUid, APEX_CAMPUS_ID);
+        const alice = contextFor(aliceUid); // Admin of apex-ai-club
+        await expectPermissionDenied(() => eventRsvpRef(alice, `pub-event-1_${carolUid}`).delete());
+      });
+
+      it("cross-campus user cannot delete another user's RSVP", async () => {
+        const eve = contextFor(eveUid);
+        await expectPermissionDenied(() => eventRsvpRef(eve, rsvpId).delete());
       });
     });
   });

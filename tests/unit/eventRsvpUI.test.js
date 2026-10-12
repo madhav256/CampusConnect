@@ -11,6 +11,7 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import React from "react";
 import { renderHook, act } from "./hookTestUtils";
+import * as eventRsvpsModule from "../../src/data/eventRsvps.js";
 import {
   RSVP_DISPLAY_STATES,
 } from "../../src/data/eventRsvps.js";
@@ -312,9 +313,13 @@ describe("Milestone 21 — Unit 21.4: RSVP Detail Interaction UI", () => {
       expect(result.current).toBeNull();
     });
 
-    it("derives display state dynamically when passed event and rsvp objects", () => {
+    it("derives display state dynamically when passed resolution and rsvp objects", () => {
       const { result } = renderComponent(RsvpStatusBadge, {
-        event: sampleEvent,
+        resolution: {
+          status: "available",
+          event: sampleEvent,
+          error: null,
+        },
         rsvp: sampleRsvp,
         referenceDate: new Date(),
       });
@@ -323,15 +328,71 @@ describe("Milestone 21 — Unit 21.4: RSVP Detail Interaction UI", () => {
       expect(getTextContent(badge)).toContain("Going");
     });
 
-    it("derives 'Cancelled' dynamically when event is cancelled", () => {
+    it("derives 'Cancelled' dynamically when event in resolution is cancelled", () => {
       const cancelledEvent = { ...sampleEvent, status: EVENT_STATUSES.CANCELLED };
       const { result } = renderComponent(RsvpStatusBadge, {
-        event: cancelledEvent,
+        resolution: {
+          status: "available",
+          event: cancelledEvent,
+          error: null,
+        },
         rsvp: sampleRsvp,
       });
       const badge = findByTestId(result.current, "rsvp-status-badge");
       expect(badge).toBeTruthy();
       expect(getTextContent(badge)).toContain("Cancelled");
+    });
+
+    it("handles basic RSVP presence without calling getRsvpDisplayState when resolution is omitted or null", () => {
+      const spy = vi.spyOn(eventRsvpsModule, "getRsvpDisplayState");
+      try {
+        const { result: goingResult } = renderComponent(RsvpStatusBadge, {
+          rsvp: sampleRsvp,
+        });
+        const goingBadge = findByTestId(goingResult.current, "rsvp-status-badge");
+        expect(goingBadge).toBeTruthy();
+        expect(getTextContent(goingBadge)).toContain("Going");
+
+        const { result: notGoingResult } = renderComponent(RsvpStatusBadge, {
+          rsvp: null,
+          showNotGoing: true,
+        });
+        const notGoingBadge = findByTestId(notGoingResult.current, "rsvp-status-badge");
+        expect(notGoingBadge).toBeTruthy();
+        expect(getTextContent(notGoingBadge)).toContain("Not Going");
+
+        expect(spy).not.toHaveBeenCalled();
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it("does not call getRsvpDisplayState with raw event or null resolution", () => {
+      const spy = vi.spyOn(eventRsvpsModule, "getRsvpDisplayState");
+      try {
+        renderComponent(RsvpStatusBadge, {
+          resolution: null,
+          rsvp: sampleRsvp,
+        });
+        renderComponent(RsvpStatusBadge, {
+          event: sampleEvent,
+          rsvp: sampleRsvp,
+        });
+        expect(spy).not.toHaveBeenCalled();
+
+        renderComponent(RsvpStatusBadge, {
+          resolution: { status: "available", event: sampleEvent, error: null },
+          rsvp: sampleRsvp,
+        });
+        expect(spy).toHaveBeenCalledTimes(1);
+        expect(spy).toHaveBeenCalledWith(
+          expect.objectContaining({ status: "available", event: sampleEvent }),
+          sampleRsvp,
+          undefined
+        );
+      } finally {
+        spy.mockRestore();
+      }
     });
 
     it("derives display state dynamically when passed an EventResolution with status 'available'", () => {
@@ -854,6 +915,35 @@ describe("Milestone 21 — Unit 21.4: RSVP Detail Interaction UI", () => {
       const badges = findAllByTestId(result.current, "rsvp-status-badge");
       expect(badges.length).toBeGreaterThanOrEqual(1);
       expect(getTextContent(badges[0])).toContain("Going");
+    });
+
+    it("does not synthesize available EventResolution when availability is unrecognized or null even if event is present", () => {
+      const spy = vi.spyOn(eventRsvpsModule, "getRsvpDisplayState");
+      try {
+        mocks.useEvent.mockReturnValue({
+          event: sampleEvent,
+          availability: null,
+          isLoading: false,
+          error: null,
+          refetch: vi.fn(),
+        });
+        mocks.useEventRsvp.mockReturnValue({
+          rsvp: sampleRsvp,
+          isGoing: true,
+          isLoading: false,
+          isMutating: false,
+          error: null,
+          rsvpToEvent: vi.fn(),
+          cancelRsvp: vi.fn(),
+        });
+        const { result } = renderComponent(EventDetail);
+        const badges = findAllByTestId(result.current, "rsvp-status-badge");
+        expect(badges.length).toBeGreaterThanOrEqual(1);
+        expect(getTextContent(badges[0])).toContain("Going");
+        expect(spy).not.toHaveBeenCalled();
+      } finally {
+        spy.mockRestore();
+      }
     });
   });
 });

@@ -103,7 +103,7 @@ export default function EventDetail() {
         error: error instanceof Error ? error : new Error(String(error || "Failed to load event.")),
       };
     }
-    return event ? { status: "available", event, error: null } : null;
+    return null;
   }, [availability, event, error]);
 
   // Loading State

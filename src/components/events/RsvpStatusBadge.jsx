@@ -5,7 +5,6 @@
  * States: not_going, going, attended_window_passed, event_cancelled, event_unavailable.
  */
 
-import { useMemo } from "react";
 import { Check, AlertCircle, Clock, XCircle } from "lucide-react";
 import {
   RSVP_DISPLAY_STATES,
@@ -21,9 +20,6 @@ import { useEventRsvp } from "../../hooks/useEventRsvp.js";
  * @param {string} [props.state] - Explicit RSVP display state
  * @param {string} [props.eventId] - Event ID to resolve user RSVP from hook
  * @param {object|null} [props.resolution] - Strict EventResolution contract ({ status, event, error })
- * @param {object|null} [props.event] - Event object or EventResolution
- * @param {string} [props.availability] - "available"|"inaccessible"|"error"
- * @param {any} [props.error] - Error object or string
  * @param {object|null} [props.rsvp] - RSVP document
  * @param {Date|number|string} [props.referenceDate] - Temporal reference date
  * @param {boolean} [props.showNotGoing=false] - Whether to render badge when state is not_going
@@ -33,10 +29,7 @@ import { useEventRsvp } from "../../hooks/useEventRsvp.js";
 export default function RsvpStatusBadge({
   state: propState,
   eventId,
-  resolution: propResolution,
-  event: propEvent,
-  availability,
-  error,
+  resolution,
   rsvp: propRsvp,
   referenceDate,
   showNotGoing = false,
@@ -47,38 +40,15 @@ export default function RsvpStatusBadge({
   const hookResult = useEventRsvp(shouldHook ? eventId : null);
   const resolvedRsvp = propRsvp !== undefined ? propRsvp : hookResult?.rsvp;
 
-  // Resolve strict EventResolution contract ({ status, event, error })
-  const resolution = useMemo(() => {
-    if (propResolution && typeof propResolution === "object") {
-      return propResolution;
-    }
-    if (
-      propEvent &&
-      typeof propEvent === "object" &&
-      ["available", "inaccessible", "error"].includes(propEvent.status) &&
-      ("event" in propEvent || "error" in propEvent)
-    ) {
-      return propEvent;
-    }
-    if (availability === "inaccessible") {
-      return { status: "inaccessible", event: null, error: null };
-    }
-    if (availability === "error") {
-      return {
-        status: "error",
-        event: null,
-        error: error instanceof Error ? error : new Error(String(error || "Event error")),
-      };
-    }
-    if (propEvent) {
-      return { status: "available", event: propEvent, error: null };
-    }
-    return null;
-  }, [propResolution, propEvent, availability, error]);
+  const isValidResolution = Boolean(
+    resolution &&
+      typeof resolution === "object" &&
+      ["available", "inaccessible", "error"].includes(resolution.status)
+  );
 
   const displayState =
     propState ||
-    (resolution || resolvedRsvp
+    (isValidResolution
       ? getRsvpDisplayState(resolution, resolvedRsvp, referenceDate)
       : resolvedRsvp
       ? RSVP_DISPLAY_STATES.GOING

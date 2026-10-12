@@ -2,6 +2,8 @@ import process from "node:process";
 import { initializeApp, getApps } from "firebase-admin/app";
 import { getFirestore, Timestamp } from "firebase-admin/firestore";
 import { E2E_USERS } from "../fixtures/testUsers.js";
+import { seedEventRsvps } from "../../../scripts/seedEventRsvps.mjs";
+import { EVENT_RSVP_DEFINITIONS } from "../../../src/data/eventRsvps.js";
 
 process.env.GOOGLE_AUTH_SUPPRESS_CREDENTIALS_WARNINGS = "true";
 
@@ -257,4 +259,60 @@ export async function resetMessagingPairBC() {
     createdAt: now,
     updatedAt: now,
   });
+}
+
+const APPROVED_RSVP_IDS = new Set(EVENT_RSVP_DEFINITIONS.map((def) => def.id));
+
+/**
+ * Deterministically resets the eventRsvps collection to the exact approved
+ * fixture whitelist, removing any extraneous/test-created RSVP documents and
+ * restoring the approved fixtures to pristine state. Idempotent.
+ */
+export async function resetEventRsvps() {
+  if (!process.env.FIRESTORE_EMULATOR_HOST) {
+    throw new Error("[resetEventRsvps] Refusing to run outside emulator environment.");
+  }
+
+  const snapshot = await db.collection("eventRsvps").get();
+  const batch = db.batch();
+  let deleteCount = 0;
+
+  for (const doc of snapshot.docs) {
+    if (!APPROVED_RSVP_IDS.has(doc.id)) {
+      batch.delete(doc.ref);
+      deleteCount++;
+    }
+  }
+
+  if (deleteCount > 0) {
+    await batch.commit();
+  }
+
+  // Restore the approved fixtures
+  await seedEventRsvps(db);
+}
+
+/**
+ * Creates a deterministic test RSVP document directly in Cloud Firestore
+ * via the Admin SDK for tests that exercise cancellation or attention states.
+ *
+ * @param {string} eventId
+ * @param {string} userId
+ * @param {string} campusId
+ * @returns {Promise<string>} Created RSVP document ID
+ */
+export async function createTestEventRsvp(eventId, userId, campusId) {
+  if (!process.env.FIRESTORE_EMULATOR_HOST) {
+    throw new Error("[createTestEventRsvp] Refusing to run outside emulator environment.");
+  }
+
+  const rsvpId = `${eventId}_${userId}`;
+  await db.collection("eventRsvps").doc(rsvpId).set({
+    id: rsvpId,
+    eventId,
+    campusId,
+    userId,
+    createdAt: Timestamp.now(),
+  });
+  return rsvpId;
 }

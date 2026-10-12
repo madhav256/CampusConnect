@@ -1,6 +1,6 @@
 # CampusConnect Architecture
 
-**Status:** Current implementation reference (Milestone 20 Delivered)
+**Status:** Current implementation reference (Milestone 21 Delivered)
 
 This document describes the architecture that exists in the repository today. It does not describe proposed messaging, media storage, search infrastructure, or other deferred work.
 
@@ -37,7 +37,7 @@ The UI does not use a custom HTTP API or server-rendered backend. Firebase Admin
 | Database | Cloud Firestore |
 | Hosting | Firebase Hosting serving the Vite `dist` output |
 | Admin tooling | Firebase Admin SDK seeding script |
-| Quality checks | ESLint; production Vite build; 497 Vitest unit tests (`npm run test:unit`); 154 Firestore Emulator security rules tests (`npm run test:rules`); Playwright E2E test suite (`npm run test:e2e`); development-only Firestore security audit panel |
+| Quality checks | ESLint; production Vite build; 710 Vitest unit tests (`npm run test:unit`); 352 Firestore Emulator security rules tests (`npm run test:rules`); Playwright E2E test suite with 59 passing tests across 14 spec files (`npm run test:e2e`); development-only Firestore security audit panel |
 
 Firebase Storage is not part of the active client architecture. The Firebase configuration contains a storage-bucket value because it is part of the standard web configuration shape, but the application does not initialize the Storage SDK or upload files.
 
@@ -55,9 +55,9 @@ Firebase Storage is not part of the active client architecture. The Firebase con
 | `/profile` | Authenticated | Current user's editable profile |
 | `/discover` | Authenticated | Bounded student search |
 | `/communities` | Authenticated | Campus-scoped community discovery |
-| `/communities/:communityId` | Authenticated | Community detail, profile, discussion feed, and events tab |
-| `/events` | Authenticated | Campus-wide event discovery and category/temporal filtering |
-| `/events/:eventId` | Authenticated | Event detail, sponsoring community integration, and lifecycle display |
+| `/communities/:communityId` | Authenticated | Community detail, profile, discussion feed, and Events tab with Going badge integration |
+| `/events` | Authenticated | Campus-wide event discovery, Going tab (personal RSVPs), category/community filtering, and attention/retry error states |
+| `/events/:eventId` | Authenticated | Event detail, sponsoring community integration, RSVP lifecycle interaction, real-time attendee roster, and cancellation display |
 | `/users/:uid` | Authenticated | Public profile and connection CTA |
 | `/connections` | Authenticated | Accepted connections and pending requests |
 | `/messages` | Authenticated | 1-to-1 private messaging overview |
@@ -80,7 +80,7 @@ src/
 ├── components/
 │   ├── community/        # CommunityCard, CommunityCategoryBadge, CommunityGrid, CommunityHero, CommunityMembersPreview, CommunityPostComposer, CommunityPostFeed
 │   ├── dev/              # Development-only security audit panel
-│   ├── events/           # EventCard, EventCategoryBadge, EventStatusBadge, EventFilterBar, EventGrid, EventComposerModal
+│   ├── events/           # EventCard, EventCategoryBadge, EventStatusBadge, EventFilterBar, EventGrid, EventComposerModal, EventRsvpButton, RsvpStatusBadge, EventAttendeePreview
 │   ├── feed/             # Feed, posts, comments, composers
 │   ├── layout/           # Navbar, PageContainer, Section
 │   ├── messages/         # ConversationList, ConversationItem, MessageThread, MessageBubble, MessageComposer, DisconnectedNotice
@@ -88,11 +88,11 @@ src/
 │   ├── search/           # StudentCard
 │   └── ui/               # Button, Card, Avatar, Input, Textarea, EmptyState
 ├── contexts/             # AuthContext and its context value
-├── data/                 # Deterministic demo data, campus/community/event fixtures, and ID whitelists
+├── data/                 # Deterministic demo data, campus/community/event/RSVP fixtures, and ID whitelists
 ├── firebase/             # Firebase client initialization
-├── hooks/                # Auth, campus, community, and event hooks (including useEvents, useEvent, useEligibleCommunities)
+├── hooks/                # Auth, campus, community, and event hooks (including useEvents, useEvent, useEligibleCommunities, useEventRsvp, useMyRsvps, useEventAttendees)
 ├── pages/                # Route-level screens (including Events.jsx, EventDetail.jsx, CommunityDetail.jsx)
-├── services/             # Firebase Auth/Firestore operations (including eventService.js, communityService.js)
+├── services/             # Firebase Auth/Firestore operations (including eventService.js, eventRsvpService.js, communityService.js)
 └── utils/                # Development security test runner
 ```
 
@@ -204,9 +204,9 @@ The client uses these atomic paths, while Firestore Rules remain the final autho
 
 The active collections are:
 
-- `users/{uid}`: private authority (exact 6 fields: `uid`, `email`, `isDiscoverable`, `notificationPreferences`, `createdAt`, `updatedAt`), owner-only read and write;
-- `publicProfiles/{uid}`: public profile authority (exact 8 fields: `uid`, `displayName`, `photoURL`, `bio`, `department`, `year`, `skills`, `socialLinks`), authenticated read, owner update;
-- `directoryIndex/{uid}`: search and discoverability projection (exact 7 fields: `uid`, `displayName`, `photoURL`, `department`, `year`, `skills`, `updatedAt`), authenticated read, maintained atomically when `isDiscoverable == true`;
+- `users/{uid}`: private authority (exact 6 base fields: `uid`, `email`, `isDiscoverable`, `notificationPreferences`, `createdAt`, `updatedAt`; plus optional `campusId`), owner-only read and write;
+- `publicProfiles/{uid}`: public profile authority (exact 8 base fields: `uid`, `displayName`, `photoURL`, `bio`, `department`, `year`, `skills`, `socialLinks`; plus optional `campusId`), authenticated read, owner update;
+- `directoryIndex/{uid}`: search and discoverability projection (exact 7 base fields: `uid`, `displayName`, `photoURL`, `department`, `year`, `skills`, `updatedAt`; plus optional `campusId`), authenticated read, maintained atomically when `isDiscoverable == true`;
 - `posts/{postId}`: text feed posts;
 - `posts/{postId}/comments/{commentId}`: comments;
 - `posts/{postId}/likes/{uid}`: individual likes;
@@ -216,7 +216,9 @@ The active collections are:
 - `conversations/{canonicalConnectionId}/messages/{messageId}`: append-only immutable message subcollection;
 - `campuses/{campusId}`: authoritative campus metadata for multi-tenancy and the CampusNest domain;
 - `communities/{communityId}`: authoritative campus community metadata defining student clubs, societies, and cohorts;
-- `communityMembers/{membershipId}`: authoritative community membership records linking students to campus communities with role-based security authority.
+- `communityMembers/{membershipId}`: authoritative community membership records linking students to campus communities with role-based security authority;
+- `events/{eventId}`: authoritative campus event and student activity records (locked 17 fields);
+- `eventRsvps/{eventId}_{userId}`: authoritative event participation intent records (locked 5 fields).
 
 The full field-level schema and current rule behavior are documented in [FIRESTORE_SCHEMA.md](FIRESTORE_SCHEMA.md).
 
@@ -342,16 +344,39 @@ Events (events/{eventId})
    - The UI disables creation affordances for regular non-leader students, and Firestore Security Rules authoritatively reject unauthorized creation attempts.
    - Five fields are permanently immutable on creation: `id`, `campusId`, `communityId`, `createdBy`, and `createdAt`.
 
-7. **Deferred RSVP Model & Deferred Features:**
-   - RSVP functionality, `eventParticipants` subcollections, capacity limits, waitlists, attendance tracking, QR check-ins, ticketing, payment gateways, calendar synchronization (ICS / Google Calendar), notification triggers, recurring schedules, and event comment threads are explicitly **deferred** from Milestone 20 and not active in the current implementation.
+7. **Event RSVP and Participation Discovery Architecture (Milestone 21 Delivered):**
+   - **Root Collection Pattern (`eventRsvps/{eventId}_{userId}`):** First-class root collection keyed by deterministic composite ID `{eventId}_{userId}`. Eliminates subcollections and allows global user-centric queries across events.
+   - **Strict Five-Field Schema:** `id`, `eventId`, `campusId`, `userId`, `createdAt`. All fields are permanently immutable on creation. Document updates are prohibited in Security Rules (`allow update: if false;`).
+   - **Existence-as-State Model:** The presence of an `eventRsvps` document represents "going"; absence represents "not going". There are no mutable status fields, capacity counters, or waitlist queues stored on the document.
+   - **Three Locked Query Patterns:**
+     - **Q1 (Point Read / Subscription):** `doc(eventRsvps, "${eventId}_${userId}")` to subscribe to the current user's RSVP state on an individual event.
+     - **Q2 (User Participation Query):** `collection("eventRsvps").where("userId", "==", uid).where("campusId", "==", campusId)` driving the personal "Going" tab across all active events.
+     - **Q3 (Event Attendee Query):** `collection("eventRsvps").where("eventId", "==", eventId).where("campusId", "==", campusId).limit(51)` feeding the attendee preview roster with a 50+ overflow cap.
+   - **Derived Display States (`getRsvpDisplayState`):** Client-derived state computed from event temporal state and resolution without persisted flags:
+     - `not_going`: No RSVP record exists.
+     - `going`: Active RSVP on an accessible, upcoming/ongoing event.
+     - `attended_window_passed`: Active RSVP on an event whose temporal window has completed.
+     - `event_cancelled`: Active RSVP on a cancelled event; cancellation retains attendee record for visibility while disabling new registrations.
+     - `event_unavailable`: Active RSVP where parent event is inaccessible (e.g. lost community membership or deleted parent event).
+   - **Authorization Rules:**
+     - Creation requires authenticated student, matching tenant campus, upcoming event (`request.time < event.startAt`), published event status, and parent event readability (`campus_public` or verified active member of sponsoring community).
+     - Deletion is restricted to the RSVP owner (`resource.data.userId == request.auth.uid`), permitted after event ends, after event is cancelled, or if the parent event was deleted.
+     - Reads are permitted for the owner, or for peers within the same campus if the parent event is readable.
+   - **Participation Discovery Surfaces:**
+     - Personal "Going" tab on `/events`: filters to user's RSVP'd events, resolves parent event documents with user/campus cache isolation, provides an attention section for inaccessible RSVPs and resolution errors, and includes an explicit "Remove RSVP" action for orphaned records.
+     - Event card "Going" badges: rendered on `/events` discovery feed and community detail "Events" tabs.
+     - Event detail registration card & mobile bar: interactive RSVP/Cancel button, derived badge, and real-time attendee avatar preview.
+
+8. **Deferred Features:**
+   - Capacity limits, waitlists, attendance verification, QR check-ins, ticketing, payment gateways, calendar synchronization (ICS / Google Calendar), notification triggers, recurring schedules, and event comment threads remain explicitly deferred.
 
 ## Security model
 
 The browser is treated as untrusted. Firestore Rules enforce the active authorization model, including:
 
 - authenticated access to application data where permitted;
-- strict private user document schema (6 fields), owner-only access, immutable identity fields (`uid`, `email`, `createdAt`), and strict update constraints;
-- strict public profile schema (8 fields), authenticated reads, and owner-only updates;
+- strict private user document schema (6 base fields plus optional `campusId`), owner-only access, immutable identity fields (`uid`, `email`, `createdAt`), and strict update constraints;
+- strict public profile schema (8 base fields plus optional `campusId`), authenticated reads, and owner-only updates;
 - directory index projection synced atomically to `isDiscoverable`;
 - author-restricted post deletion and no generic post editing;
 - exact like document schemas and transaction-coupled like counters;
@@ -365,10 +390,16 @@ The browser is treated as untrusted. Firestore Rules enforce the active authoriz
 - immutable conversation participants, creation time, and message history;
 - bidirectional transactional coupling preventing message or conversation summary forgery;
 - tenant-isolated event reads and creation (`resource.data.campusId == getUserCampusId()`);
-- strict 17-field event document schema with five immutable fields (`id`, `campusId`, `communityId`, `createdBy`, `createdAt`);
+- strict 17-field event document schema with five immutable fields (`id`, `campusId`, `communityId`, `createdBy`, `createdAt`) and bounded title length (3–100 characters);
 - community leadership gate for event creation (`isCommunityModeratorOrAdmin(communityId)`);
 - two-tier event visibility enforcement (`campus_public` for campus students, `community_only` for active members);
-- strict chronological invariant (`endAt >= startAt`) and allowed stored lifecycle transitions (`published`, `cancelled`).
+- strict chronological invariant (`endAt >= startAt`) and allowed stored lifecycle transitions (`published`, `cancelled`);
+- event hard deletion permitted for original creator or community admin within matching campus;
+- root collection `eventRsvps/{eventId}_{userId}` with strict 5-field schema (`id`, `eventId`, `campusId`, `userId`, `createdAt`);
+- RSVP creation gated by matching campus, upcoming event (`request.time < event.startAt`), published status, and parent event readability;
+- immutable RSVP documents (`allow update: if false;`);
+- owner-only RSVP deletion authority (`resource.data.userId == request.auth.uid`), preserved after event ends, after cancellation, or after parent deletion;
+- owner and parent-readable non-owner RSVP read boundaries.
 
 The development-only `SecurityTestPanel` exercises selected notification and user/settings rejection scenarios. It is not a production test runner and is not a replacement for automated emulator tests.
 
@@ -382,13 +413,13 @@ The recruiter demo uses a normal Firebase Auth account configured through `VITE_
 
 ## Current limitations
 
-- 497 unit tests, 154 Firestore Emulator rules tests, and 10 Playwright E2E suites are active.
+- 710 unit tests, 352 Firestore Emulator rules tests, and 14 Playwright E2E suites (59 passing tests) are active.
 - Email verification is not required after sign-up.
 - Non-discoverable students are excluded from `directoryIndex` search queries; authenticated direct public profile reads (`/users/:uid`) remain accessible by design.
 - Notifications are bounded to the newest 30 items rather than cursor-paginated.
 - No media upload or Firebase Storage integration exists.
 - No post editing, post sharing, post search, bookmarks, marketplace, or direct account deletion exists.
-- Within the Event domain, RSVP tracking, participant subcollections, capacity limits, waitlists, ticketing/payments, calendar sync, notifications, and event comments are deferred.
+- Within the Event domain, ticketing, QR check-in, verified attendance, capacity caps, waitlists, calendar sync, notifications, and event comments remain deferred.
 - Notification generation currently originates in client connection transactions rather than a trusted background event processor.
 - The parent-only exact comment-counter limitation remains; a future ledger or server-side event model would be needed to prove arbitrary child causality.
 
@@ -398,4 +429,4 @@ The following are possible later milestones and should not be treated as active 
 
 - trusted server-side event processing for notifications;
 - media storage with separate Storage Rules and lifecycle cleanup;
-- RSVP, participant capacity, attendance tracking, and calendar synchronization.
+- capacity caps, waitlists, QR check-in, ticketing, and calendar synchronization.

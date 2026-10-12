@@ -1,6 +1,6 @@
 # CampusConnect Features
 
-**Status:** Current implementation inventory (Milestone 15 Delivered / Milestone 16 Planned)
+**Status:** Current implementation inventory (Milestone 21 Delivered)
 
 This document distinguishes shipped behavior from deferred ideas. A feature is marked implemented only when it exists in the current application source and active Firebase model.
 
@@ -135,6 +135,60 @@ The discoverability toggle updates `users/{uid}` and atomically adds or removes 
 - Unread message counters per conversation and aggregated badge in desktop Navbar and mobile drawer.
 - Direct Message CTAs on connected student Public Profiles and Connections page.
 
+### Multi-Tenancy & Campus Scoping
+
+- Explicit multi-tenant architecture scoped by `campusId`.
+- Every primary application entity (posts, connections, notifications, conversations, communities, events, event RSVPs) enforces campus isolation.
+- Cross-tenant queries and writes are strictly rejected at the Firestore security boundary.
+- Active campus session resolved from student profile.
+
+### Student Communities
+
+- Communities directory at `/communities`.
+- Community detail experience at `/communities/:communityId` featuring Overview, Feed, and Events tabs.
+- Membership management with real-time membership state (Join, Leave).
+- Community membership authority with explicit roles: `member`, `moderator`, `admin`.
+- Community-scoped feed: text post creation, author-only deletion, community-scoped comments and likes.
+- Community moderation: admin and moderator capabilities for managing community posts.
+
+### Campus Events
+
+- Events discovery surface at `/events` with Upcoming and Past tabs.
+- Category filtering, date sorting, and text query filtering across accessible events.
+- Event detail page at `/events/:eventId` showing date, time, location, description, category, and host community.
+- Event lifecycle statuses: `draft`, `published`, `cancelled`.
+- Two-tier visibility model: `campus-public` (accessible to all students of the campus) and `community-only` (accessible exclusively to active members of the host community).
+- Host community integration: events linked to host community with direct navigation between event detail and community profile.
+- Creator and community-admin event management (status transitions, cancellation with explanatory reason, hard delete).
+
+### Event RSVPs & Participation Discovery
+
+- **RSVP Lifecycle on Event Detail (`/events/:eventId`):**
+  - Interactive RSVP toggle button ("Attend Event" / "Cancel RSVP") for upcoming, published, accessible events.
+  - Strict temporal eligibility: RSVP creation permitted only when event start time is in the future.
+  - Preserved owner cancellation: attending students can cancel their RSVP at any time, including after the event has started, ended, or been cancelled.
+  - Derived RSVP display states: `not_going`, `going`, `attended_window_passed`, `event_cancelled`, and `event_unavailable`.
+  - Explanatory messaging and disabled states for past events, cancelled events, and non-accessible events.
+- **Attendee Headcount & Roster Preview:**
+  - Attendee preview card showing real-time attendee count.
+  - Avatar preview chips for up to 8 attendees with initials fallback.
+  - Overflow badge ("+N more") when attendee count exceeds the preview limit.
+- **Participation Discovery on `/events` (Going Tab):**
+  - Dedicated "Going" tab displaying all events the authenticated student has RSVP'd to.
+  - Client-side resolution pipeline resolving RSVP document IDs against the active event set.
+  - Support for active category and date filters within the Going tab.
+  - Empty state with clear call-to-action to explore upcoming campus events.
+- **Card-Level Going Badges:**
+  - "Going" badge rendered on event cards for any event the student has RSVP'd to.
+  - Rendered across both main Events tabs (Upcoming, Past, Going) and the host community's Events tab.
+  - Read-only visual indication on community cards without exposing redundant RSVP controls.
+- **Inaccessible RSVPs & Attention Section:**
+  - Dedicated Attention section on the Going tab for orphaned or inaccessible RSVPs (e.g. deleted events or revoked permissions).
+  - Explicit "Remove RSVP" action allowing students to clean up orphaned RSVPs.
+- **Resilient Error Recovery & Retry Controls:**
+  - Independent retry buttons for RSVP query failures and event resolution errors.
+  - Context isolation across user authentication and campus changes, preventing stale cached resolutions.
+
 ### Interface and accessibility behavior
 
 - Campus Atelier paper/ink/terracotta visual language.
@@ -157,10 +211,9 @@ Settings and Notifications render a development-only `SecurityTestPanel`. The av
 
 Automated verification includes:
 
-- 204 Vitest unit tests covering cutover, services, messaging, normalization, and helper logic;
-- 154 Firestore Emulator security rules tests in the fixed synthetic project `demo-campusconnect-rules-test` across 11 suites, covering users, publicProfiles, directoryIndex, discoverability transitions, posts, comments, likes, connections, notifications, conversations, and messages.
-
-Service integration, end-to-end tests, and CI remain deferred.
+- **710 Vitest unit tests** covering cutover, services, messaging, communities, events, event RSVPs, normalization, hooks, and helper logic;
+- **352 Firestore Emulator security rules tests** across 15 suites, covering users, publicProfiles, directoryIndex, discoverability transitions, posts, comments, likes, connections, notifications, conversations, messages, communities, communityMembers, events, and eventRsvps;
+- **59 Playwright E2E browser tests** executed against the Firebase Emulator suite, verifying authentication, feed, discovery, connections, messaging, communities, events, and the complete event RSVP lifecycle.
 
 ### Recruiter demo and seeding
 
@@ -168,27 +221,29 @@ Service integration, end-to-end tests, and CI remain deferred.
 - Demo persona: Alex Rivera.
 - Admin SDK seeding script with deterministic peer/post/relationship IDs.
 - Merge-only seeding with explicit whitelists and no bulk-deletion routine.
-- Seeded feed activity, student profiles, connection states, and notifications.
+- Seeded feed activity, student profiles, connection states, notifications, communities, events, and event RSVPs.
 
 ## Not implemented / deferred
 
 The following ideas are intentionally outside the current MVP:
 
-- Post editing.
-- Post sharing or reposting.
-- Post search.
-- Bookmarks or saved posts.
+- Post editing, sharing, reposting, search, or bookmarks.
 - Image, file, or rich-media uploads.
 - Firebase Storage integration.
 - Group messaging, read receipts, typing indicators, or presence (minimal 1-to-1 private messaging is implemented).
-- Like and comment notifications.
+- Like, comment, message, event, or RSVP notifications.
 - Email verification enforcement.
 - Password-change UI.
 - Account deletion and cascading cleanup.
-- Clubs, events, marketplace, internship board, or admin dashboard.
+- Marketplace or internship board.
+- Global admin dashboard.
 - Dark mode or theme switching.
 - External full-text search (e.g. Algolia/Typesense).
 - Background Cloud Functions for notification processing.
-- Service integration tests, end-to-end tests, and CI.
+- Event ticketing, payment processing, or QR code check-in.
+- Event capacity caps, waitlists, or attendance quotas.
+- Verified attendance tracking or check-in verification.
+- Organizer removal/management of other students' RSVPs.
+- Calendar export/sync (iCal, Google Calendar).
 
 These are future possibilities, not current routes, collections, or components.

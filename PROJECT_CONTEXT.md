@@ -1,12 +1,12 @@
 # CampusConnect Project Context
 
-**Status:** Current project brief (Milestone 13A)
+**Status:** Current project brief (Milestone 21 Delivered)
 
 ## Product
 
-CampusConnect is a university student networking web application. The current MVP lets authenticated students maintain an academic profile, publish text updates, comment and like posts, discover classmates, manage connection requests, and receive scoped connection notifications.
+CampusConnect is a multi-tenant university student networking web application. The active application lets authenticated students maintain an academic profile, publish text updates, comment and like posts, discover classmates, manage connection requests, exchange 1-to-1 private messages, join and participate in student communities, discover campus events, and manage their event RSVPs and participation discovery.
 
-The current product boundary is intentionally focused on student profiles, a public campus feed, discovery, connections, and notifications. Private messaging, media uploads, events, clubs, marketplace workflows, and account deletion are deferred.
+The current product boundary encompasses student profiles, public campus feeds, discovery, connections, notifications, direct 1-to-1 messaging, student communities, campus events, and event RSVPs. Rich media/image uploads, event ticketing/QR check-in, capacity caps, external search engines, and automated account deletion remain deferred.
 
 ## Active stack
 
@@ -20,7 +20,9 @@ The current product boundary is intentionally focused on student profiles, a pub
 - Firebase Authentication with email/password accounts.
 - Cloud Firestore for application data and real-time subscriptions.
 - Firebase Hosting for the built SPA.
-- Firebase Admin SDK for the local/demo seeding script.
+- Firebase Admin SDK for local/demo seeding and test state management.
+- Vitest for unit testing.
+- Playwright for end-to-end browser testing.
 
 Firebase Storage is not initialized or used by the active client.
 
@@ -42,20 +44,29 @@ src/
 └── utils/
 ```
 
-There is no custom API server, server-rendered backend, global state library, Cloud Functions deployment, or active messaging subsystem.
+There is no custom API server, server-rendered backend, or Cloud Functions deployment.
 
 ## Data and security
 
+All primary data entities are tenant-scoped by `campusId`. Cross-tenant reads and writes are strictly forbidden by Firestore Rules.
+
 The active Firestore collections are:
 
-- `users/{uid}`;
-- `posts/{postId}` with comments and likes subcollections;
-- `connections/{canonicalConnectionId}`;
-- `users/{uid}/notifications/{notificationId}`.
+- `campuses/{campusId}`: registered university campuses;
+- `communities/{communityId}`: campus-scoped student communities;
+- `communityMembers/{membershipId}`: community membership records with roles (`member`, `moderator`, `admin`);
+- `events/{eventId}`: campus events with lifecycle statuses (`draft`, `published`, `cancelled`) and visibility tiers (`campus-public`, `community-only`);
+- `eventRsvps/{rsvpId}`: deterministic `{eventId}_{userId}` RSVP participation records;
+- `users/{uid}`: private user account authority;
+- `publicProfiles/{uid}`: public profile information for authenticated student networking;
+- `directoryIndex/{uid}`: discoverability projection for search;
+- `posts/{postId}`: campus and community feed posts, with comments and likes subcollections;
+- `connections/{canonicalConnectionId}`: pairwise student connection relationships (`min_max` sorted UIDs);
+- `conversations/{canonicalConversationId}`: pairwise 1-to-1 messaging conversations;
+- `messages/{messageId}`: append-only conversation messages;
+- `users/{uid}/notifications/{notificationId}`: recipient-scoped connection notifications.
 
-Likes and connection state use transactions. Comment create/delete operations use write batches. Firestore Rules enforce authentication, ownership, canonical relationships, notification scoping, and selected atomic postconditions. The browser is treated as untrusted.
-
-The current profile document combines public profile data and private account/settings data. Search discoverability is filtered on the client, and direct profile reads remain available to authenticated students. This is a known privacy boundary for future hardening.
+Firestore Rules enforce multi-tenancy, authentication, ownership, canonical relationships, notification scoping, message coupling, event visibility, and RSVP invariants. The browser is treated as untrusted.
 
 ## Design direction
 
@@ -74,7 +85,7 @@ The design priority is clarity, editorial warmth, accessible interaction, and co
 
 ## Demo and deployment
 
-The application is deployed as a Firebase Hosting SPA. The login page can optionally expose one-click demo access for Alex Rivera through environment-configured credentials. `scripts/seedDemoData.mjs` uses Firebase Admin SDK, deterministic whitelists, and merge-only writes to seed the demo account, seven peer profiles, ten posts, comments, likes, four connection relationships, and two notifications.
+The application is deployed as a Firebase Hosting SPA. The login page can optionally expose one-click demo access for Alex Rivera through environment-configured credentials. `scripts/seedDemoData.mjs` uses Firebase Admin SDK, deterministic whitelists, and merge-only writes to seed campuses, demo accounts, peer profiles, posts, comments, likes, connection relationships, notifications, communities, events, and event RSVPs.
 
 ## Development constraints
 
@@ -84,8 +95,13 @@ The application is deployed as a Firebase Hosting SPA. The login page can option
 - Keep reads bounded and understand the cost of new listeners/queries.
 - Do not present deferred features or schemas as implemented.
 - Do not add dependencies without an explicit need and review.
-- Preserve the current product boundary unless a milestone deliberately expands it.
+- Preserve the current multi-tenant security model.
 
 ## Current verification
 
-The repository has ESLint and Vite build scripts, Vitest pure-helper tests, and an isolated Firestore Emulator Rules suite. Rules tests use the synthetic `demo-campusconnect-rules-test` project with deterministic fixtures and do not use production configuration. The development-only in-app security audit remains separate. Service integration, end-to-end tests, and a CI pipeline are not yet configured.
+The repository maintains five automated verification gates:
+- **ESLint**: clean linting across application and test source.
+- **Production build**: Vite bundle generation.
+- **Unit tests**: 710 Vitest tests covering cutover, services, messaging, communities, events, event RSVPs, hooks, and helpers.
+- **Firestore security rules tests**: 352 rules tests across 15 suites executed against the Firebase Emulator using the synthetic `demo-campusconnect-rules-test` project.
+- **Playwright E2E browser tests**: 59 automated tests covering authentication, feed, discovery, connections, messaging, communities, events, and event RSVPs against the Firebase Emulator suite.

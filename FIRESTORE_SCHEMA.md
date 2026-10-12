@@ -1,6 +1,6 @@
 # CampusConnect Firestore Schema
 
-**Status:** Active client schema and Rule reference (Milestone 20 Delivered / Milestone 21 Planned)
+**Status:** Active client schema and Rule reference (Milestone 21 Delivered)
 
 This document describes the collections used by the current browser application. Firebase Admin SDK demo seeding can add deterministic metadata outside the client write path; those seeder-only details are called out explicitly.
 
@@ -38,7 +38,7 @@ campuses/{campusId} (campus authority)
 communities/{communityId} (campus community authority)
 communityMembers/{membershipId} (community membership authority)
 events/{eventId} (campus events & activities authority)
-eventRsvps/{eventId}_{userId} (event participation intent; rules pending M21.2)
+eventRsvps/{eventId}_{userId} (event participation intent authority)
 ```
 
 
@@ -54,6 +54,7 @@ Stores private account metadata, authentication email, search discoverability st
 | --- | --- | --- |
 | `uid` | string | Firebase Auth UID; must equal document ID |
 | `email` | string | Authenticated email address |
+| `campusId` | string (optional) | Tenant campus anchor (`campuses/{campusId}`); validated against existing campus documents |
 | `isDiscoverable` | boolean | Controls discoverability and directory index projection |
 | `notificationPreferences` | map | `connectionRequests` (bool) and `connectionAccepted` (bool) |
 | `createdAt` | timestamp | Account profile creation time |
@@ -63,7 +64,7 @@ Stores private account metadata, authentication email, search discoverability st
 
 - Read access is strictly restricted to the owner: `allow read: if isOwner(userId);`. Unrelated authenticated users cannot read this document.
 - `subscribeToUserProfile(uid)` subscribes to the owner's private document.
-- Client profile creation requires an exact 6-field payload with valid types, matching email, and server timestamps. Creation must be executed in a batch that also creates `publicProfiles/{uid}` and (if `isDiscoverable == true`) `directoryIndex/{uid}`.
+- Client profile creation requires a validated payload with 6 required baseline fields (plus optional `campusId`), matching email, and server timestamps. Creation must be executed in a batch that also creates `publicProfiles/{uid}` and (if `isDiscoverable == true`) `directoryIndex/{uid}`.
 - Updates are restricted to owner-only mutations affecting only `isDiscoverable`, `notificationPreferences`, and `updatedAt`. `uid`, `email`, and `createdAt` are immutable.
 - Setting `isDiscoverable` must be kept in atomic parity with `directoryIndex/{uid}` (present when true, deleted when false).
 - Document deletion is prohibited: `allow delete: if false;`.
@@ -84,6 +85,7 @@ Stores public academic and social profile fields visible to all authenticated un
 | `year` | string | Academic year or class standing |
 | `skills` | array<string> | List of student skill tags |
 | `socialLinks` | map | Nested map of `github`, `linkedin`, `portfolio`, and `website` strings |
+| `campusId` | string (optional) | Tenant campus anchor (`campuses/{campusId}`); validated against existing campus documents |
 
 ### Query and privacy behavior
 
@@ -520,13 +522,13 @@ Stores authoritative event and activity records sponsored by campus communities.
 | `id` | string | Canonical event identifier; must equal document ID; immutable |
 | `campusId` | string | Tenant campus identifier (`campuses/{campusId}`); immutable |
 | `communityId` | string | Sponsoring community identifier (`communities/{communityId}`); immutable |
-| `title` | string | Event title (3–120 characters) |
+| `title` | string | Event title (3–100 characters) |
 | `slug` | string | URL-safe slug derived from title (lowercase alphanumeric and hyphens) |
 | `description` | string | Detailed event description (10–3000 characters) |
 | `category` | string | Categorical classification enum |
 | `location` | string | Physical venue, room number, or virtual meeting URL (2–200 characters) |
 | `startAt` | timestamp | Event commencement date and time |
-| `endAt` | timestamp | Event conclusion date and time; must be strictly after `startAt` |
+| `endAt` | timestamp | Event conclusion date and time; must be at or after `startAt` (`endAt >= startAt`) |
 | `imageURL` | string \| null | Optional banner image URL or null |
 | `createdBy` | string | Firebase Auth UID of the creator; immutable |
 | `organizerName` | string | Denormalized display name of sponsoring community at creation |
@@ -593,16 +595,16 @@ This design prevents stale time-based status fields in Firestore and eliminates 
   - Verified active community leader: creator must be an active `moderator` or `admin` of the sponsoring community via `isCommunityModerator(communityId) || isCommunityAdmin(communityId)`.
   - Sponsoring community must exist and belong to the same campus.
   - Strict 17-field schema enforcement (`isValidEventCreate`).
-  - `endAt > startAt` chronological integrity enforced.
+  - `endAt >= startAt` chronological integrity enforced.
   - `status` must be `published`.
   - `createdAt` and `updatedAt` must equal `request.time`.
 - **Update Authorization:**
   - Allowed only by the original creator (`request.auth.uid == resource.data.createdBy`), an active community moderator, or an active community admin.
   - Strict 17-field schema enforcement (`isValidEventUpdate`).
   - All immutable fields (`id`, `campusId`, `communityId`, `createdBy`, `createdAt`) are preserved.
-  - Chronological integrity (`endAt > startAt`) preserved.
+  - Chronological integrity (`endAt >= startAt`) preserved.
   - `updatedAt` must equal `request.time`.
-- **Delete Authorization:** Hard deletion is blocked in security rules. Organisational lifecycle is managed via status update to `cancelled`.
+- **Delete Authorization:** Allowed for the original event creator (`request.auth.uid == resource.data.createdBy`) or an active community administrator (`isCommunityAdmin(communityId)`) within the matching tenant campus. Alternatively, organizational lifecycle can be managed via status update to `cancelled`.
 
 ## 15. `eventRsvps/{eventId}_{userId}` (Event Participation Intent)
 
@@ -642,12 +644,25 @@ Documents are keyed by the deterministic composite ID `{eventId}_{userId}`:
 - **Prerequisites:** The standalone seeder strictly requires parent event documents (`events/{eventId}`) and user profiles (`users/{userId}`, `publicProfiles/{userId}`) to be seeded beforehand. It does not automatically seed parent data.
 - **Validation Before Write:** All RSVP entries (fixtures and explicit overrides) are strictly validated against the 5-field schema and `${eventId}_${userId}` composite ID contract before any document is written to Firestore. Malformed or mismatched entries are rejected immediately.
 
-### Security Rules Status: Pending (Milestone 21.2)
+### Security Rules Behavior (Milestone 21 Delivered)
 
-> [!IMPORTANT]
-> Security Rules for `eventRsvps/{eventId}_{userId}` are **PENDING** and scheduled for implementation in Milestone 21.2 (`v21.2.0-event-rsvp-security-rules`).
-> Baseline hardening units H1, H2, and H3 do NOT implement RSVP security rules (H1 addressed temporal fixture determinism, H2 established strict event resolution without fallbacks, and H3 hardened community membership integrity).
-> Client access to `eventRsvps` remains closed until M21.2 introduces the rule match block and hoists `isCommunityActiveMember`.
+- **Strict Tenant Boundary:** All reads, queries, and mutations require tenant parity (`resource.data.campusId == getUserCampusId()` or `request.resource.data.campusId == getUserCampusId()`).
+- **Read Authorization:**
+  - Point read (`get`): Allowed for the RSVP owner (`resource.data.userId == request.auth.uid`), or for peers within the same campus if the parent event is readable (`isParentEventReadable(resource.data.eventId)`). A point read for an unwritten document where `rsvpId` matches `^.+_${request.auth.uid}$` is also permitted.
+  - Collection queries (`list`):
+    - Q2 (User RSVPs): Permitted for the owner where `userId == request.auth.uid` and `campusId == getUserCampusId()`.
+    - Q3 (Event Attendees): Permitted within the tenant campus where the parent event is readable (`isParentEventReadable(eventId)`).
+- **Create Authorization:**
+  - Authenticated student with matching tenant campus (`request.resource.data.campusId == getUserCampusId()`).
+  - Self-identity binding: `request.resource.data.userId == request.auth.uid`.
+  - Composite key binding: `rsvpId == request.resource.data.eventId + '_' + request.resource.data.userId`.
+  - Strict 5-field schema enforcement (`id`, `eventId`, `campusId`, `userId`, `createdAt`).
+  - `createdAt` must equal `request.time`.
+  - Parent event must exist in `events/{eventId}`, belong to the same campus, and have `status: "published"`.
+  - Temporal eligibility: `request.time < event.startAt` (registration closes when event starts).
+  - Parent visibility: student must have access to read the parent event (`campus_public` or active community member via `isCommunityActiveMember`).
+- **Update Authorization:** Denied unconditionally (`allow update: if false;`). Documents are strictly immutable.
+- **Delete Authorization:** Allowed exclusively for the RSVP owner (`resource.data.userId == request.auth.uid`). Deletion is permitted even after the event ends, after event cancellation, or after the parent event is hard-deleted.
 
 ## Demo-only metadata
 
@@ -661,7 +676,7 @@ The following schemas are not active and must not be used as if they already exi
 
 - `friendRequests` and `friendships`: the active relationship collection is `connections`.
 - `bookmarks`: saved posts are not implemented.
-- `eventParticipants` / advanced ticketing: while `eventRsvps` domain and seeding are introduced in M21.1 (security rules pending in M21.2), ticketing, attendance verification, QR check-in, capacity limits, waitlists, and calendar sync remain deferred.
+- `eventParticipants` / advanced ticketing: while `eventRsvps` domain, seeding, security rules, and participation discovery are delivered in Milestone 21, ticketing, attendance verification, QR check-in, capacity limits, waitlists, and calendar sync remain deferred.
 - external search indexes: discovery currently uses a bounded `directoryIndex` projection read and client-side filtering; external search services (e.g. Algolia/Typesense) will be evaluated only when directory size or observed performance demonstrates a concrete need.
 
 Any future schema should be added only alongside its service code, route/component behavior, Rules, seed/test fixtures, and documentation.

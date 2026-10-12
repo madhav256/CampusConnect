@@ -1,6 +1,6 @@
 # CampusConnect Roadmap
 
-**Status:** Status-aware roadmap (Milestone 15 Delivered / Milestone 16 Active)
+**Status:** Status-aware roadmap (Milestone 21 Delivered)
 
 Checked items describe work that exists in the current repository. Unchecked items are proposed or deferred; they are not implemented merely because they appear here.
 
@@ -30,38 +30,77 @@ Checked items describe work that exists in the current repository. Unchecked ite
 - [x] Milestone 13C Firestore Rules hardening and emulator regression expansion.
 - [x] Milestone 14: Cursor-based feed pagination (`startAfter`) merged with real-time newer-posts listener and deduplicated feed state.
 - [x] Milestone 14B: Strict public/private profile separation across three collections (`users` private authority, `publicProfiles` public-profile authority, `directoryIndex` discoverability projection).
-- [x] Automated test suites: 204 Vitest unit tests and 154 Firestore Emulator security rules tests passing.
+- [x] Milestone 16: Minimal 1-to-1 Private Messaging (canonical conversation IDs, participant-only authorization, append-only messages, unread tracking).
+- [x] Milestone 18: Multi-Tenancy Foundation (campus scoping across all primary entities, cross-tenant isolation).
+- [x] Milestone 19: Student Communities (directory, detail, membership authority, community feed, moderation).
+- [x] Milestone 20: Campus Events (lifecycle, visibility tiers, discovery, community integration, event management).
+- [x] Milestone 21: Event RSVPs & Participation Discovery (RSVP lifecycle, attendee preview, Going tab, badges, resolution pipeline, error recovery).
+- [x] Automated test suites: 710 Vitest unit tests, 352 Firestore Emulator security rules tests, and 59 Playwright E2E browser tests passing.
 
 ## Current maintenance contract
 
 - [x] Treat active source, `firestore.rules`, current schema, README, and recruiter guide as the source of truth.
 - [x] Label planned features and schemas explicitly instead of listing them as implemented.
 - [x] Keep documentation terminology aligned with the code: connections, not friends; Campus Atelier, not the obsolete indigo palette; current routes and components only.
-- [x] Re-run this documentation audit whenever a route, service, collection, or security invariant changes (Milestone 15 Unit 15.1).
+- [x] Maintain multi-tenant security boundaries and tenant isolation across all collections.
+- [x] Re-run documentation audit whenever a route, service, collection, or security invariant changes.
 
 ## Delivered engineering milestones
 
 ### Milestone 15 — Post-14B Hardening, Performance & Architecture Reconciliation (Delivered)
 
-- [x] **15.1 Documentation & Roadmap Reconciliation:** Align all project documentation with locked 14B architecture, document 3-collection model, test suites (120 unit / 107 rules), and remove stale claims.
+- [x] **15.1 Documentation & Roadmap Reconciliation:** Align all project documentation with locked 14B architecture, document 3-collection model, test suites, and remove stale claims.
 - [x] **15.2 Seeder & Security Test Runner Alignment:** Update `seedDemoData.mjs` to project into all three 14B collections; align `securityTestRunner.js` and `SecurityTestPanel.jsx` to initialize against strict rules without prohibited client-side deletions.
 - [x] **15.3 Dead Code Removal & Search Error Recovery:** Remove confirmed dead functions (`normalizeProfile`, `updateCommentsCount`, `subscribeToBootstrapPosts`); wire active retry in `useUserSearch.js` and `Discover.jsx`.
 - [x] **15.4 Firestore Rules Hardening:** Enforce strict `isValidPostCreate()` (exact 8 keys, bounds, timestamps); remove obsolete `users` fallback in `isValidCommentSchema` and `isValidActorProfile`; add comprehensive rules tests.
 - [x] **15.5 Frontend Performance & UX:** Route-level `React.lazy` and `Suspense`; top-level `ErrorBoundary`; memoize `PostCard` and derived hook states; mitigate `Connections.jsx` tab-switch read storm; add confirmation for destructive connection actions.
-- [x] **15.6 Test Expansion & Hygiene:** Add meaningful behavioral unit coverage for all six domain services; consolidate cutover test files; update test fixtures to strict private schema.
+- [x] **15.6 Test Expansion & Hygiene:** Add meaningful behavioral unit coverage for all domain services; consolidate cutover test files; update test fixtures to strict private schema.
 
-## Active engineering milestone
+### Milestone 16 — Minimal 1-to-1 Private Messaging (Delivered)
 
-### Milestone 16 — Minimal 1-to-1 Private Messaging
-
-Provides direct communication between connected students. Architectural constraints include: exactly one conversation per connected student pair; canonical conversation ID identical to the connection ID (`min_max`); messaging strictly gated by `connections/{id}.status == "accepted"`; append-only message documents; past messages remain readable after disconnection while new messages are blocked; conversation-level unread tracking; cursor pagination with real-time active thread updates; and no group chat or media attachments in this milestone.
-
-- [x] **16.1 Documentation & Test Count Reconciliation:** Reconcile stale test counts across all documentation, mark Milestone 15 complete, and establish the Milestone 16 roadmap.
-- [x] **16.2 Core Messaging Service & Unit Tests:** Implement `src/services/messageService.js` supporting canonical conversation IDs (`min_max`), conversation metadata, append-only message creation, cursor pagination, and mark-as-read; add pure unit test suite in `tests/unit/messageService.test.js`.
-- [x] **16.3 Firestore Security Rules & Emulator Tests:** Enforce connection-gated authorization (`connections/{id}.status == "accepted"` required to send), participant-only access, immutable messages, self-only unread resets, 4-key `lastMessage` schema (`id`, `content`, `senderId`, `createdAt`), and bidirectional transactional coupling (`getAfter()` / `existsAfter()`); expand emulator tests in `tests/rules/firestore.rules.test.js`.
+- [x] **16.1 Documentation & Test Count Reconciliation:** Reconcile stale test counts across documentation and establish Milestone 16 roadmap.
+- [x] **16.2 Core Messaging Service & Unit Tests:** Implement `src/services/messageService.js` supporting canonical conversation IDs (`min_max`), conversation metadata, append-only message creation, cursor pagination, and mark-as-read; pure unit tests in `tests/unit/messageService.test.js`.
+- [x] **16.3 Firestore Security Rules & Emulator Tests:** Enforce connection-gated authorization (`connections/{id}.status == "accepted"` required to send), participant-only access, immutable messages, self-only unread resets, 4-key `lastMessage` schema, and bidirectional transactional coupling (`getAfter()` / `existsAfter()`); expand emulator tests.
 - [x] **16.4 Messaging Hooks & State Management:** Implement `useConversations.js` (conversation list with unread counters) and `useConversationMessages.js` (active thread listener, older message cursor pagination, error recovery).
 - [x] **16.5 UI Implementation & Integration:** Implement responsive split-pane `/messages` view (`Messages.jsx`, `ConversationList`, `MessageThread`, `MessageBubble`, `MessageComposer`), add Navbar Messages item with unread badge, and wire "Message" CTAs from `PublicProfile.jsx` and `Connections.jsx`.
 - [x] **16.6 Demo Data, Verification & Final Reconciliation:** Update seed script with deterministic demo conversations, verify browser smoke flow, confirm full test suites passing, and reconcile final documentation.
+
+### Milestone 18 — Multi-Tenancy Foundation (Delivered)
+
+*Note: Milestone 18 multi-tenancy requirements were delivered directly as part of the architecture baseline prior to Milestone 19 without a standalone Git release tag.*
+
+- [x] **18.1 Multi-Tenant Domain & Schema:** Introduce `campusId` partitioning across all core models, profiles, and feeds.
+- [x] **18.2 Firestore Multi-Tenant Security Rules:** Enforce campus boundary validation preventing cross-campus reads or writes.
+- [x] **18.3 Client Context & Session Scoping:** Scope client queries and listeners by the authenticated student's campus.
+
+### Milestone 19 — Student Communities (Delivered)
+
+- [x] **19.1 Community Domain Foundation:** Community schema, seed infrastructure, and deterministic fixtures (`v19.1.0-community-domain-foundation`).
+- [x] **19.2 Community Membership Authority:** Membership schema, role model (`member`, `moderator`, `admin`), and security rules (`v19.2.0-community-membership-authority`).
+- [x] **19.3 Community Content Integration:** Community-scoped posts, comments, likes, and access controls (`v19.3.0-community-content-integration`).
+- [x] **19.4 Community Client Services & Hooks:** Services and custom hooks for community lifecycle, memberships, and feeds (`v19.4.0-community-client-services-and-hooks`).
+- [x] **19.5 Community UI Discovery Foundation:** Directory UI, search, category filters, and cards (`v19.5.0-community-ui-discovery-foundation`).
+- [x] **19.6 Community Detail & Profile Experience:** Detail layout, overview tab, member lists, and join/leave interactions (`v19.6.0-community-detail-profile-experience`).
+- [x] **19.7 Community Feed & Content UI:** Feed tab, composer, post cards, comments, and interactions (`v19.7.0-community-feed-content-ui`).
+- [x] **19.8 Community Moderation & Management:** Moderation controls, member role management, and settings (`v19.8.0-community-moderation-management`).
+
+### Milestone 20 — Campus Events (Delivered)
+
+- [x] **20.1 Event Domain & Seeding:** Event entity definition, lifecycle statuses (`draft`, `published`, `cancelled`), and deterministic seeder (`v20.1.0-event-domain-seeding`).
+- [x] **20.2 Event Security Rules:** Multi-tenant and visibility-tier authorization (`campus-public` vs `community-only`), temporal rules, and hard-delete authority (`v20.2.0-event-security-rules`).
+- [x] **20.3 Event Client Services & Hooks:** Service layer and reactive hooks for events querying and subscriptions (`v20.3.0-event-client-services`).
+- [x] **20.4 Event Discovery UI:** `/events` page with Upcoming and Past tabs, category filters, date sorting, and event cards (`v20.4.0-event-discovery-ui`).
+- [x] **20.5 Event Detail & Community Integration:** Event detail page at `/events/:eventId` and community Events tab integration (`v20.5.0-event-detail-community-integration`).
+- [x] **20.6 Event E2E Verification & Hardening:** End-to-end verification, temporal determinism, and membership integrity (`v20.6.0` through `v20.6.3`).
+
+### Milestone 21 — Event RSVPs & Participation Discovery (Delivered)
+
+- [x] **21.1 Event RSVP Domain & Seeding:** Exact 5-field schema (`id`, `eventId`, `campusId`, `userId`, `createdAt`), deterministic document IDs (`{eventId}_{userId}`), and seeder infrastructure (`v21.1.0-event-rsvp-domain-seeding`).
+- [x] **21.2 Event RSVP Security Rules:** Multi-tenant rules, temporal creation validation, owner/non-owner read boundaries, immutable documents, and owner-only deletion with post-event removal authority (`v21.2.0-event-rsvp-security-rules`).
+- [x] **21.3 Event RSVP Client Services & Hooks:** `eventRsvpService.js`, `useEventRsvp`, `useMyRsvps`, and resolution pipeline supporting queries Q1, Q2, and Q3 (`v21.3.0-event-rsvp-client-services-and-hooks`).
+- [x] **21.4 Event Detail RSVP UI & Attention Handling:** Interactive RSVP button, attendee roster preview (up to 8 avatars with headcount), derived status badges, and attention container for inaccessible events (`v21.4.0` through `v21.4.3`).
+- [x] **21.5 Participation Discovery Surfaces:** Dedicated Going tab on `/events`, card Going badges on all event cards and community Events tab, query/resolution retry actions, and context isolation across users/campuses (`v21.5.0-event-participation-discovery`, `v21.5.0-event-rsvp-discovery-surfaces`).
+- [x] **21.6 RSVP E2E Verification & Documentation:** Deterministic RSVP reset helper (`resetEventRsvps`), comprehensive Playwright E2E coverage across all §14.3 scenarios, and complete documentation reconciliation (`v21.6.0-event-rsvp-e2e-documentation`).
 
 ## Proposed next engineering milestones
 
@@ -77,21 +116,20 @@ Provides direct communication between connected students. Architectural constrai
 - [ ] Keep client-side `directoryIndex` projection search for the present application scale.
 - [ ] Revisit external search indexing (e.g., Algolia or Typesense) only when actual directory size or observed query latency demonstrates a concrete need.
 
-### 3. Continuous Integration & End-to-End Testing
-
-- [ ] Configure CI pipeline for lint, build, unit tests, and emulator rules tests.
-- [ ] Add browser-level end-to-end smoke tests.
-
 ## Explicitly deferred product ideas
 
 These ideas are not commitments for the next release:
 
 - image and file uploads;
 - post sharing and bookmarks;
-- clubs and events;
 - marketplace or internship board;
 - admin dashboard;
 - dark mode and theme switching;
-- rich media and advanced profile customization.
+- rich media and advanced profile customization;
+- event ticketing, payment processing, or QR code check-in;
+- event capacity caps, waitlists, or attendance quotas;
+- verified attendance tracking or check-in verification;
+- organizer removal/management of other students' RSVPs;
+- calendar export/sync (iCal, Google Calendar).
 
 They should be reconsidered only after the reliability, privacy, and read-path milestones have evidence supporting them.

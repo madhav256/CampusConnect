@@ -7,6 +7,7 @@
  * and cancellation state without direct Firestore coupling or RSVP controls.
  */
 
+import { useMemo } from "react";
 import { useParams, Link } from "react-router-dom";
 import {
   ArrowLeft,
@@ -87,6 +88,23 @@ export default function EventDetail() {
   const { eventId } = useParams();
   const { event, availability, isLoading, error, refetch } = useEvent(eventId);
   const { rsvp } = useEventRsvp(eventId);
+
+  const eventResolution = useMemo(() => {
+    if (availability === "available" && event) {
+      return { status: "available", event, error: null };
+    }
+    if (availability === "inaccessible") {
+      return { status: "inaccessible", event: null, error: null };
+    }
+    if (availability === "error") {
+      return {
+        status: "error",
+        event: null,
+        error: error instanceof Error ? error : new Error(String(error || "Failed to load event.")),
+      };
+    }
+    return event ? { status: "available", event, error: null } : null;
+  }, [availability, event, error]);
 
   // Loading State
   if (isLoading) {
@@ -332,7 +350,7 @@ export default function EventDetail() {
                   <h2 className="font-serif text-base font-bold text-ink">
                     Registration
                   </h2>
-                  <RsvpStatusBadge event={event} rsvp={rsvp} />
+                  <RsvpStatusBadge resolution={eventResolution} rsvp={rsvp} />
                 </div>
 
                 <EventRsvpButton
@@ -471,7 +489,7 @@ export default function EventDetail() {
       >
         <div className="mx-auto flex max-w-lg items-center justify-between gap-4">
           <div className="min-w-0 flex-1">
-            <RsvpStatusBadge event={event} rsvp={rsvp} />
+            <RsvpStatusBadge resolution={eventResolution} rsvp={rsvp} />
           </div>
           <div className="shrink-0 w-44">
             <EventRsvpButton

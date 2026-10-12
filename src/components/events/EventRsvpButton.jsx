@@ -123,8 +123,10 @@ export default function EventRsvpButton({
       disabledReason = "Registration closed — event has been cancelled";
     }
   } else if (isEnded) {
-    isDisabled = true;
-    disabledReason = "Event has ended";
+    if (!isGoing) {
+      isDisabled = true;
+      disabledReason = "Event has ended";
+    }
   } else if (isStarted && !isGoing) {
     isDisabled = true;
     disabledReason = "Registration closed — event has started";

@@ -333,6 +333,89 @@ describe("Milestone 21 — Unit 21.4: RSVP Detail Interaction UI", () => {
       expect(badge).toBeTruthy();
       expect(getTextContent(badge)).toContain("Cancelled");
     });
+
+    it("derives display state dynamically when passed an EventResolution with status 'available'", () => {
+      const resolution = {
+        status: "available",
+        event: sampleEvent,
+        error: null,
+      };
+      const { result } = renderComponent(RsvpStatusBadge, {
+        resolution,
+        rsvp: sampleRsvp,
+        referenceDate: new Date(),
+      });
+      const badge = findByTestId(result.current, "rsvp-status-badge");
+      expect(badge).toBeTruthy();
+      expect(getTextContent(badge)).toContain("Going");
+    });
+
+    it("derives 'Went' when passed an EventResolution for a completed event", () => {
+      const pastEvent = {
+        ...sampleEvent,
+        startAt: new Date(Date.now() - 7200000).toISOString(),
+        endAt: new Date(Date.now() - 3600000).toISOString(),
+      };
+      const resolution = {
+        status: "available",
+        event: pastEvent,
+        error: null,
+      };
+      const { result } = renderComponent(RsvpStatusBadge, {
+        resolution,
+        rsvp: sampleRsvp,
+        referenceDate: new Date(),
+      });
+      const badge = findByTestId(result.current, "rsvp-status-badge");
+      expect(badge).toBeTruthy();
+      expect(getTextContent(badge)).toContain("Went");
+    });
+
+    it("derives 'Cancelled' when passed an EventResolution for a cancelled event", () => {
+      const cancelledEvent = { ...sampleEvent, status: EVENT_STATUSES.CANCELLED };
+      const resolution = {
+        status: "available",
+        event: cancelledEvent,
+        error: null,
+      };
+      const { result } = renderComponent(RsvpStatusBadge, {
+        resolution,
+        rsvp: sampleRsvp,
+      });
+      const badge = findByTestId(result.current, "rsvp-status-badge");
+      expect(badge).toBeTruthy();
+      expect(getTextContent(badge)).toContain("Cancelled");
+    });
+
+    it("derives 'Unavailable' when passed an inaccessible EventResolution", () => {
+      const resolution = {
+        status: "inaccessible",
+        event: null,
+        error: null,
+      };
+      const { result } = renderComponent(RsvpStatusBadge, {
+        resolution,
+        rsvp: sampleRsvp,
+      });
+      const badge = findByTestId(result.current, "rsvp-status-badge");
+      expect(badge).toBeTruthy();
+      expect(getTextContent(badge)).toContain("Unavailable");
+    });
+
+    it("derives 'Unavailable' when passed an error EventResolution", () => {
+      const resolution = {
+        status: "error",
+        event: null,
+        error: new Error("Network timeout"),
+      };
+      const { result } = renderComponent(RsvpStatusBadge, {
+        resolution,
+        rsvp: sampleRsvp,
+      });
+      const badge = findByTestId(result.current, "rsvp-status-badge");
+      expect(badge).toBeTruthy();
+      expect(getTextContent(badge)).toContain("Unavailable");
+    });
   });
 
   // =========================================================================
@@ -464,7 +547,7 @@ describe("Milestone 21 — Unit 21.4: RSVP Detail Interaction UI", () => {
       expect(getTextContent(button)).toContain("Cancel RSVP");
     });
 
-    it("disables button with reason 'Event has ended' when event has ended", () => {
+    it("disables button with reason 'Event has ended' when event has ended and not going", () => {
       const pastEvent = {
         ...sampleEvent,
         startAt: new Date(Date.now() - 7200000).toISOString(),
@@ -480,6 +563,42 @@ describe("Milestone 21 — Unit 21.4: RSVP Detail Interaction UI", () => {
 
       const reason = findByTestId(result.current, "rsvp-disabled-reason");
       expect(getTextContent(reason)).toBe("Event has ended");
+    });
+
+    it("allows existing RSVP removal when event has ended and student is already going", () => {
+      const pastEvent = {
+        ...sampleEvent,
+        startAt: new Date(Date.now() - 7200000).toISOString(),
+        endAt: new Date(Date.now() - 3600000).toISOString(),
+      };
+      const { result } = renderComponent(EventRsvpButton, {
+        eventId: "evt-ai-summit",
+        event: pastEvent,
+        isGoing: true,
+      });
+      const button = findByTestId(result.current, "event-rsvp-button");
+      expect(button.props.disabled).toBe(false);
+      expect(getTextContent(button)).toContain("Cancel RSVP");
+    });
+
+    it("executes onCancel callback when 'Cancel RSVP' is clicked on an ended event", async () => {
+      const pastEvent = {
+        ...sampleEvent,
+        startAt: new Date(Date.now() - 7200000).toISOString(),
+        endAt: new Date(Date.now() - 3600000).toISOString(),
+      };
+      const onCancelMock = vi.fn().mockResolvedValue(undefined);
+      const { result } = renderComponent(EventRsvpButton, {
+        eventId: "evt-ai-summit",
+        event: pastEvent,
+        isGoing: true,
+        onCancel: onCancelMock,
+      });
+      const button = findByTestId(result.current, "event-rsvp-button");
+      await act(async () => {
+        await button.props.onClick();
+      });
+      expect(onCancelMock).toHaveBeenCalledTimes(1);
     });
 
     it("disables button with reason 'Registration closed — event has started' when ongoing and not going", () => {
@@ -712,6 +831,29 @@ describe("Milestone 21 — Unit 21.4: RSVP Detail Interaction UI", () => {
       expect(findByTestId(result.current, "event-detail-description")).toBeTruthy();
       expect(findByTestId(result.current, "event-sponsoring-community-card")).toBeTruthy();
       expect(findByTestId(result.current, "event-meta-card")).toBeTruthy();
+    });
+
+    it("passes strict EventResolution to RsvpStatusBadge in EventDetail", () => {
+      mocks.useEvent.mockReturnValue({
+        event: sampleEvent,
+        availability: "available",
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+      });
+      mocks.useEventRsvp.mockReturnValue({
+        rsvp: sampleRsvp,
+        isGoing: true,
+        isLoading: false,
+        isMutating: false,
+        error: null,
+        rsvpToEvent: vi.fn(),
+        cancelRsvp: vi.fn(),
+      });
+      const { result } = renderComponent(EventDetail);
+      const badges = findAllByTestId(result.current, "rsvp-status-badge");
+      expect(badges.length).toBeGreaterThanOrEqual(1);
+      expect(getTextContent(badges[0])).toContain("Going");
     });
   });
 });

@@ -21,6 +21,7 @@ import {
   Building2,
 } from "lucide-react";
 import { useEvent } from "../hooks/useEvent.js";
+import { useEventRsvp } from "../hooks/useEventRsvp.js";
 import Navbar from "../components/layout/Navbar.jsx";
 import PageContainer from "../components/layout/PageContainer.jsx";
 import Card from "../components/ui/Card.jsx";
@@ -28,6 +29,9 @@ import Button from "../components/ui/Button.jsx";
 import EmptyState from "../components/ui/EmptyState.jsx";
 import EventCategoryBadge from "../components/events/EventCategoryBadge.jsx";
 import EventStatusBadge from "../components/events/EventStatusBadge.jsx";
+import EventRsvpButton from "../components/events/EventRsvpButton.jsx";
+import EventAttendeePreview from "../components/events/EventAttendeePreview.jsx";
+import RsvpStatusBadge from "../components/events/RsvpStatusBadge.jsx";
 import { EVENT_STATUSES, EVENT_VISIBILITIES } from "../constants.js";
 
 /**
@@ -81,7 +85,8 @@ function formatTimeRange(startVal, endVal) {
 
 export default function EventDetail() {
   const { eventId } = useParams();
-  const { event, isLoading, error, refetch } = useEvent(eventId);
+  const { event, availability, isLoading, error, refetch } = useEvent(eventId);
+  const { rsvp } = useEventRsvp(eventId);
 
   // Loading State
   if (isLoading) {
@@ -177,7 +182,7 @@ export default function EventDetail() {
       <Navbar />
 
       <PageContainer>
-        <div className="space-y-6">
+        <div className="space-y-6 pb-24 lg:pb-0">
           {/* Back Navigation */}
           <div>
             <Link
@@ -321,6 +326,29 @@ export default function EventDetail() {
 
             {/* Sidebar Column (Time, Venue, Details) */}
             <div className="space-y-6 lg:col-span-1">
+              {/* Event Registration & RSVP Card */}
+              <Card data-testid="event-rsvp-card" className="space-y-4">
+                <div className="flex items-center justify-between border-b border-border-warm/60 pb-3">
+                  <h2 className="font-serif text-base font-bold text-ink">
+                    Registration
+                  </h2>
+                  <RsvpStatusBadge event={event} rsvp={rsvp} />
+                </div>
+
+                <EventRsvpButton
+                  eventId={eventId}
+                  event={event}
+                  availability={availability}
+                />
+
+                <div className="border-t border-border-warm/60 pt-3">
+                  <EventAttendeePreview
+                    eventId={eventId}
+                    enabled={availability === "available"}
+                  />
+                </div>
+              </Card>
+
               <Card data-testid="event-meta-card" className="space-y-5">
                 <h2 className="font-serif text-base font-bold text-ink border-b border-border-warm/60 pb-2">
                   Event Details
@@ -436,6 +464,25 @@ export default function EventDetail() {
           </div>
         </div>
       </PageContainer>
+      {/* Sticky Bottom Action Bar (Mobile Viewport < 1024px) */}
+      <div
+        data-testid="event-rsvp-mobile-bar"
+        className="fixed bottom-0 inset-x-0 z-30 border-t border-border-warm bg-surface/95 backdrop-blur-md p-4 shadow-lg lg:hidden"
+      >
+        <div className="mx-auto flex max-w-lg items-center justify-between gap-4">
+          <div className="min-w-0 flex-1">
+            <RsvpStatusBadge event={event} rsvp={rsvp} />
+          </div>
+          <div className="shrink-0 w-44">
+            <EventRsvpButton
+              eventId={eventId}
+              event={event}
+              availability={availability}
+              size="sm"
+            />
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

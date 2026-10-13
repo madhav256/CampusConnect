@@ -180,18 +180,36 @@ service cloud.firestore {
     }
 
     function isCommunityModeratorOrAdmin(communityId) {
-      let mPath = /databases/$(database)/documents/communityMembers/$(communityId + '_' + request.auth.uid);
-      return exists(mPath) &&
-             get(mPath).data.status == 'active' &&
-             get(mPath).data.campusId == getUserCampusId() &&
-             (get(mPath).data.role == 'admin' || get(mPath).data.role == 'moderator');
+      return communityId is string &&
+             communityId.size() > 0 &&
+             exists(/databases/$(database)/documents/communityMembers/$(communityId + '_' + request.auth.uid)) &&
+             get(/databases/$(database)/documents/communityMembers/$(communityId + '_' + request.auth.uid)).data.status == 'active' &&
+             get(/databases/$(database)/documents/communityMembers/$(communityId + '_' + request.auth.uid)).data.campusId == getUserCampusId() &&
+             (get(/databases/$(database)/documents/communityMembers/$(communityId + '_' + request.auth.uid)).data.role == 'admin' ||
+              get(/databases/$(database)/documents/communityMembers/$(communityId + '_' + request.auth.uid)).data.role == 'moderator');
+    }
+
+    function isCommunityAdmin(communityId) {
+      return communityId is string &&
+             communityId.size() > 0 &&
+             exists(/databases/$(database)/documents/communityMembers/$(communityId + '_' + request.auth.uid)) &&
+             get(/databases/$(database)/documents/communityMembers/$(communityId + '_' + request.auth.uid)).data.status == 'active' &&
+             get(/databases/$(database)/documents/communityMembers/$(communityId + '_' + request.auth.uid)).data.campusId == getUserCampusId() &&
+             get(/databases/$(database)/documents/communityMembers/$(communityId + '_' + request.auth.uid)).data.role == 'admin';
+    }
+
+    function hasValidStoredChronology(r) {
+      return r.startAt is timestamp &&
+             r.endAt is timestamp &&
+             r.endAt >= r.startAt;
     }
 
     function isCommunityActiveMember(communityId) {
-      let mPath = /databases/$(database)/documents/communityMembers/$(communityId + '_' + request.auth.uid);
-      return exists(mPath) &&
-             get(mPath).data.status == 'active' &&
-             get(mPath).data.campusId == getUserCampusId();
+      return communityId is string &&
+             communityId.size() > 0 &&
+             exists(/databases/$(database)/documents/communityMembers/$(communityId + '_' + request.auth.uid)) &&
+             get(/databases/$(database)/documents/communityMembers/$(communityId + '_' + request.auth.uid)).data.status == 'active' &&
+             get(/databases/$(database)/documents/communityMembers/$(communityId + '_' + request.auth.uid)).data.campusId == getUserCampusId();
     }
 
     function isValidPostCreate() {
@@ -921,14 +939,6 @@ service cloud.firestore {
 
     // 9. Events collection (Campus Events & Activities - Milestone 20)
     match /events/{eventId} {
-      function isCommunityAdmin(communityId) {
-        let adminMembershipPath = /databases/$(database)/documents/communityMembers/$(communityId + '_' + request.auth.uid);
-        return exists(adminMembershipPath) &&
-               get(adminMembershipPath).data.role == 'admin' &&
-               get(adminMembershipPath).data.status == 'active' &&
-               get(adminMembershipPath).data.campusId == getUserCampusId();
-      }
-
       function isValidEventCreate(eId) {
         let d = request.resource.data;
         let communityPath = /databases/$(database)/documents/communities/$(d.communityId);
@@ -983,18 +993,21 @@ service cloud.firestore {
       function isValidEventUpdate(eId) {
         let d = request.resource.data;
         let r = resource.data;
-        let isCreator = request.auth.uid == r.createdBy;
-        let isModOrAdmin = isCommunityModeratorOrAdmin(r.communityId);
+        let diff = d.diff(r);
+        let affected = diff.affectedKeys();
 
-        let immutableFieldsPreserved =
+        let commonInvariants =
           d.id == r.id &&
+          d.id == eId &&
           d.campusId == r.campusId &&
           d.communityId == r.communityId &&
           d.createdBy == r.createdBy &&
           d.createdAt == r.createdAt &&
-          r.campusId == getUserCampusId();
-
-        let validMutableFields =
+          d.visibility == r.visibility &&
+          d.updatedAt == request.time &&
+          r.campusId == getUserCampusId() &&
+          isCommunityModeratorOrAdmin(r.communityId) &&
+          hasValidStoredChronology(r) &&
           d.keys().hasOnly([
             'id', 'campusId', 'communityId', 'title', 'slug', 'description',
             'category', 'location', 'startAt', 'endAt', 'imageURL',
@@ -1006,35 +1019,91 @@ service cloud.firestore {
             'category', 'location', 'startAt', 'endAt', 'imageURL',
             'createdBy', 'organizerName', 'status', 'visibility',
             'createdAt', 'updatedAt'
-          ]) &&
-          d.title is string &&
-          d.title.size() >= 3 &&
-          d.title.size() <= 100 &&
-          d.slug is string &&
-          d.slug.size() > 0 &&
-          d.description is string &&
-          d.description.size() > 0 &&
-          d.description.size() <= 3000 &&
-          d.category in [
-            'academic', 'tech', 'cultural', 'sports',
-            'career', 'workshop', 'social', 'competition'
-          ] &&
-          d.location is string &&
-          d.location.size() > 0 &&
-          d.location.size() <= 200 &&
-          d.startAt is timestamp &&
-          d.endAt is timestamp &&
-          d.endAt >= d.startAt &&
-          (d.imageURL == null || (d.imageURL is string && d.imageURL.size() > 0)) &&
-          d.organizerName is string &&
-          d.organizerName.size() > 0 &&
-          d.status in ['published', 'cancelled'] &&
-          d.visibility in ['campus_public', 'community_only'] &&
-          d.updatedAt == request.time;
+          ]);
 
-        return (isCreator || isModOrAdmin) &&
-               immutableFieldsPreserved &&
-               validMutableFields;
+        // Pathway A: Detail Edits (published -> published)
+        let isPathwayA =
+          r.status == 'published' &&
+          d.status == 'published' &&
+          (
+            // Upcoming Event Branch (now < r.startAt)
+            (
+              request.time < r.startAt &&
+              affected.hasOnly([
+                'title', 'slug', 'description', 'category', 'location',
+                'startAt', 'endAt', 'imageURL', 'organizerName', 'updatedAt'
+              ]) &&
+              affected.hasAny([
+                'title', 'slug', 'description', 'category', 'location',
+                'startAt', 'endAt', 'imageURL', 'organizerName'
+              ]) &&
+              (!affected.hasAny(['startAt']) || (d.startAt is timestamp && d.startAt > request.time)) &&
+              (!affected.hasAny(['startAt', 'endAt']) || (d.endAt is timestamp && d.endAt >= d.startAt)) &&
+              d.title is string && d.title.size() >= 3 && d.title.size() <= 100 &&
+              d.slug is string && d.slug.size() > 0 &&
+              d.description is string && d.description.size() > 0 && d.description.size() <= 3000 &&
+              d.category in [
+                'academic', 'tech', 'cultural', 'sports',
+                'career', 'workshop', 'social', 'competition'
+              ] &&
+              d.location is string && d.location.size() > 0 && d.location.size() <= 200 &&
+              d.organizerName is string && d.organizerName.size() > 0 &&
+              (d.imageURL == null || (d.imageURL is string && d.imageURL.size() > 0))
+            ) ||
+            // Ongoing Event Branch (r.startAt <= now <= r.endAt)
+            (
+              request.time >= r.startAt &&
+              request.time <= r.endAt &&
+              affected.hasOnly(['location', 'description', 'imageURL', 'endAt', 'updatedAt']) &&
+              affected.hasAny(['location', 'description', 'imageURL', 'endAt']) &&
+              d.startAt == r.startAt &&
+              d.title == r.title &&
+              d.slug == r.slug &&
+              d.category == r.category &&
+              d.organizerName == r.organizerName &&
+              d.description is string && d.description.size() > 0 && d.description.size() <= 3000 &&
+              d.location is string && d.location.size() > 0 && d.location.size() <= 200 &&
+              (d.imageURL == null || (d.imageURL is string && d.imageURL.size() > 0)) &&
+              (
+                (affected.hasAny(['endAt']) && d.endAt is timestamp && d.endAt >= r.endAt && d.endAt > request.time) ||
+                (!affected.hasAny(['endAt']) && d.endAt == r.endAt)
+              )
+            )
+          );
+
+        // Pathway B: Dedicated Cancellation (published -> cancelled, now <= r.endAt)
+        let isPathwayB =
+          r.status == 'published' &&
+          d.status == 'cancelled' &&
+          request.time <= r.endAt &&
+          affected.hasOnly(['status', 'updatedAt']) &&
+          d.title == r.title &&
+          d.slug == r.slug &&
+          d.description == r.description &&
+          d.category == r.category &&
+          d.location == r.location &&
+          d.startAt == r.startAt &&
+          d.endAt == r.endAt &&
+          d.imageURL == r.imageURL &&
+          d.organizerName == r.organizerName;
+
+        // Pathway C: Dedicated Republishing (cancelled -> published, now < r.startAt)
+        let isPathwayC =
+          r.status == 'cancelled' &&
+          d.status == 'published' &&
+          request.time < r.startAt &&
+          affected.hasOnly(['status', 'updatedAt']) &&
+          d.title == r.title &&
+          d.slug == r.slug &&
+          d.description == r.description &&
+          d.category == r.category &&
+          d.location == r.location &&
+          d.startAt == r.startAt &&
+          d.endAt == r.endAt &&
+          d.imageURL == r.imageURL &&
+          d.organizerName == r.organizerName;
+
+        return commonInvariants && (isPathwayA || isPathwayB || isPathwayC);
       }
 
       allow read: if isAuthenticated() && (
@@ -1051,12 +1120,12 @@ service cloud.firestore {
 
       allow update: if isAuthenticated() && isValidEventUpdate(eventId);
 
-      allow delete: if isAuthenticated() && (
-        resource.data.campusId == getUserCampusId() && (
-          resource.data.createdBy == request.auth.uid ||
-          isCommunityAdmin(resource.data.communityId)
-        )
-      );
+      allow delete: if isAuthenticated() &&
+                       resource.data.campusId == getUserCampusId() &&
+                       isCommunityAdmin(resource.data.communityId) &&
+                       resource.data.status in ['published', 'cancelled'] &&
+                       hasValidStoredChronology(resource.data) &&
+                       request.time < resource.data.startAt;
     }
 
     // 10. Event RSVPs collection (Milestone 21 - Unit 21.2: RSVP Security Authority & Rules)

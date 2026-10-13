@@ -4486,6 +4486,9 @@ describe("Milestone 18 — Unit 18.2: Campuses & Multi-Tenancy Rules", () => {
     }
 
     async function seedEvent(eventId, creatorId, campusId, communityId, overrides = {}) {
+      const now = Date.now();
+      const defaultStartAt = firebase.firestore.Timestamp.fromMillis(now + 24 * 60 * 60 * 1000);
+      const defaultEndAt = firebase.firestore.Timestamp.fromMillis(now + 48 * 60 * 60 * 1000);
       await testEnvironment.withSecurityRulesDisabled(async (context) => {
         const db = context.firestore();
         await db
@@ -4494,6 +4497,8 @@ describe("Milestone 18 — Unit 18.2: Campuses & Multi-Tenancy Rules", () => {
           .set(
             eventFixture(eventId, creatorId, communityId, {
               campusId,
+              startAt: defaultStartAt,
+              endAt: defaultEndAt,
               ...overrides,
             })
           );
@@ -5107,9 +5112,9 @@ describe("Milestone 18 — Unit 18.2: Campuses & Multi-Tenancy Rules", () => {
         await seedEvent("delete-target-bob", bobUid, APEX_CAMPUS_ID, "apex-ai-club");
       });
 
-      it("creator can delete event", async () => {
+      it("creator without admin role cannot delete event", async () => {
         const bob = contextFor(bobUid);
-        await assertSucceeds(eventRef(bob, "delete-target-bob").delete());
+        await expectPermissionDenied(() => eventRef(bob, "delete-target-bob").delete());
       });
 
       it("active community admin can delete event", async () => {
@@ -6253,6 +6258,1020 @@ describe("Milestone 18 — Unit 18.2: Campuses & Multi-Tenancy Rules", () => {
       it("cross-campus user cannot delete another user's RSVP", async () => {
         const eve = contextFor(eveUid);
         await expectPermissionDenied(() => eventRsvpRef(eve, rsvpId).delete());
+      });
+    });
+  });
+
+  describe("Milestone 22 — Unit 22.2: Event Lifecycle Security Rules & Verification", () => {
+    const aliceUid = TEST_UIDS.alice; // Apex student, admin of apex-ai-club
+    const bobUid = TEST_UIDS.bob; // Apex student, moderator of apex-ai-club
+    const carolUid = TEST_UIDS.carol; // Apex student, regular member of apex-ai-club
+    const davidUid = "m22-uid-david"; // Apex student, non-member
+    const eveUid = "m22-uid-eve"; // St. Jude student, admin of st-jude-medical-society (cross-campus)
+    const demotedUid = "m22-uid-demoted-creator"; // Event creator demoted to regular member
+    const removedUid = "m22-uid-removed-creator"; // Event creator removed from community
+
+    function getTimestamps() {
+      const now = Date.now();
+      return {
+        now,
+        upcomingStart: firebase.firestore.Timestamp.fromMillis(now + 24 * 60 * 60 * 1000),
+        upcomingEnd: firebase.firestore.Timestamp.fromMillis(now + 48 * 60 * 60 * 1000),
+        furtherUpcomingStart: firebase.firestore.Timestamp.fromMillis(now + 30 * 60 * 60 * 1000),
+        furtherUpcomingEnd: firebase.firestore.Timestamp.fromMillis(now + 60 * 60 * 1000),
+        ongoingStart: firebase.firestore.Timestamp.fromMillis(now - 60 * 60 * 1000),
+        ongoingEnd: firebase.firestore.Timestamp.fromMillis(now + 60 * 60 * 1000),
+        extendedOngoingEnd: firebase.firestore.Timestamp.fromMillis(now + 3 * 60 * 60 * 1000),
+        shortenedOngoingEnd: firebase.firestore.Timestamp.fromMillis(now + 30 * 60 * 1000),
+        completedStart: firebase.firestore.Timestamp.fromMillis(now - 48 * 60 * 60 * 1000),
+        completedEnd: firebase.firestore.Timestamp.fromMillis(now - 24 * 60 * 60 * 1000),
+        pastTimestamp: firebase.firestore.Timestamp.fromMillis(now - 10 * 60 * 1000),
+      };
+    }
+
+    async function seedM22Event(eventId, creatorId, communityId, overrides = {}) {
+      const t = getTimestamps();
+      await testEnvironment.withSecurityRulesDisabled(async (context) => {
+        const db = context.firestore();
+        const base = eventFixture(eventId, creatorId, communityId || "apex-ai-club", {
+          campusId: APEX_CAMPUS_ID,
+          startAt: t.upcomingStart,
+          endAt: t.upcomingEnd,
+          ...overrides,
+        });
+        if (communityId === null) {
+          base.communityId = null;
+        }
+        await db.collection("events").doc(eventId).set(base);
+      });
+    }
+
+    async function seedM22EventRsvp(rsvpId, eventId, userId, campusId, overrides = {}) {
+      await testEnvironment.withSecurityRulesDisabled(async (context) => {
+        const db = context.firestore();
+        await db
+          .collection("eventRsvps")
+          .doc(rsvpId)
+          .set(
+            eventRsvpFixture(eventId, userId, campusId, {
+              id: rsvpId,
+              ...overrides,
+            })
+          );
+      });
+    }
+
+    async function seedUserWithCampus(uid, campusId) {
+      await testEnvironment.withSecurityRulesDisabled(async (context) => {
+        const db = context.firestore();
+        await db.collection("users").doc(uid).set(userFixture(uid, { campusId }));
+        await db.collection("publicProfiles").doc(uid).set(publicProfileFixture(uid, { campusId }));
+        await db.collection("directoryIndex").doc(uid).set(directoryIndexFixture(uid, { campusId }));
+      });
+    }
+
+    async function seedCommunity(communityId, campusId, overrides = {}) {
+      await testEnvironment.withSecurityRulesDisabled(async (context) => {
+        const db = context.firestore();
+        await db
+          .collection("communities")
+          .doc(communityId)
+          .set(communityFixture(communityId, { campusId, ...overrides }));
+      });
+    }
+
+    async function seedCommunityMember(
+      membershipId,
+      communityId,
+      userId,
+      campusId,
+      role = COMMUNITY_MEMBER_ROLES.MEMBER,
+      status = COMMUNITY_MEMBER_STATUSES.ACTIVE,
+      overrides = {}
+    ) {
+      await testEnvironment.withSecurityRulesDisabled(async (context) => {
+        const db = context.firestore();
+        await db
+          .collection("communityMembers")
+          .doc(membershipId)
+          .set(
+            communityMemberFixture(communityId, userId, {
+              id: membershipId,
+              campusId,
+              role,
+              status,
+              ...overrides,
+            })
+          );
+      });
+    }
+
+    beforeEach(async () => {
+      await seedUserWithCampus(aliceUid, APEX_CAMPUS_ID);
+      await seedUserWithCampus(bobUid, APEX_CAMPUS_ID);
+      await seedUserWithCampus(carolUid, APEX_CAMPUS_ID);
+      await seedUserWithCampus(davidUid, APEX_CAMPUS_ID);
+      await seedUserWithCampus(eveUid, ST_JUDE_CAMPUS_ID);
+      await seedUserWithCampus(demotedUid, APEX_CAMPUS_ID);
+      await seedUserWithCampus(removedUid, APEX_CAMPUS_ID);
+
+      await seedCommunity("apex-ai-club", APEX_CAMPUS_ID);
+      await seedCommunity("st-jude-medical-society", ST_JUDE_CAMPUS_ID);
+
+      await seedCommunityMember(
+        `apex-ai-club_${aliceUid}`,
+        "apex-ai-club",
+        aliceUid,
+        APEX_CAMPUS_ID,
+        COMMUNITY_MEMBER_ROLES.ADMIN,
+        COMMUNITY_MEMBER_STATUSES.ACTIVE
+      );
+      await seedCommunityMember(
+        `apex-ai-club_${bobUid}`,
+        "apex-ai-club",
+        bobUid,
+        APEX_CAMPUS_ID,
+        COMMUNITY_MEMBER_ROLES.MODERATOR,
+        COMMUNITY_MEMBER_STATUSES.ACTIVE
+      );
+      await seedCommunityMember(
+        `apex-ai-club_${carolUid}`,
+        "apex-ai-club",
+        carolUid,
+        APEX_CAMPUS_ID,
+        COMMUNITY_MEMBER_ROLES.MEMBER,
+        COMMUNITY_MEMBER_STATUSES.ACTIVE
+      );
+      await seedCommunityMember(
+        `apex-ai-club_${demotedUid}`,
+        "apex-ai-club",
+        demotedUid,
+        APEX_CAMPUS_ID,
+        COMMUNITY_MEMBER_ROLES.MEMBER,
+        COMMUNITY_MEMBER_STATUSES.ACTIVE
+      );
+      await seedCommunityMember(
+        `apex-ai-club_${removedUid}`,
+        "apex-ai-club",
+        removedUid,
+        APEX_CAMPUS_ID,
+        COMMUNITY_MEMBER_ROLES.MEMBER,
+        COMMUNITY_MEMBER_STATUSES.REMOVED
+      );
+      await seedCommunityMember(
+        `st-jude-medical-society_${eveUid}`,
+        "st-jude-medical-society",
+        eveUid,
+        ST_JUDE_CAMPUS_ID,
+        COMMUNITY_MEMBER_ROLES.ADMIN,
+        COMMUNITY_MEMBER_STATUSES.ACTIVE
+      );
+    });
+
+    describe("1. Leadership & Persona Authorization", () => {
+      beforeEach(async () => {
+        await seedM22Event("lead-event-1", aliceUid, "apex-ai-club");
+        await seedM22Event("lead-demoted-1", demotedUid, "apex-ai-club");
+        await seedM22Event("lead-removed-1", removedUid, "apex-ai-club");
+      });
+
+      it("active community admin can update event details", async () => {
+        const alice = contextFor(aliceUid);
+        await assertSucceeds(
+          eventRef(alice, "lead-event-1").update({
+            title: "Admin Updated Title",
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("active community moderator can update event details", async () => {
+        const bob = contextFor(bobUid);
+        await assertSucceeds(
+          eventRef(bob, "lead-event-1").update({
+            title: "Moderator Updated Title",
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("creator demoted to regular member cannot update event details", async () => {
+        const demoted = contextFor(demotedUid);
+        await expectPermissionDenied(() =>
+          eventRef(demoted, "lead-demoted-1").update({
+            title: "Demoted Creator Hack",
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("creator removed from community cannot update event details", async () => {
+        const removed = contextFor(removedUid);
+        await expectPermissionDenied(() =>
+          eventRef(removed, "lead-removed-1").update({
+            title: "Removed Creator Hack",
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("regular community member cannot update event details", async () => {
+        const carol = contextFor(carolUid);
+        await expectPermissionDenied(() =>
+          eventRef(carol, "lead-event-1").update({
+            title: "Carol Hack",
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("non-member student cannot update event details", async () => {
+        const david = contextFor(davidUid);
+        await expectPermissionDenied(() =>
+          eventRef(david, "lead-event-1").update({
+            title: "David Hack",
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("cross-campus user cannot update event details", async () => {
+        const eve = contextFor(eveUid);
+        await expectPermissionDenied(() =>
+          eventRef(eve, "lead-event-1").update({
+            title: "Eve Hack",
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+    });
+
+    describe("2. Hard Deletion Authority", () => {
+      beforeEach(async () => {
+        const t = getTimestamps();
+        await seedM22Event("del-upcoming-pub", aliceUid, "apex-ai-club", {
+          status: "published",
+          startAt: t.upcomingStart,
+          endAt: t.upcomingEnd,
+        });
+        await seedM22Event("del-upcoming-canc", aliceUid, "apex-ai-club", {
+          status: "cancelled",
+          startAt: t.upcomingStart,
+          endAt: t.upcomingEnd,
+        });
+        await seedM22Event("del-ongoing-pub", aliceUid, "apex-ai-club", {
+          status: "published",
+          startAt: t.ongoingStart,
+          endAt: t.ongoingEnd,
+        });
+        await seedM22Event("del-completed-pub", aliceUid, "apex-ai-club", {
+          status: "published",
+          startAt: t.completedStart,
+          endAt: t.completedEnd,
+        });
+        await seedM22Event("del-creator-event", demotedUid, "apex-ai-club", {
+          status: "published",
+          startAt: t.upcomingStart,
+          endAt: t.upcomingEnd,
+        });
+        await seedM22Event("del-invalid-status", aliceUid, "apex-ai-club", {
+          status: "completed",
+          startAt: t.upcomingStart,
+          endAt: t.upcomingEnd,
+        });
+        await seedM22Event("del-inverted-chrono", aliceUid, "apex-ai-club", {
+          status: "published",
+          startAt: t.upcomingEnd,
+          endAt: t.upcomingStart,
+        });
+      });
+
+      it("active admin can hard delete upcoming published event", async () => {
+        const alice = contextFor(aliceUid);
+        await assertSucceeds(eventRef(alice, "del-upcoming-pub").delete());
+      });
+
+      it("active admin can hard delete upcoming cancelled event", async () => {
+        const alice = contextFor(aliceUid);
+        await assertSucceeds(eventRef(alice, "del-upcoming-canc").delete());
+      });
+
+      it("active moderator cannot hard delete upcoming event", async () => {
+        const bob = contextFor(bobUid);
+        await expectPermissionDenied(() => eventRef(bob, "del-upcoming-pub").delete());
+      });
+
+      it("original creator who is not active admin cannot hard delete event", async () => {
+        const demoted = contextFor(demotedUid);
+        await expectPermissionDenied(() => eventRef(demoted, "del-creator-event").delete());
+      });
+
+      it("active admin cannot hard delete ongoing event", async () => {
+        const alice = contextFor(aliceUid);
+        await expectPermissionDenied(() => eventRef(alice, "del-ongoing-pub").delete());
+      });
+
+      it("active admin cannot hard delete completed event", async () => {
+        const alice = contextFor(aliceUid);
+        await expectPermissionDenied(() => eventRef(alice, "del-completed-pub").delete());
+      });
+
+      it("active admin cannot hard delete event with status other than published or cancelled", async () => {
+        const alice = contextFor(aliceUid);
+        await expectPermissionDenied(() => eventRef(alice, "del-invalid-status").delete());
+      });
+
+      it("active admin cannot hard delete event with inverted stored chronology", async () => {
+        const alice = contextFor(aliceUid);
+        await expectPermissionDenied(() => eventRef(alice, "del-inverted-chrono").delete());
+      });
+    });
+
+    describe("3. Fail-Closed Immutability Contract", () => {
+      beforeEach(async () => {
+        await seedM22Event("immut-event-1", aliceUid, "apex-ai-club", {
+          visibility: "campus_public",
+        });
+      });
+
+      it("update attempting to change visibility is denied", async () => {
+        const alice = contextFor(aliceUid);
+        await expectPermissionDenied(() =>
+          eventRef(alice, "immut-event-1").update({
+            visibility: "community_only",
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("update attempting to change communityId is denied", async () => {
+        const alice = contextFor(aliceUid);
+        await expectPermissionDenied(() =>
+          eventRef(alice, "immut-event-1").update({
+            communityId: "st-jude-medical-society",
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("update attempting to change createdBy is denied", async () => {
+        const alice = contextFor(aliceUid);
+        await expectPermissionDenied(() =>
+          eventRef(alice, "immut-event-1").update({
+            createdBy: bobUid,
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("update attempting to change id is denied", async () => {
+        const alice = contextFor(aliceUid);
+        await expectPermissionDenied(() =>
+          eventRef(alice, "immut-event-1").update({
+            id: "different-event-id",
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("update attempting to change campusId is denied", async () => {
+        const alice = contextFor(aliceUid);
+        await expectPermissionDenied(() =>
+          eventRef(alice, "immut-event-1").update({
+            campusId: ST_JUDE_CAMPUS_ID,
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("update attempting to change createdAt is denied", async () => {
+        const alice = contextFor(aliceUid);
+        await expectPermissionDenied(() =>
+          eventRef(alice, "immut-event-1").update({
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+    });
+
+    describe("4. Pathway A: Published Detail Edits", () => {
+      beforeEach(async () => {
+        const t = getTimestamps();
+        await seedM22Event("pa-upcoming-1", aliceUid, "apex-ai-club", {
+          status: "published",
+          startAt: t.upcomingStart,
+          endAt: t.upcomingEnd,
+        });
+        await seedM22Event("pa-ongoing-1", aliceUid, "apex-ai-club", {
+          status: "published",
+          startAt: t.ongoingStart,
+          endAt: t.ongoingEnd,
+        });
+        await seedM22Event("pa-completed-1", aliceUid, "apex-ai-club", {
+          status: "published",
+          startAt: t.completedStart,
+          endAt: t.completedEnd,
+        });
+        await seedM22Event("pa-cancelled-1", aliceUid, "apex-ai-club", {
+          status: "cancelled",
+          startAt: t.upcomingStart,
+          endAt: t.upcomingEnd,
+        });
+      });
+
+      it("upcoming: moderator can update allowlisted fields", async () => {
+        const bob = contextFor(bobUid);
+        await assertSucceeds(
+          eventRef(bob, "pa-upcoming-1").update({
+            title: "Pathway A Updated Title",
+            description: "Updated description for upcoming event.",
+            location: "Room 101 Innovation Lab",
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("upcoming: moderator can update startAt to future timestamp", async () => {
+        const bob = contextFor(bobUid);
+        const t = getTimestamps();
+        await assertSucceeds(
+          eventRef(bob, "pa-upcoming-1").update({
+            startAt: t.furtherUpcomingStart,
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("upcoming: update startAt to past timestamp is denied", async () => {
+        const bob = contextFor(bobUid);
+        const t = getTimestamps();
+        await expectPermissionDenied(() =>
+          eventRef(bob, "pa-upcoming-1").update({
+            startAt: t.pastTimestamp,
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("upcoming: update endAt before startAt is denied", async () => {
+        const bob = contextFor(bobUid);
+        const t = getTimestamps();
+        await expectPermissionDenied(() =>
+          eventRef(bob, "pa-upcoming-1").update({
+            endAt: t.pastTimestamp,
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("upcoming: update containing unallowlisted field is denied", async () => {
+        const bob = contextFor(bobUid);
+        await expectPermissionDenied(() =>
+          eventRef(bob, "pa-upcoming-1").update({
+            title: "New Title",
+            status: "cancelled",
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("ongoing: moderator can update location and description", async () => {
+        const bob = contextFor(bobUid);
+        await assertSucceeds(
+          eventRef(bob, "pa-ongoing-1").update({
+            location: "Moved to Auditorium B",
+            description: "Updated ongoing event instructions.",
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("ongoing: moderator can extend endAt into the future", async () => {
+        const bob = contextFor(bobUid);
+        const t = getTimestamps();
+        await assertSucceeds(
+          eventRef(bob, "pa-ongoing-1").update({
+            endAt: t.extendedOngoingEnd,
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("ongoing: shortening endAt is denied", async () => {
+        const bob = contextFor(bobUid);
+        const t = getTimestamps();
+        await expectPermissionDenied(() =>
+          eventRef(bob, "pa-ongoing-1").update({
+            endAt: t.shortenedOngoingEnd,
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("ongoing: moving endAt to past is denied", async () => {
+        const bob = contextFor(bobUid);
+        const t = getTimestamps();
+        await expectPermissionDenied(() =>
+          eventRef(bob, "pa-ongoing-1").update({
+            endAt: t.pastTimestamp,
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("ongoing: changing locked field title is denied", async () => {
+        const bob = contextFor(bobUid);
+        await expectPermissionDenied(() =>
+          eventRef(bob, "pa-ongoing-1").update({
+            title: "Changed Ongoing Title",
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("ongoing: changing locked field slug is denied", async () => {
+        const bob = contextFor(bobUid);
+        await expectPermissionDenied(() =>
+          eventRef(bob, "pa-ongoing-1").update({
+            slug: "changed-ongoing-slug",
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("ongoing: changing locked field category is denied", async () => {
+        const bob = contextFor(bobUid);
+        await expectPermissionDenied(() =>
+          eventRef(bob, "pa-ongoing-1").update({
+            category: "cultural",
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("ongoing: changing locked field organizerName is denied", async () => {
+        const bob = contextFor(bobUid);
+        await expectPermissionDenied(() =>
+          eventRef(bob, "pa-ongoing-1").update({
+            organizerName: "New Organizer Name",
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("ongoing: changing locked field startAt is denied", async () => {
+        const bob = contextFor(bobUid);
+        const t = getTimestamps();
+        await expectPermissionDenied(() =>
+          eventRef(bob, "pa-ongoing-1").update({
+            startAt: t.furtherUpcomingStart,
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("completed: detail edit is denied", async () => {
+        const alice = contextFor(aliceUid);
+        await expectPermissionDenied(() =>
+          eventRef(alice, "pa-completed-1").update({
+            title: "Completed Event Edit Attempt",
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("cancelled: detail edit via Pathway A is denied", async () => {
+        const alice = contextFor(aliceUid);
+        await expectPermissionDenied(() =>
+          eventRef(alice, "pa-cancelled-1").update({
+            title: "Cancelled Event Edit Attempt",
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+    });
+
+    describe("5. Pathway B: Dedicated Cancellation", () => {
+      beforeEach(async () => {
+        const t = getTimestamps();
+        await seedM22Event("pb-upcoming-1", aliceUid, "apex-ai-club", {
+          status: "published",
+          startAt: t.upcomingStart,
+          endAt: t.upcomingEnd,
+        });
+        await seedM22Event("pb-ongoing-1", aliceUid, "apex-ai-club", {
+          status: "published",
+          startAt: t.ongoingStart,
+          endAt: t.ongoingEnd,
+        });
+        await seedM22Event("pb-completed-1", aliceUid, "apex-ai-club", {
+          status: "published",
+          startAt: t.completedStart,
+          endAt: t.completedEnd,
+        });
+        await seedM22Event("pb-cancelled-1", aliceUid, "apex-ai-club", {
+          status: "cancelled",
+          startAt: t.upcomingStart,
+          endAt: t.upcomingEnd,
+        });
+      });
+
+      it("upcoming: moderator can cancel event changing only status and updatedAt", async () => {
+        const bob = contextFor(bobUid);
+        await assertSucceeds(
+          eventRef(bob, "pb-upcoming-1").update({
+            status: "cancelled",
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("ongoing: moderator can cancel event changing only status and updatedAt", async () => {
+        const bob = contextFor(bobUid);
+        await assertSucceeds(
+          eventRef(bob, "pb-ongoing-1").update({
+            status: "cancelled",
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("completed: cancelling completed event is denied", async () => {
+        const alice = contextFor(aliceUid);
+        await expectPermissionDenied(() =>
+          eventRef(alice, "pb-completed-1").update({
+            status: "cancelled",
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("already cancelled: cancelling already cancelled event is denied", async () => {
+        const alice = contextFor(aliceUid);
+        await expectPermissionDenied(() =>
+          eventRef(alice, "pb-cancelled-1").update({
+            status: "cancelled",
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("cancelling event while simultaneously modifying title is denied", async () => {
+        const alice = contextFor(aliceUid);
+        await expectPermissionDenied(() =>
+          eventRef(alice, "pb-upcoming-1").update({
+            status: "cancelled",
+            title: "Simultaneously Tampered Title",
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+    });
+
+    describe("6. Pathway C: Dedicated Republishing", () => {
+      beforeEach(async () => {
+        const t = getTimestamps();
+        await seedM22Event("pc-upcoming-canc", aliceUid, "apex-ai-club", {
+          status: "cancelled",
+          startAt: t.upcomingStart,
+          endAt: t.upcomingEnd,
+        });
+        await seedM22Event("pc-ongoing-canc", aliceUid, "apex-ai-club", {
+          status: "cancelled",
+          startAt: t.ongoingStart,
+          endAt: t.ongoingEnd,
+        });
+        await seedM22Event("pc-completed-canc", aliceUid, "apex-ai-club", {
+          status: "cancelled",
+          startAt: t.completedStart,
+          endAt: t.completedEnd,
+        });
+        await seedM22Event("pc-published-1", aliceUid, "apex-ai-club", {
+          status: "published",
+          startAt: t.upcomingStart,
+          endAt: t.upcomingEnd,
+        });
+      });
+
+      it("upcoming cancelled: moderator can republish event changing only status and updatedAt", async () => {
+        const bob = contextFor(bobUid);
+        await assertSucceeds(
+          eventRef(bob, "pc-upcoming-canc").update({
+            status: "published",
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("ongoing cancelled: republishing ongoing cancelled event is denied", async () => {
+        const alice = contextFor(aliceUid);
+        await expectPermissionDenied(() =>
+          eventRef(alice, "pc-ongoing-canc").update({
+            status: "published",
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("completed cancelled: republishing completed cancelled event is denied", async () => {
+        const alice = contextFor(aliceUid);
+        await expectPermissionDenied(() =>
+          eventRef(alice, "pc-completed-canc").update({
+            status: "published",
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("already published: republishing published event is denied", async () => {
+        const alice = contextFor(aliceUid);
+        await expectPermissionDenied(() =>
+          eventRef(alice, "pc-published-1").update({
+            status: "published",
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("republishing event while simultaneously modifying title is denied", async () => {
+        const alice = contextFor(aliceUid);
+        await expectPermissionDenied(() =>
+          eventRef(alice, "pc-upcoming-canc").update({
+            status: "published",
+            title: "Simultaneously Tampered Title",
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+    });
+
+    describe("7. Fail-Closed Stored Chronology", () => {
+      beforeEach(async () => {
+        const t = getTimestamps();
+        await seedM22Event("chrono-inverted-pub", aliceUid, "apex-ai-club", {
+          status: "published",
+          startAt: t.upcomingEnd,
+          endAt: t.upcomingStart,
+        });
+        await seedM22Event("chrono-inverted-canc", aliceUid, "apex-ai-club", {
+          status: "cancelled",
+          startAt: t.upcomingEnd,
+          endAt: t.upcomingStart,
+        });
+        await testEnvironment.withSecurityRulesDisabled(async (context) => {
+          const db = context.firestore();
+          const base = eventFixture("chrono-bad-types", aliceUid, "apex-ai-club", {
+            campusId: APEX_CAMPUS_ID,
+            startAt: "not-a-timestamp",
+            endAt: t.upcomingEnd,
+          });
+          await db.collection("events").doc("chrono-bad-types").set(base);
+        });
+      });
+
+      it("detail edit on event with inverted stored dates is denied", async () => {
+        const alice = contextFor(aliceUid);
+        await expectPermissionDenied(() =>
+          eventRef(alice, "chrono-inverted-pub").update({
+            title: "Inverted Chronology Edit",
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("cancellation on event with inverted stored dates is denied", async () => {
+        const alice = contextFor(aliceUid);
+        await expectPermissionDenied(() =>
+          eventRef(alice, "chrono-inverted-pub").update({
+            status: "cancelled",
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("republishing on event with inverted stored dates is denied", async () => {
+        const alice = contextFor(aliceUid);
+        await expectPermissionDenied(() =>
+          eventRef(alice, "chrono-inverted-canc").update({
+            status: "published",
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("hard deletion on event with inverted stored dates is denied", async () => {
+        const alice = contextFor(aliceUid);
+        await expectPermissionDenied(() => eventRef(alice, "chrono-inverted-pub").delete());
+      });
+
+      it("mutations on event with non-timestamp startAt are denied", async () => {
+        const alice = contextFor(aliceUid);
+        await expectPermissionDenied(() =>
+          eventRef(alice, "chrono-bad-types").update({
+            title: "Bad Types Edit",
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("hard deletion on event with non-timestamp startAt is denied", async () => {
+        const alice = contextFor(aliceUid);
+        await expectPermissionDenied(() => eventRef(alice, "chrono-bad-types").delete());
+      });
+    });
+
+    describe("8. Campus-Wide & Null communityId Resolution", () => {
+      beforeEach(async () => {
+        const t = getTimestamps();
+        await seedM22Event("null-comm-pub", aliceUid, null, {
+          campusId: APEX_CAMPUS_ID,
+          visibility: "campus_public",
+          status: "published",
+          startAt: t.upcomingStart,
+          endAt: t.upcomingEnd,
+        });
+        await seedM22Event("null-comm-canc", aliceUid, null, {
+          campusId: APEX_CAMPUS_ID,
+          visibility: "campus_public",
+          status: "cancelled",
+          startAt: t.upcomingStart,
+          endAt: t.upcomingEnd,
+        });
+        await testEnvironment.withSecurityRulesDisabled(async (context) => {
+          const db = context.firestore();
+          // Missing communityId key
+          const missingKey = eventFixture("missing-comm-key", aliceUid, "apex-ai-club", {
+            campusId: APEX_CAMPUS_ID,
+            startAt: t.upcomingStart,
+            endAt: t.upcomingEnd,
+          });
+          delete missingKey.communityId;
+          await db.collection("events").doc("missing-comm-key").set(missingKey);
+
+          // Non-string communityId (number)
+          const badType = eventFixture("bad-comm-type", aliceUid, "apex-ai-club", {
+            campusId: APEX_CAMPUS_ID,
+            communityId: 99999,
+            startAt: t.upcomingStart,
+            endAt: t.upcomingEnd,
+          });
+          await db.collection("events").doc("bad-comm-type").set(badType);
+        });
+      });
+
+      it("same-campus student can read valid null communityId event with campus_public visibility", async () => {
+        const david = contextFor(davidUid);
+        const snap = await assertSucceeds(eventRef(david, "null-comm-pub").get());
+        expect(snap.exists).toBe(true);
+      });
+
+      it("cross-campus student cannot read valid null communityId event", async () => {
+        const eve = contextFor(eveUid);
+        await expectPermissionDenied(() => eventRef(eve, "null-comm-pub").get());
+      });
+
+      it("client Pathway A detail edit on null communityId event is denied", async () => {
+        const alice = contextFor(aliceUid);
+        await expectPermissionDenied(() =>
+          eventRef(alice, "null-comm-pub").update({
+            title: "Admin Edit Null Comm",
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("client Pathway B cancellation on null communityId event is denied", async () => {
+        const alice = contextFor(aliceUid);
+        await expectPermissionDenied(() =>
+          eventRef(alice, "null-comm-pub").update({
+            status: "cancelled",
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("client Pathway C republishing on null communityId event is denied", async () => {
+        const alice = contextFor(aliceUid);
+        await expectPermissionDenied(() =>
+          eventRef(alice, "null-comm-canc").update({
+            status: "published",
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("client hard deletion on null communityId event is denied", async () => {
+        const alice = contextFor(aliceUid);
+        await expectPermissionDenied(() => eventRef(alice, "null-comm-pub").delete());
+      });
+
+      it("attempting to adopt null communityId event by writing a non-empty communityId is denied", async () => {
+        const alice = contextFor(aliceUid);
+        await expectPermissionDenied(() =>
+          eventRef(alice, "null-comm-pub").update({
+            communityId: "apex-ai-club",
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("mutations on event missing communityId field are denied", async () => {
+        const alice = contextFor(aliceUid);
+        await expectPermissionDenied(() =>
+          eventRef(alice, "missing-comm-key").update({
+            title: "Missing Key Edit Attempt",
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("hard deletion on event missing communityId field is denied", async () => {
+        const alice = contextFor(aliceUid);
+        await expectPermissionDenied(() => eventRef(alice, "missing-comm-key").delete());
+      });
+
+      it("mutations on event with non-string communityId are denied", async () => {
+        const alice = contextFor(aliceUid);
+        await expectPermissionDenied(() =>
+          eventRef(alice, "bad-comm-type").update({
+            title: "Bad Type Edit Attempt",
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("hard deletion on event with non-string communityId is denied", async () => {
+        const alice = contextFor(aliceUid);
+        await expectPermissionDenied(() => eventRef(alice, "bad-comm-type").delete());
+      });
+    });
+
+    describe("9. RSVP Preservation & Interaction Invariants", () => {
+      beforeEach(async () => {
+        const t = getTimestamps();
+        await seedM22Event("rsvp-pub-event", aliceUid, "apex-ai-club", {
+          status: "published",
+          startAt: t.upcomingStart,
+          endAt: t.upcomingEnd,
+        });
+        await seedM22Event("rsvp-canc-event", aliceUid, "apex-ai-club", {
+          status: "cancelled",
+          startAt: t.upcomingStart,
+          endAt: t.upcomingEnd,
+        });
+        await seedM22Event("rsvp-del-parent-event", aliceUid, "apex-ai-club", {
+          status: "published",
+          startAt: t.upcomingStart,
+          endAt: t.upcomingEnd,
+        });
+
+        // Seed existing RSVPs
+        const rsvpExistingCancId = `rsvp-canc-event_${davidUid}`;
+        await seedM22EventRsvp(rsvpExistingCancId, "rsvp-canc-event", davidUid, APEX_CAMPUS_ID);
+
+        const rsvpDelParentId = `rsvp-del-parent-event_${davidUid}`;
+        await seedM22EventRsvp(rsvpDelParentId, "rsvp-del-parent-event", davidUid, APEX_CAMPUS_ID);
+        // Delete the parent event doc directly to simulate parent deletion
+        await testEnvironment.withSecurityRulesDisabled(async (context) => {
+          await context.firestore().collection("events").doc("rsvp-del-parent-event").delete();
+        });
+      });
+
+      it("student cannot create RSVP on cancelled event", async () => {
+        const carol = contextFor(carolUid);
+        const rsvpId = `rsvp-canc-event_${carolUid}`;
+        await expectPermissionDenied(() =>
+          eventRsvpRef(carol, rsvpId).set({
+            id: rsvpId,
+            eventId: "rsvp-canc-event",
+            campusId: APEX_CAMPUS_ID,
+            userId: carolUid,
+            createdAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("owner can delete their own RSVP after parent event has been cancelled", async () => {
+        const david = contextFor(davidUid);
+        const rsvpId = `rsvp-canc-event_${davidUid}`;
+        await assertSucceeds(eventRsvpRef(david, rsvpId).delete());
+      });
+
+      it("owner can delete their own RSVP after parent event has been hard-deleted", async () => {
+        const david = contextFor(davidUid);
+        const rsvpId = `rsvp-del-parent-event_${davidUid}`;
+        await assertSucceeds(eventRsvpRef(david, rsvpId).delete());
+      });
+
+      it("update of existing RSVP is strictly denied", async () => {
+        const david = contextFor(davidUid);
+        const rsvpId = `rsvp-canc-event_${davidUid}`;
+        await expectPermissionDenied(() =>
+          eventRsvpRef(david, rsvpId).update({
+            createdAt: serverTimestamp(),
+          })
+        );
       });
     });
   });

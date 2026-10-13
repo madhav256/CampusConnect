@@ -7,8 +7,8 @@
  * and cancellation state without direct Firestore coupling or RSVP controls.
  */
 
-import { useMemo } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useState, useMemo } from "react";
+import { useParams, Link, useNavigate } from "react-router-dom";
 import {
   ArrowLeft,
   Calendar,
@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { useEvent } from "../hooks/useEvent.js";
 import { useEventRsvp } from "../hooks/useEventRsvp.js";
+import { useEventManagement } from "../hooks/useEventManagement.js";
 import Navbar from "../components/layout/Navbar.jsx";
 import PageContainer from "../components/layout/PageContainer.jsx";
 import Card from "../components/ui/Card.jsx";
@@ -33,6 +34,11 @@ import EventStatusBadge from "../components/events/EventStatusBadge.jsx";
 import EventRsvpButton from "../components/events/EventRsvpButton.jsx";
 import EventAttendeePreview from "../components/events/EventAttendeePreview.jsx";
 import RsvpStatusBadge from "../components/events/RsvpStatusBadge.jsx";
+import EventManagementToolbar from "../components/events/EventManagementToolbar.jsx";
+import EventEditModal from "../components/events/EventEditModal.jsx";
+import EventCancelModal from "../components/events/EventCancelModal.jsx";
+import EventRepublishModal from "../components/events/EventRepublishModal.jsx";
+import EventDeleteModal from "../components/events/EventDeleteModal.jsx";
 import { EVENT_STATUSES, EVENT_VISIBILITIES } from "../constants.js";
 
 /**
@@ -86,8 +92,51 @@ function formatTimeRange(startVal, endVal) {
 
 export default function EventDetail() {
   const { eventId } = useParams();
+  const navigate = useNavigate();
   const { event, availability, isLoading, error, refetch } = useEvent(eventId);
   const { rsvp } = useEventRsvp(eventId);
+
+  // Modal Open States
+  const [isEditOpen, setIsEditOpen] = useState(false);
+  const [isCancelOpen, setIsCancelOpen] = useState(false);
+  const [isRepublishOpen, setIsRepublishOpen] = useState(false);
+  const [isDeleteOpen, setIsDeleteOpen] = useState(false);
+
+  // Authority & Reactive Temporal Lifecycle Management
+  const {
+    isLeader,
+    isAdmin,
+    temporalState,
+    isOngoing,
+    canEdit,
+    canCancel,
+    canRepublish,
+    canDelete,
+    isMutating,
+    mutationError,
+    clearError,
+    editDetails,
+    cancelCurrentEvent,
+    republishCurrentEvent,
+    deleteCurrentEvent,
+  } = useEventManagement(event);
+
+  const handleSaveEdit = async (sparseUpdates) => {
+    await editDetails(sparseUpdates);
+  };
+
+  const handleConfirmCancel = async () => {
+    await cancelCurrentEvent();
+  };
+
+  const handleConfirmRepublish = async () => {
+    await republishCurrentEvent();
+  };
+
+  const handleConfirmDelete = async () => {
+    await deleteCurrentEvent();
+    navigate("/events", { replace: true });
+  };
 
   const eventResolution = useMemo(() => {
     if (availability === "available" && event) {
@@ -234,6 +283,29 @@ export default function EventDetail() {
                 </p>
               </div>
             </div>
+          )}
+
+          {/* Management Toolbar for Authorized Leaders */}
+          {event && (canEdit || canCancel || canRepublish || canDelete) && (
+            <EventManagementToolbar
+              data-testid="event-management-toolbar"
+              event={event}
+              isLeader={isLeader}
+              isAdmin={isAdmin}
+              temporalState={temporalState}
+              isOngoing={isOngoing}
+              canEdit={canEdit}
+              canCancel={canCancel}
+              canRepublish={canRepublish}
+              canDelete={canDelete}
+              isMutating={isMutating}
+              mutationError={mutationError}
+              onClearError={clearError}
+              onOpenEdit={() => setIsEditOpen(true)}
+              onOpenCancel={() => setIsCancelOpen(true)}
+              onOpenRepublish={() => setIsRepublishOpen(true)}
+              onOpenDelete={() => setIsDeleteOpen(true)}
+            />
           )}
 
           {/* Event Header Banner / Hero Card */}
@@ -501,6 +573,52 @@ export default function EventDetail() {
           </div>
         </div>
       </div>
+
+      {/* Management Action Modals */}
+      {isEditOpen && (
+        <EventEditModal
+          data-testid="event-edit-modal"
+          isOpen={isEditOpen}
+          onClose={() => setIsEditOpen(false)}
+          event={event}
+          isOngoing={isOngoing}
+          isMutating={isMutating}
+          onSave={handleSaveEdit}
+        />
+      )}
+
+      {isCancelOpen && (
+        <EventCancelModal
+          data-testid="event-cancel-modal"
+          isOpen={isCancelOpen}
+          onClose={() => setIsCancelOpen(false)}
+          event={event}
+          isMutating={isMutating}
+          onConfirm={handleConfirmCancel}
+        />
+      )}
+
+      {isRepublishOpen && (
+        <EventRepublishModal
+          data-testid="event-republish-modal"
+          isOpen={isRepublishOpen}
+          onClose={() => setIsRepublishOpen(false)}
+          event={event}
+          isMutating={isMutating}
+          onConfirm={handleConfirmRepublish}
+        />
+      )}
+
+      {isDeleteOpen && (
+        <EventDeleteModal
+          data-testid="event-delete-modal"
+          isOpen={isDeleteOpen}
+          onClose={() => setIsDeleteOpen(false)}
+          event={event}
+          isMutating={isMutating}
+          onConfirm={handleConfirmDelete}
+        />
+      )}
     </div>
   );
 }

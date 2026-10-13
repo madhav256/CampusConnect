@@ -35,8 +35,25 @@ const mocks = vi.hoisted(() => ({
   useEvent: vi.fn(),
   useEvents: vi.fn(),
   useCommunity: vi.fn(),
-  useCommunityMembers: vi.fn(),
+  useCommunityMembers: vi.fn(() => ({ members: [], membership: null, isLoading: false })),
   useEligibleCommunities: vi.fn(),
+  useEventManagement: vi.fn(() => ({
+    isLeader: false,
+    isAdmin: false,
+    temporalState: "upcoming",
+    isOngoing: false,
+    canEdit: false,
+    canCancel: false,
+    canRepublish: false,
+    canDelete: false,
+    isMutating: false,
+    mutationError: null,
+    clearError: vi.fn(),
+    editDetails: vi.fn(),
+    cancelCurrentEvent: vi.fn(),
+    republishCurrentEvent: vi.fn(),
+    deleteCurrentEvent: vi.fn(),
+  })),
   createEvent: vi.fn(),
   usePosts: vi.fn(() => ({
     posts: [],
@@ -100,6 +117,11 @@ vi.mock("../../src/hooks/useCommunityMembers", () => ({
 
 vi.mock("../../src/hooks/useEligibleCommunities", () => ({
   useEligibleCommunities: (campusId) => mocks.useEligibleCommunities(campusId),
+}));
+
+vi.mock("../../src/hooks/useEventManagement", () => ({
+  useEventManagement: (event, explicitUser, explicitCampusId) =>
+    mocks.useEventManagement(event, explicitUser, explicitCampusId),
 }));
 
 vi.mock("../../src/services/eventService", () => ({

@@ -1,6 +1,6 @@
 # CampusConnect Project Context
 
-**Status:** Current project brief (Milestone 21 Delivered)
+**Status:** Current project brief (Milestone 22 Delivered)
 
 ## Product
 
@@ -55,7 +55,7 @@ The active Firestore collections are:
 - `campuses/{campusId}`: registered university campuses;
 - `communities/{communityId}`: campus-scoped student communities;
 - `communityMembers/{membershipId}`: community membership records with roles (`member`, `moderator`, `admin`);
-- `events/{eventId}`: campus events with lifecycle statuses (`draft`, `published`, `cancelled`) and visibility tiers (`campus-public`, `community-only`);
+- `events/{eventId}`: campus events with lifecycle statuses (`published`, `cancelled`) and visibility tiers (`campus-public`, `community-only`);
 - `eventRsvps/{rsvpId}`: deterministic `{eventId}_{userId}` RSVP participation records;
 - `users/{uid}`: private user account authority;
 - `publicProfiles/{uid}`: public profile information for authenticated student networking;
@@ -102,6 +102,6 @@ The application is deployed as a Firebase Hosting SPA. The login page can option
 The repository maintains five automated verification gates:
 - **ESLint**: clean linting across application and test source.
 - **Production build**: Vite bundle generation.
-- **Unit tests**: 710 Vitest tests covering cutover, services, messaging, communities, events, event RSVPs, hooks, and helpers.
-- **Firestore security rules tests**: 352 rules tests across 15 suites executed against the Firebase Emulator using the synthetic `demo-campusconnect-rules-test` project.
-- **Playwright E2E browser tests**: 59 automated tests covering authentication, feed, discovery, connections, messaging, communities, events, and event RSVPs against the Firebase Emulator suite.
+- **Unit tests**: 835 Vitest tests covering cutover, services, messaging, communities, events, event RSVPs, event management, hooks, and helpers.
+- **Firestore security rules tests**: 420 rules tests across 15 suites executed against the Firebase Emulator using the synthetic `demo-campusconnect-rules-test` project.
+- **Playwright E2E browser tests**: 69 automated tests across 15 spec files covering authentication, feed, discovery, connections, messaging, communities, events, event RSVPs, and event lifecycle management against the Firebase Emulator suite.

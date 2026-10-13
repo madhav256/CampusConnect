@@ -1,6 +1,6 @@
 # CampusConnect Firestore Schema
 
-**Status:** Active client schema and Rule reference (Milestone 21 Delivered)
+**Status:** Active client schema and Rule reference (Milestone 22 Delivered)
 
 This document describes the collections used by the current browser application. Firebase Admin SDK demo seeding can add deterministic metadata outside the client write path; those seeder-only details are called out explicitly.
 
@@ -546,13 +546,14 @@ The following fields cannot be modified after document creation:
 - `communityId`: Permanent sponsoring community anchor.
 - `createdBy`: Permanent creator UID provenance.
 - `createdAt`: Permanent creation timestamp.
+- `visibility`: Access visibility boundary enum (`campus_public`, `community_only`).
 
 ### Stored Lifecycle Status
 
 The `status` field tracks administrative lifecycle state:
 
 - `published`: Active, visible event.
-- `cancelled`: Event cancelled by organizers or moderators; retains record with cancellation warning.
+- `cancelled`: Event cancelled by community leaders; retains record with prominent cancellation warning and registration closure.
 
 ### Access Visibility
 
@@ -598,13 +599,29 @@ This design prevents stale time-based status fields in Firestore and eliminates 
   - `endAt >= startAt` chronological integrity enforced.
   - `status` must be `published`.
   - `createdAt` and `updatedAt` must equal `request.time`.
-- **Update Authorization:**
-  - Allowed only by the original creator (`request.auth.uid == resource.data.createdBy`), an active community moderator, or an active community admin.
+- **Update Authorization (Revision 9 Locked Pathways):**
+  - Allowed exclusively for active community leaders (moderators or admins of the sponsoring community via `isCommunityModeratorOrAdmin(communityId)`) belonging to the matching tenant campus. Creator UID alone without an active leader role confers no update authority.
+  - Preserves all 6 immutable fields (`id`, `campusId`, `communityId`, `createdBy`, `createdAt`, `visibility`) and chronological integrity (`endAt >= startAt`).
   - Strict 17-field schema enforcement (`isValidEventUpdate`).
-  - All immutable fields (`id`, `campusId`, `communityId`, `createdBy`, `createdAt`) are preserved.
-  - Chronological integrity (`endAt >= startAt`) preserved.
   - `updatedAt` must equal `request.time`.
-- **Delete Authorization:** Allowed for the original event creator (`request.auth.uid == resource.data.createdBy`) or an active community administrator (`isCommunityAdmin(communityId)`) within the matching tenant campus. Alternatively, organizational lifecycle can be managed via status update to `cancelled`.
+  - Three mutually exclusive update pathways:
+    - **Pathway A (Detail Edits: `published -> published`):**
+      - *Upcoming Events (`request.time < startAt`):* Modifies any of the 9 domain allowlisted fields (`title`, `slug`, `description`, `category`, `location`, `startAt`, `endAt`, `imageURL`, `organizerName`). `startAt` must remain in the future, and `endAt >= startAt`. Unsupported fields (such as `capacity` or `tags`) are strictly rejected.
+      - *Ongoing Events (`startAt <= request.time <= endAt`):* Core identity fields (`title`, `slug`, `category`, `organizerName`, `startAt`) are immutable. Only `location`, `description`, `imageURL`, and non-shortening `endAt` extensions (`endAt >= resource.data.endAt && endAt > request.time`) may be modified.
+    - **Pathway B (Dedicated Cancellation: `published -> cancelled`):**
+      - Permitted for upcoming and ongoing events (`request.time <= endAt`).
+      - Strictly restricts affected keys to `['status', 'updatedAt']`. All detail and timing fields remain immutable.
+      - Closes new attendee registration immediately while preserving existing attendee RSVP records for voluntary withdrawal.
+    - **Pathway C (Dedicated Republishing: `cancelled -> published`):**
+      - Permitted exclusively for upcoming events (`request.time < startAt`).
+      - Strictly restricts affected keys to `['status', 'updatedAt']`. All detail and timing fields remain immutable.
+      - Reopens attendee registration for eligible students.
+    - *Completed Events (`request.time > endAt`):* Strictly read-only invariant. No update pathway exists for completed events.
+- **Delete Authorization (Revision 9 Hard Delete):**
+  - Allowed exclusively for active community administrators (`isCommunityAdmin(communityId)`) belonging to the matching tenant campus. Creator UID alone or community moderators cannot delete.
+  - Restricted to upcoming events (`request.time < resource.data.startAt`) in `published` or `cancelled` status.
+  - Deletion of ongoing or completed events is strictly prohibited.
+  - Hard delete removes the event document from Firestore. Orphaned attendee RSVP documents are intentionally retained and surface in attending students' Going tab under "RSVPs Requiring Attention" until voluntarily dismissed.
 
 ## 15. `eventRsvps/{eventId}_{userId}` (Event Participation Intent)
 

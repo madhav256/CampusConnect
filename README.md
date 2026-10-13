@@ -82,7 +82,9 @@ The active source structure is:
 ```text
 src/
 ├── components/
+│   ├── communities/
 │   ├── dev/
+│   ├── events/
 │   ├── feed/
 │   ├── layout/
 │   ├── messages/
@@ -119,12 +121,12 @@ Private account settings (`users/{uid}`) and public profile fields (`publicProfi
 
 ## Current limitations
 
-- Automated test suites include 204 Vitest unit tests and 154 Firestore Emulator rules tests; service integration, end-to-end, and a CI pipeline remain deferred.
+- Automated test suites include 835 Vitest unit tests, 420 Firestore Emulator rules tests, and 69 Playwright E2E browser tests across 15 spec files, with a continuous integration pipeline.
 - Directory and notification reads are bounded rather than cursor-paginated (the campus feed supports cursor pagination).
 - Discovery uses client-side filtering over the `directoryIndex` projection rather than an external search index.
 - No Firebase Storage integration or media uploads.
 - No post editing, sharing, search, or bookmarks.
-- No presence, read receipts, clubs, events, marketplace, or internship board.
+- No presence, read receipts, marketplace, or internship board.
 - No email-verification enforcement, password-change UI, or account-deletion cascade.
 - Notification generation currently occurs in client connection transactions rather than a background event processor.
 
@@ -183,30 +185,38 @@ The seeder uses explicit demo ID whitelists, merge-only writes, and no bulk dele
 
 ## Verification commands
 
-Unit tests run via Vitest (204 passing tests):
+Unit tests run via Vitest (835 passing tests):
 
 ```bash
 npm run test:unit
 ```
 
-Firestore Rules tests run inside the fixed synthetic emulator project `demo-campusconnect-rules-test` (154 passing tests):
+Firestore Rules tests run inside the fixed synthetic emulator project `demo-campusconnect-rules-test` (420 passing tests):
 
 ```bash
 npm run test:rules
 ```
 
-The Rules command starts and stops the Firestore Emulator automatically. It does not read `.env.local`, use service-account credentials, invoke the demo seeder, or connect to the recruiter project. The Rules suite runs 154 passing security regression tests across 11 suites, verifying strict schemas, permissions, immutability, state transitions, and bidirectional transactional message coupling.
+The Rules command starts and stops the Firestore Emulator automatically. It does not read `.env.local`, use service-account credentials, invoke the demo seeder, or connect to the recruiter project. The Rules suite runs 420 passing security regression tests across 15 suites, verifying strict schemas, permissions, immutability, state transitions, and bidirectional transactional message coupling.
+
+End-to-end browser tests run via Playwright against the Firebase Emulator suite (69 passing tests across 15 spec files):
+
+```bash
+npm run test:e2e
+```
 
 The broader local checks are:
 
 ```bash
 npm run lint
-npm run test
+npm run test:unit
+npm run test:rules
+npm run test:e2e
 npm run build
 npm run preview
 ```
 
-The current automated coverage does not include service integration, end-to-end tests, or CI. The development `SecurityTestPanel` remains a separate manual audit tool and is not used by these tests.
+Automated verification is also continuously validated via GitHub Actions CI across lint, unit, rules, build, and E2E suites. The development `SecurityTestPanel` remains a separate manual audit tool and is not used by these tests.
 
 ## Documentation map
 

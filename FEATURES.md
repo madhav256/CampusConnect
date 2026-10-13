@@ -1,6 +1,6 @@
 # CampusConnect Features
 
-**Status:** Current implementation inventory (Milestone 21 Delivered)
+**Status:** Current implementation inventory (Milestone 22 Delivered)
 
 This document distinguishes shipped behavior from deferred ideas. A feature is marked implemented only when it exists in the current application source and active Firebase model.
 
@@ -156,10 +156,23 @@ The discoverability toggle updates `users/{uid}` and atomically adds or removes 
 - Events discovery surface at `/events` with Upcoming and Past tabs.
 - Category filtering, date sorting, and text query filtering across accessible events.
 - Event detail page at `/events/:eventId` showing date, time, location, description, category, and host community.
-- Event lifecycle statuses: `draft`, `published`, `cancelled`.
+- Event lifecycle statuses: `published`, `cancelled`.
 - Two-tier visibility model: `campus-public` (accessible to all students of the campus) and `community-only` (accessible exclusively to active members of the host community).
 - Host community integration: events linked to host community with direct navigation between event detail and community profile.
-- Creator and community-admin event management (status transitions, cancellation with explanatory reason, hard delete).
+- Role-based event management for community administrators and moderators (allowlisted detail updates, cancellation with registration closure, republishing, and administrator-only hard delete).
+
+### Event Lifecycle Management (Milestone 22 Delivered)
+
+- **Dedicated Management Toolbar (`EventManagementToolbar`):** Rendered on `/events/:eventId` exclusively for authorized community leaders (admins and moderators) within the matching campus tenant.
+- **Adaptive Mutability (`EventEditModal`):**
+  - Upcoming events: Allows updating all 9 domain allowlisted fields (`title`, `slug`, `description`, `category`, `location`, `startAt`, `endAt`, `imageURL`, `organizerName`). Strict absence and rejection of unsupported fields (`capacity`, `tags`).
+  - Ongoing events: Core identity fields (`title`, `slug`, `category`, `organizerName`, `startAt`) are strictly locked. Allows updating location, description, banner image, and non-shortening end time extensions.
+- **Dedicated Cancellation (`EventCancelModal`):** Permitted for upcoming and ongoing events (`now <= endAt`). Immediately closes new registration, displays prominent cancellation banners and badges, preserves attendee RSVP records for voluntary withdrawal, and allows republishing before start time.
+- **Dedicated Republishing (`EventRepublishModal`):** Permitted exclusively for cancelled upcoming events (`now < startAt`). Restores event status to `published`, removes cancellation alerts, and reopens attendee registration.
+- **Permanent Hard Deletion (`EventDeleteModal`):** Restricted exclusively to community administrators for upcoming events (`now < startAt`). Irreversible action warning and orphan RSVP retention disclosure. Deletes event document from Firestore; orphaned attendee RSVPs surface in the "RSVPs Requiring Attention" section on the Going tab.
+- **Completed Event Invariant:** Past events (`now > endAt`) are strictly read-only; management toolbar and mutation actions are omitted from the DOM.
+- **Reactive Temporal Boundaries:** Client-side boundary timers trigger automatic state transitions at `startAt` and `endAt` without polling.
+- **Persistent Concurrency Locks:** State machine prevents conflicting in-flight operations with zero-flash optimistic transitions.
 
 ### Event RSVPs & Participation Discovery
 
@@ -211,9 +224,9 @@ Settings and Notifications render a development-only `SecurityTestPanel`. The av
 
 Automated verification includes:
 
-- **710 Vitest unit tests** covering cutover, services, messaging, communities, events, event RSVPs, normalization, hooks, and helper logic;
-- **352 Firestore Emulator security rules tests** across 15 suites, covering users, publicProfiles, directoryIndex, discoverability transitions, posts, comments, likes, connections, notifications, conversations, messages, communities, communityMembers, events, and eventRsvps;
-- **59 Playwright E2E browser tests** executed against the Firebase Emulator suite, verifying authentication, feed, discovery, connections, messaging, communities, events, and the complete event RSVP lifecycle.
+- **835 Vitest unit tests** covering cutover, services, messaging, communities, events, event RSVPs, event management, normalization, hooks, and helper logic;
+- **420 Firestore Emulator security rules tests** across 15 suites, covering users, publicProfiles, directoryIndex, discoverability transitions, posts, comments, likes, connections, notifications, conversations, messages, communities, communityMembers, events, and eventRsvps;
+- **69 Playwright E2E browser tests** across 15 spec files executed against the Firebase Emulator suite, verifying authentication, feed, discovery, connections, messaging, communities, events, event RSVPs, and complete event lifecycle management.
 
 ### Recruiter demo and seeding
 

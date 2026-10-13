@@ -4,6 +4,8 @@ import { getFirestore, Timestamp } from "firebase-admin/firestore";
 import { E2E_USERS } from "../fixtures/testUsers.js";
 import { seedEventRsvps } from "../../../scripts/seedEventRsvps.mjs";
 import { EVENT_RSVP_DEFINITIONS } from "../../../src/data/eventRsvps.js";
+import { seedEvents } from "../../../scripts/seedEvents.mjs";
+import { seedCommunityMembers } from "../../../scripts/seedCommunityMembers.mjs";
 
 process.env.GOOGLE_AUTH_SUPPRESS_CREDENTIALS_WARNINGS = "true";
 
@@ -315,4 +317,147 @@ export async function createTestEventRsvp(eventId, userId, campusId) {
     createdAt: Timestamp.now(),
   });
   return rsvpId;
+}
+
+/**
+ * Deletes a specific test RSVP document directly in Cloud Firestore.
+ *
+ * @param {string} eventId
+ * @param {string} userId
+ */
+export async function deleteTestEventRsvp(eventId, userId) {
+  if (!process.env.FIRESTORE_EMULATOR_HOST) {
+    throw new Error("[deleteTestEventRsvp] Refusing to run outside emulator environment.");
+  }
+  const rsvpId = `${eventId}_${userId}`;
+  await db.collection("eventRsvps").doc(rsvpId).delete();
+}
+
+/**
+ * Creates an isolated event document directly in Cloud Firestore for destructive or
+ * lifecycle-specific tests. Uses an explicit isolated ID prefix (e2e-isolated-) to prevent
+ * modifying or colliding with approved baseline fixtures.
+ *
+ * @param {object} [overrides={}]
+ * @returns {Promise<object>} Created event document snapshot data
+ */
+export async function createIsolatedTestEvent(overrides = {}) {
+  if (!process.env.FIRESTORE_EMULATOR_HOST) {
+    throw new Error("[createIsolatedTestEvent] Refusing to run outside emulator environment.");
+  }
+
+  const id = overrides.id || `e2e-isolated-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  const now = Timestamp.now();
+  const startAt = overrides.startAt || Timestamp.fromMillis(Date.now() + 3 * 24 * 60 * 60 * 1000);
+  const endAt = overrides.endAt || Timestamp.fromMillis(Date.now() + 4 * 24 * 60 * 60 * 1000);
+
+  const eventDoc = {
+    id,
+    campusId: overrides.campusId || "apex-university",
+    communityId: overrides.communityId || "apex-ai-club",
+    title: overrides.title || "Isolated Test Event",
+    slug: overrides.slug || `isolated-${id}`,
+    description: overrides.description || "Isolated test event description for automated testing.",
+    category: overrides.category || "tech",
+    location: overrides.location || "Innovation Lab 101",
+    startAt,
+    endAt,
+    imageURL: overrides.imageURL !== undefined ? overrides.imageURL : null,
+    createdBy: overrides.createdBy || E2E_USERS.studentA.uid,
+    organizerName: overrides.organizerName || "Apex AI & Robotics Society",
+    status: overrides.status || "published",
+    visibility: overrides.visibility || "campus_public",
+    createdAt: overrides.createdAt || now,
+    updatedAt: overrides.updatedAt || now,
+  };
+
+  await db.collection("events").doc(id).set(eventDoc);
+  return eventDoc;
+}
+
+/**
+ * Safely removes a single isolated event document. Strictly guards that the event ID
+ * starts with 'e2e-isolated-' to prevent accidental deletion of shared fixtures.
+ *
+ * @param {string} eventId
+ */
+export async function deleteIsolatedTestEvent(eventId) {
+  if (!process.env.FIRESTORE_EMULATOR_HOST) {
+    throw new Error("[deleteIsolatedTestEvent] Refusing to run outside emulator environment.");
+  }
+  if (!eventId || !eventId.startsWith("e2e-isolated-")) {
+    throw new Error(`[deleteIsolatedTestEvent] Refusing to delete non-isolated event ID: ${eventId}`);
+  }
+  await db.collection("events").doc(eventId).delete();
+}
+
+/**
+ * Deletes all test-created events matching the isolated prefix ('e2e-isolated-').
+ * Never deletes shared baseline fixtures.
+ */
+export async function cleanupIsolatedEvents() {
+  if (!process.env.FIRESTORE_EMULATOR_HOST) {
+    throw new Error("[cleanupIsolatedEvents] Refusing to run outside emulator environment.");
+  }
+  const snapshot = await db.collection("events").get();
+  const batch = db.batch();
+  let count = 0;
+  for (const doc of snapshot.docs) {
+    if (doc.id.startsWith("e2e-isolated-")) {
+      batch.delete(doc.ref);
+      count++;
+    }
+  }
+  if (count > 0) {
+    await batch.commit();
+  }
+}
+
+/**
+ * Deterministically resets the events collection to pristine baseline state by
+ * purging any test-isolated events and re-seeding the approved fixtures.
+ */
+export async function resetEventFixtures() {
+  if (!process.env.FIRESTORE_EMULATOR_HOST) {
+    throw new Error("[resetEventFixtures] Refusing to run outside emulator environment.");
+  }
+  await cleanupIsolatedEvents();
+  await seedEvents(db);
+}
+
+/**
+ * Updates or sets a user's role and status within a community.
+ *
+ * @param {string} communityId
+ * @param {string} userId
+ * @param {string} role
+ * @param {string} [status="active"]
+ */
+export async function setCommunityMemberRole(communityId, userId, role, status = "active") {
+  if (!process.env.FIRESTORE_EMULATOR_HOST) {
+    throw new Error("[setCommunityMemberRole] Refusing to run outside emulator environment.");
+  }
+  const memberId = `${communityId}_${userId}`;
+  await db.collection("communityMembers").doc(memberId).set(
+    {
+      id: memberId,
+      communityId,
+      userId,
+      campusId: "apex-university",
+      role,
+      status,
+      updatedAt: Timestamp.now(),
+    },
+    { merge: true }
+  );
+}
+
+/**
+ * Restores community membership documents to their approved baseline state.
+ */
+export async function restoreCommunityMembers() {
+  if (!process.env.FIRESTORE_EMULATOR_HOST) {
+    throw new Error("[restoreCommunityMembers] Refusing to run outside emulator environment.");
+  }
+  await seedCommunityMembers(db);
 }

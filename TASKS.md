@@ -1,6 +1,6 @@
 # CampusConnect Roadmap
 
-**Status:** Status-aware roadmap (Milestone 21 Delivered)
+**Status:** Status-aware roadmap (Milestone 22 Delivered)
 
 Checked items describe work that exists in the current repository. Unchecked items are proposed or deferred; they are not implemented merely because they appear here.
 
@@ -35,7 +35,7 @@ Checked items describe work that exists in the current repository. Unchecked ite
 - [x] Milestone 19: Student Communities (directory, detail, membership authority, community feed, moderation).
 - [x] Milestone 20: Campus Events (lifecycle, visibility tiers, discovery, community integration, event management).
 - [x] Milestone 21: Event RSVPs & Participation Discovery (RSVP lifecycle, attendee preview, Going tab, badges, resolution pipeline, error recovery).
-- [x] Automated test suites: 710 Vitest unit tests, 352 Firestore Emulator security rules tests, and 59 Playwright E2E browser tests passing.
+- [x] Automated test suites: 835 Vitest unit tests, 420 Firestore Emulator security rules tests, and 69 Playwright E2E browser tests passing.
 
 ## Current maintenance contract
 
@@ -101,6 +101,14 @@ Checked items describe work that exists in the current repository. Unchecked ite
 - [x] **21.4 Event Detail RSVP UI & Attention Handling:** Interactive RSVP button, attendee roster preview (up to 8 avatars with headcount), derived status badges, and attention container for inaccessible events (`v21.4.0` through `v21.4.3`).
 - [x] **21.5 Participation Discovery Surfaces:** Dedicated Going tab on `/events`, card Going badges on all event cards and community Events tab, query/resolution retry actions, and context isolation across users/campuses (`v21.5.0-event-participation-discovery`, `v21.5.0-event-rsvp-discovery-surfaces`).
 - [x] **21.6 RSVP E2E Verification & Documentation:** Deterministic RSVP reset helper (`resetEventRsvps`), comprehensive Playwright E2E coverage across all §14.3 scenarios, and complete documentation reconciliation (`v21.6.0-event-rsvp-e2e-documentation`).
+
+### Milestone 22 — Event Lifecycle Management (Delivered)
+
+- [x] **22.1 Event Lifecycle Domain Contract:** Exact 17-field event schema, 6 immutable fields (`id`, `campusId`, `communityId`, `createdBy`, `createdAt`, `visibility`), lifecycle statuses (`published`, `cancelled`), temporal boundaries, and unit tests (`v22.1.0-event-lifecycle-domain-contract`).
+- [x] **22.2 Firestore Security Rules & Security Verification:** Revision 9 update Pathways A (upcoming general), B (ongoing metadata), and C (cancellation/republishing), community admin hard-delete authority for non-ongoing events, and 420 security rules regression tests (`v22.2.0-event-lifecycle-security-rules`).
+- [x] **22.3 Event Management Hooks & Service Integration:** `eventService.js` management methods, `useEventManagement` hook, transactional update/delete operations, and service/hook unit tests (`v22.3.0-event-management-hooks-integration`).
+- [x] **22.4 Event Management UI:** `EventManagementToolbar`, `EventEditModal`, `EventCancelModal`, `EventRepublishModal`, `EventDeleteModal`, integration into `EventDetail.jsx`, and UI unit test suite (`v22.4.0-event-management-ui`).
+- [x] **22.5 E2E Verification & Documentation Reconciliation:** End-to-end verification across 10 lifecycle scenarios (`eventManagement.spec.js`), safe deterministic fixture/membership helpers, full test suite verification (835 unit tests, 420 rules tests, 69 Playwright E2E tests), and complete documentation reconciliation.
 
 ## Proposed next engineering milestones
 

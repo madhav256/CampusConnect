@@ -324,6 +324,82 @@ export function eventRsvpFixture(
   };
 }
 
+export function eventNotificationDeliveryFixture(
+  eventId = "event-test-1",
+  actorId = TEST_UIDS.alice,
+  campusId = APEX_CAMPUS_ID,
+  communityId = "apex-ai-club",
+  overrides = {}
+) {
+  const names = {
+    alice: "Alice Test",
+    bob: "Bob Test",
+    carol: "Carol Test",
+    david: "David Test",
+  };
+  return {
+    id: eventId,
+    eventId,
+    cycleId: overrides.cycleId || "cycle_test_1234567890",
+    campusId,
+    communityId,
+    actorId,
+    actorName: names[actorId] || "Test Student",
+    actorAvatar: null,
+    status: overrides.status || "pending",
+    checkpointVersion: overrides.checkpointVersion !== undefined ? overrides.checkpointVersion : 0,
+    lastProcessedRsvpId: overrides.lastProcessedRsvpId !== undefined ? overrides.lastProcessedRsvpId : null,
+    processedCount: overrides.processedCount !== undefined ? overrides.processedCount : 0,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    ...overrides,
+  };
+}
+
+export function eventRsvpNotificationFixture(recipientId, actorId, eventId, overrides = {}) {
+  const names = {
+    alice: "Alice Test",
+    bob: "Bob Test",
+    carol: "Carol Test",
+    david: "David Test",
+  };
+  return {
+    id: overrides.id || `rsvp_${eventId}_${actorId}`,
+    recipientId,
+    actorId,
+    actorName: names[actorId] || "Test Student",
+    actorAvatar: null,
+    type: "event_rsvp",
+    referenceId: eventId,
+    isRead: false,
+    createdAt: timestamp,
+    ...overrides,
+  };
+}
+
+export function eventCancelledNotificationFixture(recipientId, actorId, eventId, cycleId, overrides = {}) {
+  const names = {
+    alice: "Alice Test",
+    bob: "Bob Test",
+    carol: "Carol Test",
+    david: "David Test",
+  };
+  return {
+    id: overrides.id || `cancel_${eventId}_${cycleId}`,
+    recipientId,
+    actorId,
+    actorName: names[actorId] || "Test Student",
+    actorAvatar: null,
+    type: "event_cancelled",
+    referenceId: eventId,
+    cycleId,
+    isRead: false,
+    createdAt: timestamp,
+    ...overrides,
+  };
+}
+
+
 export async function seedBaseData(testEnvironment) {
   await testEnvironment.withSecurityRulesDisabled(async (context) => {
     const db = context.firestore();

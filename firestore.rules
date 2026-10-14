@@ -32,18 +32,23 @@ service cloud.firestore {
 
     function isValidNotificationPreferencesForCreate(preferences) {
       return preferences is map &&
-             preferences.keys().hasOnly(['connectionRequests', 'connectionAccepted']) &&
              preferences.keys().hasAll(['connectionRequests', 'connectionAccepted']) &&
+             preferences.keys().hasOnly(['connectionRequests', 'connectionAccepted', 'eventRsvps', 'eventCancellations']) &&
              preferences.connectionRequests is bool &&
-             preferences.connectionAccepted is bool;
+             preferences.connectionAccepted is bool &&
+             (!('eventRsvps' in preferences) || preferences.eventRsvps is bool) &&
+             (!('eventCancellations' in preferences) || preferences.eventCancellations is bool);
     }
 
     function isValidNotificationPreferencesForUpdate(preferences) {
       return preferences is map &&
-             preferences.keys().hasOnly(['connectionRequests', 'connectionAccepted']) &&
+             preferences.keys().hasOnly(['connectionRequests', 'connectionAccepted', 'eventRsvps', 'eventCancellations']) &&
              (!('connectionRequests' in preferences) || preferences.connectionRequests is bool) &&
-             (!('connectionAccepted' in preferences) || preferences.connectionAccepted is bool);
+             (!('connectionAccepted' in preferences) || preferences.connectionAccepted is bool) &&
+             (!('eventRsvps' in preferences) || preferences.eventRsvps is bool) &&
+             (!('eventCancellations' in preferences) || preferences.eventCancellations is bool);
     }
+
 
     function isValidUserCreate(userId) {
       let d = request.resource.data;
@@ -365,25 +370,19 @@ service cloud.firestore {
 
       // 2. User notifications subcollection
       match /notifications/{notificationId} {
-        function isValidNotificationSchema(uId) {
+        function isValidNotificationBaseFields(uId, notifId) {
           let d = request.resource.data;
-          let keys = d.keys();
-          return keys.hasOnly(['id', 'recipientId', 'actorId', 'actorName', 'actorAvatar', 'type', 'referenceId', 'isRead', 'createdAt']) &&
-                 keys.hasAll(['id', 'recipientId', 'actorId', 'actorName', 'actorAvatar', 'type', 'referenceId', 'isRead', 'createdAt']) &&
-                 d.id == notificationId &&
+          return d.id == notifId &&
                  d.recipientId == uId &&
-                 d.actorId == request.auth.uid &&
-                 d.actorId != uId &&
-                 d.isRead == false &&
-                 d.createdAt == request.time &&
-                 d.recipientId is string &&
                  d.actorId is string &&
+                 d.actorId != uId &&
                  d.actorName is string &&
                  (d.actorAvatar == null || d.actorAvatar is string) &&
                  d.type is string &&
                  d.referenceId is string &&
-                 d.isRead is bool &&
-                 d.createdAt is timestamp;
+                 d.isRead == false &&
+                 d.createdAt == request.time &&
+                 (!('referenceTitle' in d) || (d.referenceTitle is string && d.referenceTitle.size() > 0 && d.referenceTitle.size() <= 100));
         }
 
         function isValidActorProfile() {
@@ -414,6 +413,83 @@ service cloud.firestore {
                  getAfter(connPath).data.status == 'accepted' &&
                  getAfter(connPath).data.receiverId == request.auth.uid &&
                  getAfter(connPath).data.senderId == uId;
+        }
+
+        function isValidConnectionNotification(uId, notifId) {
+          let d = request.resource.data;
+          let keys = d.keys();
+          return keys.hasOnly(['id', 'recipientId', 'actorId', 'actorName', 'actorAvatar', 'type', 'referenceId', 'isRead', 'createdAt']) &&
+                 keys.hasAll(['id', 'recipientId', 'actorId', 'actorName', 'actorAvatar', 'type', 'referenceId', 'isRead', 'createdAt']) &&
+                 !('cycleId' in d) &&
+                 !('referenceTitle' in d) &&
+                 d.actorId == request.auth.uid &&
+                 isValidActorProfile() &&
+                 (
+                   isValidConnectionRequestNotification(uId, notifId) ||
+                   isValidConnectionAcceptedNotification(uId, notifId)
+                 );
+        }
+
+        function isValidEventRsvpNotification(uId, notifId) {
+          let d = request.resource.data;
+          let keys = d.keys();
+          let eventPath = /databases/$(database)/documents/events/$(d.referenceId);
+          let rsvpPath = /databases/$(database)/documents/eventRsvps/$(d.referenceId + '_' + request.auth.uid);
+          let eventDoc = exists(eventPath) ? get(eventPath) : null;
+          let rsvpDoc = existsAfter(rsvpPath) ? getAfter(rsvpPath) : null;
+
+          return keys.hasOnly(['id', 'recipientId', 'actorId', 'actorName', 'actorAvatar', 'type', 'referenceId', 'isRead', 'createdAt', 'referenceTitle']) &&
+                 keys.hasAll(['id', 'recipientId', 'actorId', 'actorName', 'actorAvatar', 'type', 'referenceId', 'isRead', 'createdAt']) &&
+                 !('cycleId' in d) &&
+                 d.type == 'event_rsvp' &&
+                 notifId == 'rsvp_' + d.referenceId + '_' + request.auth.uid &&
+                 d.actorId == request.auth.uid &&
+                 isValidActorProfile() &&
+                 eventDoc != null &&
+                 eventDoc.data.campusId == getUserCampusId() &&
+                 eventDoc.data.status == 'published' &&
+                 eventDoc.data.createdBy == uId &&
+                 (!('referenceTitle' in d) || d.referenceTitle == eventDoc.data.title) &&
+                 rsvpDoc != null &&
+                 rsvpDoc.data.userId == request.auth.uid &&
+                 rsvpDoc.data.eventId == d.referenceId &&
+                 rsvpDoc.data.campusId == getUserCampusId();
+        }
+
+        function isValidEventCancelledNotification(uId, notifId) {
+          let d = request.resource.data;
+          let keys = d.keys();
+          let eventPath = /databases/$(database)/documents/events/$(d.referenceId);
+          let ledgerPath = /databases/$(database)/documents/eventNotificationDeliveries/$(d.referenceId);
+          let rsvpPath = /databases/$(database)/documents/eventRsvps/$(d.referenceId + '_' + uId);
+          let eventDoc = exists(eventPath) ? get(eventPath) : null;
+          let ledgerDoc = exists(ledgerPath) ? get(ledgerPath) : null;
+
+          return keys.hasOnly(['id', 'recipientId', 'actorId', 'actorName', 'actorAvatar', 'type', 'referenceId', 'cycleId', 'isRead', 'createdAt', 'referenceTitle']) &&
+                 keys.hasAll(['id', 'recipientId', 'actorId', 'actorName', 'actorAvatar', 'type', 'referenceId', 'cycleId', 'isRead', 'createdAt']) &&
+                 d.type == 'event_cancelled' &&
+                 d.cycleId is string &&
+                 d.cycleId.size() >= 10 &&
+                 d.cycleId.size() <= 64 &&
+                 notifId == 'cancel_' + d.referenceId + '_' + d.cycleId &&
+                 eventDoc != null &&
+                 eventDoc.data.status == 'cancelled' &&
+                 eventDoc.data.campusId == getUserCampusId() &&
+                 (!('referenceTitle' in d) || d.referenceTitle == eventDoc.data.title) &&
+                 ledgerDoc != null &&
+                 ledgerDoc.data.eventId == d.referenceId &&
+                 ledgerDoc.data.cycleId == d.cycleId &&
+                 ledgerDoc.data.communityId == eventDoc.data.communityId &&
+                 ledgerDoc.data.campusId == eventDoc.data.campusId &&
+                 ledgerDoc.data.status in ['pending', 'in_progress'] &&
+                 d.actorId == ledgerDoc.data.actorId &&
+                 d.actorName == ledgerDoc.data.actorName &&
+                 d.actorAvatar == ledgerDoc.data.actorAvatar &&
+                 (
+                   request.auth.uid == eventDoc.data.createdBy ||
+                   isCommunityModeratorOrAdmin(ledgerDoc.data.communityId)
+                 ) &&
+                 exists(rsvpPath);
         }
 
         // Allows an acceptance transaction to refresh an existing deterministic
@@ -451,11 +527,11 @@ service cloud.firestore {
         allow get: if isAuthenticated() && request.auth.uid == userId;
 
         allow create: if isAuthenticated() &&
-          isValidNotificationSchema(userId) &&
-          isValidActorProfile() &&
+          isValidNotificationBaseFields(userId, notificationId) &&
           (
-            isValidConnectionRequestNotification(userId, notificationId) ||
-            isValidConnectionAcceptedNotification(userId, notificationId)
+            (request.resource.data.type in ['connection_request', 'connection_accepted'] && isValidConnectionNotification(userId, notificationId)) ||
+            (request.resource.data.type == 'event_rsvp' && isValidEventRsvpNotification(userId, notificationId)) ||
+            (request.resource.data.type == 'event_cancelled' && isValidEventCancelledNotification(userId, notificationId))
           );
 
         allow update: if isAuthenticated() && (
@@ -465,7 +541,7 @@ service cloud.firestore {
             request.resource.data.isRead is bool
           ) ||
           (
-            isValidNotificationSchema(userId) &&
+            isValidNotificationBaseFields(userId, notificationId) &&
             isValidActorProfile() &&
             isValidConnectionAcceptedNotificationUpdate(userId, notificationId)
           )
@@ -477,6 +553,7 @@ service cloud.firestore {
           (resource == null && notificationId.matches('^req_.*'))
         );
       }
+
     }
 
     // 1b. Public profiles collection (Sole authority for public profile fields)
@@ -990,6 +1067,121 @@ service cloud.firestore {
                d.updatedAt == request.time;
       }
 
+      function isValidPathwayA(d, r, affected) {
+        return (
+          // Upcoming Event Branch (now < r.startAt)
+          (
+            request.time < r.startAt &&
+            affected.hasOnly([
+              'title', 'slug', 'description', 'category', 'location',
+              'startAt', 'endAt', 'imageURL', 'organizerName', 'updatedAt'
+            ]) &&
+            affected.hasAny([
+              'title', 'slug', 'description', 'category', 'location',
+              'startAt', 'endAt', 'imageURL', 'organizerName'
+            ]) &&
+            (!affected.hasAny(['startAt']) || (d.startAt is timestamp && d.startAt > request.time)) &&
+            (!affected.hasAny(['startAt', 'endAt']) || (d.endAt is timestamp && d.endAt >= d.startAt)) &&
+            d.title is string && d.title.size() >= 3 && d.title.size() <= 100 &&
+            d.slug is string && d.slug.size() > 0 &&
+            d.description is string && d.description.size() > 0 && d.description.size() <= 3000 &&
+            d.category in [
+              'academic', 'tech', 'cultural', 'sports',
+              'career', 'workshop', 'social', 'competition'
+            ] &&
+            d.location is string && d.location.size() > 0 && d.location.size() <= 200 &&
+            d.organizerName is string && d.organizerName.size() > 0 &&
+            (d.imageURL == null || (d.imageURL is string && d.imageURL.size() > 0))
+          ) ||
+          // Ongoing Event Branch (r.startAt <= now <= r.endAt)
+          (
+            request.time >= r.startAt &&
+            request.time <= r.endAt &&
+            affected.hasOnly(['location', 'description', 'imageURL', 'endAt', 'updatedAt']) &&
+            affected.hasAny(['location', 'description', 'imageURL', 'endAt']) &&
+            d.startAt == r.startAt &&
+            d.title == r.title &&
+            d.slug == r.slug &&
+            d.category == r.category &&
+            d.organizerName == r.organizerName &&
+            d.description is string && d.description.size() > 0 && d.description.size() <= 3000 &&
+            d.location is string && d.location.size() > 0 && d.location.size() <= 200 &&
+            (d.imageURL == null || (d.imageURL is string && d.imageURL.size() > 0)) &&
+            (
+              (affected.hasAny(['endAt']) && d.endAt is timestamp && d.endAt >= r.endAt && d.endAt > request.time) ||
+              (!affected.hasAny(['endAt']) && d.endAt == r.endAt)
+            )
+          )
+        );
+      }
+
+      function hasValidInitialLedger(eId, r) {
+        let ledgerPath = /databases/$(database)/documents/eventNotificationDeliveries/$(eId);
+        return !exists(ledgerPath) &&
+               existsAfter(ledgerPath) &&
+               getAfter(ledgerPath).data.id == eId &&
+               getAfter(ledgerPath).data.eventId == eId &&
+               getAfter(ledgerPath).data.campusId == r.campusId &&
+               getAfter(ledgerPath).data.communityId == r.communityId &&
+               getAfter(ledgerPath).data.actorId == request.auth.uid &&
+               getAfter(ledgerPath).data.status == 'pending' &&
+               getAfter(ledgerPath).data.checkpointVersion == 0 &&
+               getAfter(ledgerPath).data.processedCount == 0 &&
+               (!('lastProcessedRsvpId' in getAfter(ledgerPath).data) || getAfter(ledgerPath).data.lastProcessedRsvpId == null) &&
+               getAfter(ledgerPath).data.cycleId is string &&
+               getAfter(ledgerPath).data.cycleId.size() >= 10 &&
+               getAfter(ledgerPath).data.cycleId.size() <= 64;
+      }
+
+      function hasValidRepeatLedger(eId, r) {
+        let ledgerPath = /databases/$(database)/documents/eventNotificationDeliveries/$(eId);
+        return exists(ledgerPath) &&
+               existsAfter(ledgerPath) &&
+               get(ledgerPath).data.status in ['completed', 'superseded'] &&
+               getAfter(ledgerPath).data.id == eId &&
+               getAfter(ledgerPath).data.eventId == eId &&
+               getAfter(ledgerPath).data.campusId == r.campusId &&
+               getAfter(ledgerPath).data.communityId == r.communityId &&
+               getAfter(ledgerPath).data.actorId == request.auth.uid &&
+               getAfter(ledgerPath).data.status == 'pending' &&
+               getAfter(ledgerPath).data.checkpointVersion == 0 &&
+               getAfter(ledgerPath).data.processedCount == 0 &&
+               (!('lastProcessedRsvpId' in getAfter(ledgerPath).data) || getAfter(ledgerPath).data.lastProcessedRsvpId == null) &&
+               getAfter(ledgerPath).data.cycleId is string &&
+               getAfter(ledgerPath).data.cycleId.size() >= 10 &&
+               getAfter(ledgerPath).data.cycleId.size() <= 64 &&
+               getAfter(ledgerPath).data.cycleId != get(ledgerPath).data.cycleId;
+      }
+
+      function isValidPathwayB(eId, d, r, affected) {
+        return request.time <= r.endAt &&
+               affected.hasOnly(['status', 'updatedAt']) &&
+               d.title == r.title &&
+               d.slug == r.slug &&
+               d.description == r.description &&
+               d.category == r.category &&
+               d.location == r.location &&
+               d.startAt == r.startAt &&
+               d.endAt == r.endAt &&
+               d.imageURL == r.imageURL &&
+               d.organizerName == r.organizerName &&
+               (hasValidInitialLedger(eId, r) || hasValidRepeatLedger(eId, r));
+      }
+
+      function isValidPathwayC(d, r, affected) {
+        return request.time < r.startAt &&
+               affected.hasOnly(['status', 'updatedAt']) &&
+               d.title == r.title &&
+               d.slug == r.slug &&
+               d.description == r.description &&
+               d.category == r.category &&
+               d.location == r.location &&
+               d.startAt == r.startAt &&
+               d.endAt == r.endAt &&
+               d.imageURL == r.imageURL &&
+               d.organizerName == r.organizerName;
+      }
+
       function isValidEventUpdate(eId) {
         let d = request.resource.data;
         let r = resource.data;
@@ -1021,89 +1213,11 @@ service cloud.firestore {
             'createdAt', 'updatedAt'
           ]);
 
-        // Pathway A: Detail Edits (published -> published)
-        let isPathwayA =
-          r.status == 'published' &&
-          d.status == 'published' &&
-          (
-            // Upcoming Event Branch (now < r.startAt)
-            (
-              request.time < r.startAt &&
-              affected.hasOnly([
-                'title', 'slug', 'description', 'category', 'location',
-                'startAt', 'endAt', 'imageURL', 'organizerName', 'updatedAt'
-              ]) &&
-              affected.hasAny([
-                'title', 'slug', 'description', 'category', 'location',
-                'startAt', 'endAt', 'imageURL', 'organizerName'
-              ]) &&
-              (!affected.hasAny(['startAt']) || (d.startAt is timestamp && d.startAt > request.time)) &&
-              (!affected.hasAny(['startAt', 'endAt']) || (d.endAt is timestamp && d.endAt >= d.startAt)) &&
-              d.title is string && d.title.size() >= 3 && d.title.size() <= 100 &&
-              d.slug is string && d.slug.size() > 0 &&
-              d.description is string && d.description.size() > 0 && d.description.size() <= 3000 &&
-              d.category in [
-                'academic', 'tech', 'cultural', 'sports',
-                'career', 'workshop', 'social', 'competition'
-              ] &&
-              d.location is string && d.location.size() > 0 && d.location.size() <= 200 &&
-              d.organizerName is string && d.organizerName.size() > 0 &&
-              (d.imageURL == null || (d.imageURL is string && d.imageURL.size() > 0))
-            ) ||
-            // Ongoing Event Branch (r.startAt <= now <= r.endAt)
-            (
-              request.time >= r.startAt &&
-              request.time <= r.endAt &&
-              affected.hasOnly(['location', 'description', 'imageURL', 'endAt', 'updatedAt']) &&
-              affected.hasAny(['location', 'description', 'imageURL', 'endAt']) &&
-              d.startAt == r.startAt &&
-              d.title == r.title &&
-              d.slug == r.slug &&
-              d.category == r.category &&
-              d.organizerName == r.organizerName &&
-              d.description is string && d.description.size() > 0 && d.description.size() <= 3000 &&
-              d.location is string && d.location.size() > 0 && d.location.size() <= 200 &&
-              (d.imageURL == null || (d.imageURL is string && d.imageURL.size() > 0)) &&
-              (
-                (affected.hasAny(['endAt']) && d.endAt is timestamp && d.endAt >= r.endAt && d.endAt > request.time) ||
-                (!affected.hasAny(['endAt']) && d.endAt == r.endAt)
-              )
-            )
-          );
-
-        // Pathway B: Dedicated Cancellation (published -> cancelled, now <= r.endAt)
-        let isPathwayB =
-          r.status == 'published' &&
-          d.status == 'cancelled' &&
-          request.time <= r.endAt &&
-          affected.hasOnly(['status', 'updatedAt']) &&
-          d.title == r.title &&
-          d.slug == r.slug &&
-          d.description == r.description &&
-          d.category == r.category &&
-          d.location == r.location &&
-          d.startAt == r.startAt &&
-          d.endAt == r.endAt &&
-          d.imageURL == r.imageURL &&
-          d.organizerName == r.organizerName;
-
-        // Pathway C: Dedicated Republishing (cancelled -> published, now < r.startAt)
-        let isPathwayC =
-          r.status == 'cancelled' &&
-          d.status == 'published' &&
-          request.time < r.startAt &&
-          affected.hasOnly(['status', 'updatedAt']) &&
-          d.title == r.title &&
-          d.slug == r.slug &&
-          d.description == r.description &&
-          d.category == r.category &&
-          d.location == r.location &&
-          d.startAt == r.startAt &&
-          d.endAt == r.endAt &&
-          d.imageURL == r.imageURL &&
-          d.organizerName == r.organizerName;
-
-        return commonInvariants && (isPathwayA || isPathwayB || isPathwayC);
+        return commonInvariants && (
+          (r.status == 'published' && d.status == 'published' && isValidPathwayA(d, r, affected)) ||
+          (r.status == 'published' && d.status == 'cancelled' && isValidPathwayB(eId, d, r, affected)) ||
+          (r.status == 'cancelled' && d.status == 'published' && isValidPathwayC(d, r, affected))
+        );
       }
 
       allow read: if isAuthenticated() && (
@@ -1191,6 +1305,178 @@ service cloud.firestore {
 
       allow delete: if isAuthenticated() &&
                     resource.data.userId == request.auth.uid;
+    }
+
+    // 11. Event Notification Deliveries collection (Milestone 23.2: Delivery Ledger Security Authority)
+    match /eventNotificationDeliveries/{eventId} {
+      function isValidLedgerActorProfile() {
+        let pubPath = /databases/$(database)/documents/publicProfiles/$(request.auth.uid);
+        let pubDoc = exists(pubPath) ? get(pubPath) : null;
+        return pubDoc != null &&
+               request.resource.data.actorName == pubDoc.data.get('displayName', 'CampusConnect Student') &&
+               request.resource.data.actorAvatar == pubDoc.data.get('photoURL', null);
+      }
+
+      function isValidLedgerCreate(eId) {
+        let d = request.resource.data;
+        let eventPath = /databases/$(database)/documents/events/$(eId);
+
+        return d.keys().hasAll([
+                 'id', 'eventId', 'cycleId', 'campusId', 'communityId',
+                 'actorId', 'actorName', 'actorAvatar', 'status',
+                 'checkpointVersion', 'processedCount', 'createdAt', 'updatedAt'
+               ]) &&
+               d.keys().hasOnly([
+                 'id', 'eventId', 'cycleId', 'campusId', 'communityId',
+                 'actorId', 'actorName', 'actorAvatar', 'status',
+                 'checkpointVersion', 'lastProcessedRsvpId', 'processedCount',
+                 'createdAt', 'updatedAt'
+               ]) &&
+               d.id == eId &&
+               d.eventId == eId &&
+               d.cycleId is string &&
+               d.cycleId.size() >= 10 &&
+               d.cycleId.size() <= 64 &&
+               d.campusId is string &&
+               getUserCampusId() != null &&
+               d.campusId == getUserCampusId() &&
+               d.communityId is string &&
+               isCommunityModeratorOrAdmin(d.communityId) &&
+               existsAfter(eventPath) &&
+               getAfter(eventPath).data.status == 'cancelled' &&
+               getAfter(eventPath).data.campusId == d.campusId &&
+               getAfter(eventPath).data.communityId == d.communityId &&
+               d.actorId == request.auth.uid &&
+               isValidLedgerActorProfile() &&
+               d.status == 'pending' &&
+               d.checkpointVersion == 0 &&
+               d.processedCount == 0 &&
+               (!('lastProcessedRsvpId' in d) || d.lastProcessedRsvpId == null) &&
+               d.createdAt == request.time &&
+               d.updatedAt == request.time;
+      }
+
+      function isValidLedgerRepeatCancellationUpdate(eId) {
+        let d = request.resource.data;
+        let r = resource.data;
+        let eventPath = /databases/$(database)/documents/events/$(eId);
+
+        return isCommunityModeratorOrAdmin(r.communityId) &&
+               r.campusId == getUserCampusId() &&
+               exists(eventPath) &&
+               get(eventPath).data.status == 'published' &&
+               existsAfter(eventPath) &&
+               getAfter(eventPath).data.status == 'cancelled' &&
+               getAfter(eventPath).data.campusId == r.campusId &&
+               getAfter(eventPath).data.communityId == r.communityId &&
+               r.status in ['completed', 'superseded'] &&
+               d.diff(r).affectedKeys().hasOnly([
+                 'cycleId', 'actorId', 'actorName', 'actorAvatar',
+                 'status', 'checkpointVersion', 'lastProcessedRsvpId',
+                 'processedCount', 'updatedAt'
+               ]) &&
+               d.id == r.id &&
+               d.eventId == r.eventId &&
+               d.campusId == r.campusId &&
+               d.communityId == r.communityId &&
+               d.cycleId is string &&
+               d.cycleId.size() >= 10 &&
+               d.cycleId.size() <= 64 &&
+               d.cycleId != r.cycleId &&
+               d.actorId == request.auth.uid &&
+               isValidLedgerActorProfile() &&
+               d.status == 'pending' &&
+               d.checkpointVersion == 0 &&
+               d.processedCount == 0 &&
+               (!('lastProcessedRsvpId' in d) || d.lastProcessedRsvpId == null) &&
+               d.updatedAt == request.time;
+      }
+
+      function isValidLedgerCheckpointUpdate(eId) {
+        let d = request.resource.data;
+        let r = resource.data;
+        let eventPath = /databases/$(database)/documents/events/$(eId);
+
+        return exists(eventPath) &&
+               get(eventPath).data.status == 'cancelled' &&
+               (isCommunityModeratorOrAdmin(r.communityId) || request.auth.uid == get(eventPath).data.createdBy) &&
+               r.campusId == getUserCampusId() &&
+               r.status in ['pending', 'in_progress'] &&
+               d.status in ['in_progress', 'completed'] &&
+               d.diff(r).affectedKeys().hasOnly([
+                 'status', 'checkpointVersion', 'lastProcessedRsvpId',
+                 'processedCount', 'updatedAt'
+               ]) &&
+               d.id == r.id &&
+               d.eventId == r.eventId &&
+               d.cycleId == r.cycleId &&
+               d.campusId == r.campusId &&
+               d.communityId == r.communityId &&
+               d.actorId == r.actorId &&
+               d.actorName == r.actorName &&
+               d.actorAvatar == r.actorAvatar &&
+               d.createdAt == r.createdAt &&
+               d.checkpointVersion == r.checkpointVersion + 1 &&
+               d.processedCount is int &&
+               d.processedCount >= r.processedCount &&
+               (!('lastProcessedRsvpId' in d) || d.lastProcessedRsvpId == null || d.lastProcessedRsvpId is string) &&
+               d.updatedAt == request.time;
+      }
+
+      function isValidLedgerSupersededUpdate(eId) {
+        let d = request.resource.data;
+        let r = resource.data;
+        let eventPath = /databases/$(database)/documents/events/$(eId);
+
+        return isCommunityModeratorOrAdmin(r.communityId) &&
+               r.campusId == getUserCampusId() &&
+               r.status in ['pending', 'in_progress'] &&
+               d.status == 'superseded' &&
+               (
+                 (existsAfter(eventPath) && getAfter(eventPath).data.status == 'published') ||
+                 !existsAfter(eventPath)
+               ) &&
+               d.diff(r).affectedKeys().hasOnly(['status', 'updatedAt']) &&
+               d.id == r.id &&
+               d.eventId == r.eventId &&
+               d.cycleId == r.cycleId &&
+               d.campusId == r.campusId &&
+               d.communityId == r.communityId &&
+               d.actorId == r.actorId &&
+               d.actorName == r.actorName &&
+               d.actorAvatar == r.actorAvatar &&
+               d.checkpointVersion == r.checkpointVersion &&
+               d.processedCount == r.processedCount &&
+               d.createdAt == r.createdAt &&
+               d.updatedAt == request.time;
+      }
+
+      function isAuthorizedToReadLedger(eId) {
+        let eventPath = /databases/$(database)/documents/events/$(eId);
+        return resource != null ? (
+          resource.data.campusId == getUserCampusId() && (
+            request.auth.uid == resource.data.actorId ||
+            isCommunityModeratorOrAdmin(resource.data.get('communityId', null))
+          )
+        ) : (
+          exists(eventPath) &&
+          get(eventPath).data.campusId == getUserCampusId() &&
+          isCommunityModeratorOrAdmin(get(eventPath).data.get('communityId', null))
+        );
+      }
+
+      allow get: if isAuthenticated() && isAuthorizedToReadLedger(eventId);
+      allow list: if false;
+
+      allow create: if isAuthenticated() && isValidLedgerCreate(eventId);
+
+      allow update: if isAuthenticated() && (
+        (request.resource.data.status in ['in_progress', 'completed'] && isValidLedgerCheckpointUpdate(eventId)) ||
+        (request.resource.data.status == 'pending' && isValidLedgerRepeatCancellationUpdate(eventId)) ||
+        (request.resource.data.status == 'superseded' && isValidLedgerSupersededUpdate(eventId))
+      );
+
+      allow delete: if false;
     }
   }
 }

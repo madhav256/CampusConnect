@@ -263,6 +263,90 @@ export default function Settings() {
                     />
                   </button>
                 </div>
+
+                {/* Event RSVPs Toggle */}
+                <div className="flex items-center justify-between py-3">
+                  <div className="pr-4">
+                    <label
+                      htmlFor="toggle-notif-rsvps"
+                      className="cursor-pointer text-sm font-semibold text-ink"
+                    >
+                      Event RSVPs
+                    </label>
+                    <p className="text-xs text-ink-muted">
+                      Receive an inbox notification when another student RSVPs to your events.
+                    </p>
+                  </div>
+                  <button
+                    id="toggle-notif-rsvps"
+                    type="button"
+                    role="switch"
+                    aria-checked={settings.notificationPreferences.eventRsvps}
+                    disabled={isSaving}
+                    onClick={() =>
+                      updateNotificationPreference(
+                        "eventRsvps",
+                        !settings.notificationPreferences.eventRsvps
+                      )
+                    }
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-terracotta-500 focus:ring-offset-2 disabled:opacity-50 ${
+                      settings.notificationPreferences.eventRsvps
+                        ? "bg-terracotta-600"
+                        : "bg-stone-300"
+                    }`}
+                  >
+                    <span
+                      aria-hidden="true"
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                        settings.notificationPreferences.eventRsvps
+                          ? "translate-x-5"
+                          : "translate-x-0"
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                {/* Event Cancellations Toggle */}
+                <div className="flex items-center justify-between py-3">
+                  <div className="pr-4">
+                    <label
+                      htmlFor="toggle-notif-cancellations"
+                      className="cursor-pointer text-sm font-semibold text-ink"
+                    >
+                      Event Cancellations
+                    </label>
+                    <p className="text-xs text-ink-muted">
+                      Receive an inbox notification when an event you have RSVP'd to is cancelled.
+                    </p>
+                  </div>
+                  <button
+                    id="toggle-notif-cancellations"
+                    type="button"
+                    role="switch"
+                    aria-checked={settings.notificationPreferences.eventCancellations}
+                    disabled={isSaving}
+                    onClick={() =>
+                      updateNotificationPreference(
+                        "eventCancellations",
+                        !settings.notificationPreferences.eventCancellations
+                      )
+                    }
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-terracotta-500 focus:ring-offset-2 disabled:opacity-50 ${
+                      settings.notificationPreferences.eventCancellations
+                        ? "bg-terracotta-600"
+                        : "bg-stone-300"
+                    }`}
+                  >
+                    <span
+                      aria-hidden="true"
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                        settings.notificationPreferences.eventCancellations
+                          ? "translate-x-5"
+                          : "translate-x-0"
+                      }`}
+                    />
+                  </button>
+                </div>
               </div>
             </Card>
 

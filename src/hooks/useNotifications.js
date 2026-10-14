@@ -62,6 +62,12 @@ export function useNotifications() {
       if (n.type === "connection_accepted" && prefs?.connectionAccepted === false) {
         return false;
       }
+      if (n.type === "event_rsvp" && prefs?.eventRsvps === false) {
+        return false;
+      }
+      if (n.type === "event_cancelled" && prefs?.eventCancellations === false) {
+        return false;
+      }
       return true;
     });
   }, [rawNotifications, profile?.notificationPreferences]);

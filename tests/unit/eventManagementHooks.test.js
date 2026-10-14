@@ -17,6 +17,9 @@ const mocks = vi.hoisted(() => ({
   cancelEvent: vi.fn(),
   republishEvent: vi.fn(),
   deleteEvent: vi.fn(),
+  deliverCancellationNotifications: vi.fn().mockResolvedValue({ status: "completed" }),
+  resumeCancellationDelivery: vi.fn().mockResolvedValue({ status: "completed" }),
+  subscribeToDeliveryLedger: vi.fn(() => () => {}),
 }));
 
 vi.mock("../../src/hooks/useAuth.js", () => ({
@@ -40,6 +43,16 @@ vi.mock("../../src/services/eventService.js", async (importOriginal) => {
     cancelEvent: mocks.cancelEvent,
     republishEvent: mocks.republishEvent,
     deleteEvent: mocks.deleteEvent,
+  };
+});
+
+vi.mock("../../src/services/eventNotificationDeliveryService.js", async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    deliverCancellationNotifications: mocks.deliverCancellationNotifications,
+    resumeCancellationDelivery: mocks.resumeCancellationDelivery,
+    subscribeToDeliveryLedger: mocks.subscribeToDeliveryLedger,
   };
 });
 
@@ -328,19 +341,25 @@ describe("Milestone 22 — Unit 22.3: Event Management Hooks", () => {
     });
 
     it("derives correct permissions at exact ongoing boundary (now === endAt)", () => {
-      const now = Date.now();
-      const event = buildEvent({
-        startAt: new Date(now - 100000),
-        endAt: new Date(now), // exactly now
-      });
+      vi.useFakeTimers();
+      const fixedNow = new Date("2026-10-15T12:00:00.000Z");
+      vi.setSystemTime(fixedNow);
+      try {
+        const event = buildEvent({
+          startAt: new Date(fixedNow.getTime() - 100000),
+          endAt: new Date(fixedNow.getTime()), // exactly now
+        });
 
-      const { result } = renderHook(() => useEventManagement(event));
+        const { result } = renderHook(() => useEventManagement(event));
 
-      expect(result.current.temporalState).toBe("ongoing");
-      expect(result.current.isOngoing).toBe(true);
-      expect(result.current.canEdit).toBe(true);
-      expect(result.current.canCancel).toBe(true);
-      expect(result.current.canDelete).toBe(false);
+        expect(result.current.temporalState).toBe("ongoing");
+        expect(result.current.isOngoing).toBe(true);
+        expect(result.current.canEdit).toBe(true);
+        expect(result.current.canCancel).toBe(true);
+        expect(result.current.canDelete).toBe(false);
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it("derives read-only freeze for completed event (now > endAt)", () => {
@@ -867,6 +886,104 @@ describe("Milestone 22 — Unit 22.3: Event Management Hooks", () => {
 
       // Should complete cleanly without uncaught warnings
       expect(mocks.cancelEvent).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("10. Cancellation Notification Delivery Orchestration & Resumption (M23.4)", () => {
+    beforeEach(() => {
+      mocks.deliverCancellationNotifications.mockClear();
+      mocks.resumeCancellationDelivery.mockClear();
+    });
+
+    it("triggers deliverCancellationNotifications after cancelEvent commits successfully", async () => {
+      mocks.cancelEvent.mockResolvedValueOnce({ status: "cancelled" });
+      mocks.deliverCancellationNotifications.mockResolvedValueOnce({
+        status: "completed",
+        processedCount: 5,
+      });
+
+      const event = buildEvent({ id: "test-event-delivery", title: "AI Workshop" });
+      const { result } = renderHook(() => useEventManagement(event));
+
+      await act(async () => {
+        await result.current.cancelCurrentEvent();
+      });
+
+      expect(mocks.cancelEvent).toHaveBeenCalledWith("test-event-delivery", event);
+      expect(mocks.deliverCancellationNotifications).toHaveBeenCalledWith(
+        "test-event-delivery",
+        { eventTitle: "AI Workshop" }
+      );
+      expect(result.current.mutationError).toBeNull();
+      expect(result.current.deliveryError).toBeNull();
+    });
+
+    it("surfaces deliveryError distinctly without failing event cancellation when notification delivery fails", async () => {
+      mocks.cancelEvent.mockResolvedValueOnce({ status: "cancelled" });
+      mocks.deliverCancellationNotifications.mockRejectedValueOnce(
+        new Error("Network timeout during batch delivery")
+      );
+
+      const event = buildEvent({ id: "test-event-deliv-fail", title: "AI Workshop" });
+      const { result } = renderHook(() => useEventManagement(event));
+
+      await act(async () => {
+        await result.current.cancelCurrentEvent();
+      });
+
+      // Cancellation succeeded, so mutationError is null!
+      expect(result.current.mutationError).toBeNull();
+      // Delivery error is captured distinctly
+      expect(result.current.deliveryError).toBe("Network timeout during batch delivery");
+    });
+
+    it("resumeDelivery invokes resumeCancellationDelivery with authoritative event context", async () => {
+      mocks.resumeCancellationDelivery.mockResolvedValueOnce({
+        status: "completed",
+        processedCount: 8,
+      });
+
+      const event = buildEvent({
+        id: "test-event-resume",
+        title: "Robotics Hackathon",
+        status: "cancelled",
+      });
+      const { result } = renderHook(() => useEventManagement(event));
+
+      let res;
+      await act(async () => {
+        res = await result.current.resumeDelivery();
+      });
+
+      expect(mocks.resumeCancellationDelivery).toHaveBeenCalledWith("test-event-resume", {
+        eventTitle: "Robotics Hackathon",
+      });
+      expect(res).toEqual({ status: "completed", processedCount: 8 });
+      expect(result.current.deliveryError).toBeNull();
+    });
+
+    it("resumeDelivery captures error and sets deliveryError when resumption fails", async () => {
+      mocks.resumeCancellationDelivery.mockRejectedValueOnce(
+        new Error("Checkpoint CAS mismatch")
+      );
+
+      const event = buildEvent({
+        id: "test-event-resume-err",
+        title: "Robotics Hackathon",
+        status: "cancelled",
+      });
+      const { result } = renderHook(() => useEventManagement(event));
+
+      await act(async () => {
+        try {
+          await result.current.resumeDelivery();
+        } catch {
+          // Expected rejection
+        }
+      });
+
+      expect(result.current.deliveryError).toBe("Checkpoint CAS mismatch");
+      expect(result.current.mutationError).toBeNull();
     });
   });
 });

@@ -10,7 +10,7 @@ import {
   collection,
   doc,
   deleteDoc,
-  setDoc,
+  writeBatch,
   onSnapshot,
   query,
   where,
@@ -19,6 +19,8 @@ import {
 } from "firebase/firestore";
 import { db, isFirebaseConfigured } from "../firebase/config";
 import { getEventRsvpId } from "../data/eventRsvps.js";
+import { getEventById } from "./eventService.js";
+import { fetchUserById } from "./userService.js";
 
 function requireDb() {
   if (!isFirebaseConfigured || !db) {
@@ -279,16 +281,28 @@ export function subscribeToMyRsvps(
 }
 
 /**
- * Creates the deterministic RSVP document adhering strictly to the 5-field schema.
+ * Creates the deterministic RSVP document adhering strictly to the 5-field schema
+ * and atomically creates the organizer notification (rsvp_${eventId}_${userId})
+ * in the same Firestore writeBatch if the organizer is not the actor.
+ *
  * Root collection: eventRsvps/{eventId}_{userId}
+ * Notification: users/{organizerId}/notifications/rsvp_{eventId}_{userId}
  *
  * @param {object} params
  * @param {string} params.eventId
  * @param {string} params.userId
  * @param {string} params.campusId
+ * @param {object|null} [params.event] Optional preloaded event object
+ * @param {object|null} [params.userProfile] Optional preloaded actor public profile
  * @returns {Promise<object>} Created RSVP document payload
  */
-export async function createEventRsvp({ eventId, userId, campusId }) {
+export async function createEventRsvp({
+  eventId,
+  userId,
+  campusId,
+  event = null,
+  userProfile = null,
+}) {
   if (
     !eventId ||
     !userId ||
@@ -311,7 +325,62 @@ export async function createEventRsvp({ eventId, userId, campusId }) {
     createdAt: serverTimestamp(),
   };
 
-  await setDoc(rRef, rsvpDoc);
+  let targetEvent = event;
+  if (!targetEvent && typeof getEventById === "function") {
+    try {
+      targetEvent = await getEventById(eventId);
+    } catch {
+      targetEvent = null;
+    }
+  }
+
+  let actorProfile = userProfile;
+  if (!actorProfile && typeof fetchUserById === "function") {
+    try {
+      actorProfile = await fetchUserById(userId);
+    } catch {
+      actorProfile = null;
+    }
+  }
+
+  const shouldNotifyOrganizer = Boolean(
+    targetEvent &&
+    targetEvent.createdBy &&
+    targetEvent.createdBy !== userId
+  );
+
+  const firestore = requireDb();
+  const batch = writeBatch(firestore);
+
+  batch.set(rRef, rsvpDoc);
+
+  if (shouldNotifyOrganizer) {
+    const notifId = `rsvp_${eventId}_${userId}`;
+    const notifRef = doc(firestore, "users", targetEvent.createdBy, "notifications", notifId);
+
+    const notifDoc = {
+      id: notifId,
+      recipientId: targetEvent.createdBy,
+      actorId: userId,
+      actorName: actorProfile?.displayName || "CampusConnect Student",
+      actorAvatar: actorProfile?.photoURL || null,
+      type: "event_rsvp",
+      referenceId: eventId,
+      isRead: false,
+      createdAt: serverTimestamp(),
+    };
+
+    if (targetEvent.title && typeof targetEvent.title === "string") {
+      const trimmedTitle = targetEvent.title.trim();
+      if (trimmedTitle.length > 0) {
+        notifDoc.referenceTitle = trimmedTitle.slice(0, 100);
+      }
+    }
+
+    batch.set(notifRef, notifDoc);
+  }
+
+  await batch.commit();
   return rsvpDoc;
 }
 

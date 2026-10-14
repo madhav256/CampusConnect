@@ -46,6 +46,13 @@ const mocks = vi.hoisted(() => {
     setDoc: vi.fn(),
     updateDoc: vi.fn(),
     deleteDoc: vi.fn(),
+    mockBatch: {
+      set: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+      commit: vi.fn(() => Promise.resolve()),
+    },
+    writeBatch: vi.fn(),
     onSnapshot: vi.fn(),
     query: vi.fn((ref, ...constraints) => ({ ref, constraints })),
     where: vi.fn((field, op, val) => ({ field, op, val })),
@@ -55,7 +62,10 @@ const mocks = vi.hoisted(() => {
   };
 });
 
+mocks.writeBatch.mockImplementation(() => mocks.mockBatch);
+
 vi.mock("../../src/firebase/config", () => ({
+  auth: { currentUser: null },
   db: mocks.mockDb,
   isFirebaseConfigured: true,
 }));
@@ -68,6 +78,7 @@ vi.mock("firebase/firestore", () => ({
   setDoc: mocks.setDoc,
   updateDoc: mocks.updateDoc,
   deleteDoc: mocks.deleteDoc,
+  writeBatch: mocks.writeBatch,
   onSnapshot: mocks.onSnapshot,
   query: mocks.query,
   where: mocks.where,
@@ -1704,43 +1715,118 @@ describe("Milestone 20 — Unit 20.3: Event Service", () => {
       const fixedNow = new Date("2026-10-15T12:00:00.000Z");
       const publishedUpcoming = {
         id: "e-cancel-up",
+        campusId: APEX_CAMPUS_ID,
+        communityId: COMMUNITY_APEX_AI,
+        createdBy: "creator-1",
         status: EVENT_STATUSES.PUBLISHED,
         startAt: new Date("2026-10-20T10:00:00.000Z"),
         endAt: new Date("2026-10-20T16:00:00.000Z"),
       };
       const publishedOngoing = {
         id: "e-cancel-on",
+        campusId: APEX_CAMPUS_ID,
+        communityId: COMMUNITY_APEX_AI,
+        createdBy: "creator-1",
         status: EVENT_STATUSES.PUBLISHED,
         startAt: new Date("2026-10-15T10:00:00.000Z"),
         endAt: new Date("2026-10-15T16:00:00.000Z"),
       };
 
-      it("cancels an upcoming published event with dedicated status payload", async () => {
-        mocks.updateDoc.mockResolvedValueOnce();
+      beforeEach(() => {
+        mocks.mockBatch.set.mockClear();
+        mocks.mockBatch.update.mockClear();
+        mocks.mockBatch.delete.mockClear();
+        mocks.mockBatch.commit.mockClear();
+        mocks.mockBatch.commit.mockResolvedValue();
+        mocks.getDoc.mockResolvedValue({ exists: () => false });
+      });
 
-        await cancelEvent("e-cancel-up", publishedUpcoming, fixedNow);
+      it("cancels an upcoming published event with atomic ledger creation", async () => {
+        const result = await cancelEvent("e-cancel-up", publishedUpcoming, fixedNow);
 
-        expect(mocks.updateDoc).toHaveBeenCalledWith(
+        expect(result).toHaveProperty("cycleId");
+        expect(typeof result.cycleId).toBe("string");
+        expect(result.cycleId.length).toBeGreaterThanOrEqual(10);
+
+        expect(mocks.mockBatch.update).toHaveBeenCalledWith(
           expect.objectContaining({ path: "events/e-cancel-up" }),
           {
             status: EVENT_STATUSES.CANCELLED,
             updatedAt: expect.objectContaining({ _methodName: "serverTimestamp" }),
           }
         );
+
+        expect(mocks.mockBatch.set).toHaveBeenCalledWith(
+          expect.objectContaining({ path: "eventNotificationDeliveries/e-cancel-up" }),
+          expect.objectContaining({
+            id: "e-cancel-up",
+            eventId: "e-cancel-up",
+            cycleId: result.cycleId,
+            campusId: APEX_CAMPUS_ID,
+            communityId: COMMUNITY_APEX_AI,
+            status: "pending",
+            checkpointVersion: 0,
+            processedCount: 0,
+            lastProcessedRsvpId: null,
+          })
+        );
+
+        expect(mocks.mockBatch.commit).toHaveBeenCalledTimes(1);
       });
 
-      it("cancels an ongoing published event with dedicated status payload", async () => {
-        mocks.updateDoc.mockResolvedValueOnce();
-
+      it("cancels an ongoing published event with atomic ledger creation", async () => {
         await cancelEvent("e-cancel-on", publishedOngoing, fixedNow);
 
-        expect(mocks.updateDoc).toHaveBeenCalledWith(
+        expect(mocks.mockBatch.update).toHaveBeenCalledWith(
           expect.objectContaining({ path: "events/e-cancel-on" }),
           {
             status: EVENT_STATUSES.CANCELLED,
             updatedAt: expect.objectContaining({ _methodName: "serverTimestamp" }),
           }
         );
+        expect(mocks.mockBatch.commit).toHaveBeenCalledTimes(1);
+      });
+
+      it("reinitializes ledger with fresh cycleId on repeat cancellation after completion", async () => {
+        mocks.getDoc.mockResolvedValueOnce({
+          exists: () => true,
+          data: () => ({
+            status: "completed",
+            cycleId: "cycle_old_1234567890",
+            checkpointVersion: 3,
+            processedCount: 24,
+          }),
+        });
+
+        const result = await cancelEvent("e-cancel-up", publishedUpcoming, fixedNow);
+
+        expect(result.cycleId).not.toBe("cycle_old_1234567890");
+        expect(mocks.mockBatch.update).toHaveBeenCalledWith(
+          expect.objectContaining({ path: "eventNotificationDeliveries/e-cancel-up" }),
+          expect.objectContaining({
+            cycleId: result.cycleId,
+            status: "pending",
+            checkpointVersion: 0,
+            processedCount: 0,
+            lastProcessedRsvpId: null,
+          })
+        );
+        expect(mocks.mockBatch.commit).toHaveBeenCalledTimes(1);
+      });
+
+      it("rejects repeat cancellation while a previous cycle is currently active", async () => {
+        mocks.getDoc.mockResolvedValueOnce({
+          exists: () => true,
+          data: () => ({
+            status: "in_progress",
+            cycleId: "cycle_active_1234567890",
+          }),
+        });
+
+        await expect(cancelEvent("e-cancel-up", publishedUpcoming, fixedNow)).rejects.toThrow(
+          "Cannot cancel event while a delivery cycle is currently active (in_progress)."
+        );
+        expect(mocks.mockBatch.commit).not.toHaveBeenCalled();
       });
 
       it("rejects cancellation if event is already cancelled", async () => {
@@ -1748,22 +1834,21 @@ describe("Milestone 20 — Unit 20.3: Event Service", () => {
         await expect(cancelEvent("e-cancel-up", cancelledEvent, fixedNow)).rejects.toThrow(
           "Only published events can be cancelled; event is already cancelled."
         );
-        expect(mocks.updateDoc).not.toHaveBeenCalled();
+        expect(mocks.mockBatch.commit).not.toHaveBeenCalled();
       });
 
       it("permits cancellation at exact boundary referenceNow === existingEndAt", async () => {
-        mocks.updateDoc.mockResolvedValueOnce();
-
         const exactEndNow = new Date(publishedOngoing.endAt.getTime());
         await cancelEvent("e-cancel-on", publishedOngoing, exactEndNow);
 
-        expect(mocks.updateDoc).toHaveBeenCalledWith(
+        expect(mocks.mockBatch.update).toHaveBeenCalledWith(
           expect.objectContaining({ path: "events/e-cancel-on" }),
           {
             status: EVENT_STATUSES.CANCELLED,
             updatedAt: expect.objectContaining({ _methodName: "serverTimestamp" }),
           }
         );
+        expect(mocks.mockBatch.commit).toHaveBeenCalledTimes(1);
       });
 
       it("rejects cancellation at referenceNow === existingEndAt + 1ms (completed)", async () => {
@@ -1771,7 +1856,7 @@ describe("Milestone 20 — Unit 20.3: Event Service", () => {
         await expect(cancelEvent("e-cancel-on", publishedOngoing, afterEndNow)).rejects.toThrow(
           "Completed events cannot be cancelled."
         );
-        expect(mocks.updateDoc).not.toHaveBeenCalled();
+        expect(mocks.mockBatch.commit).not.toHaveBeenCalled();
       });
     });
 
@@ -1790,7 +1875,15 @@ describe("Milestone 20 — Unit 20.3: Event Service", () => {
         endAt: new Date("2026-10-15T16:00:00.000Z"),
       };
 
-      it("republishes an upcoming cancelled event with dedicated status payload", async () => {
+      beforeEach(() => {
+        mocks.mockBatch.update.mockClear();
+        mocks.mockBatch.commit.mockClear();
+        mocks.mockBatch.commit.mockResolvedValue();
+        mocks.updateDoc.mockClear();
+        mocks.getDoc.mockResolvedValue({ exists: () => false });
+      });
+
+      it("republishes an upcoming cancelled event without ledger via updateDoc", async () => {
         mocks.updateDoc.mockResolvedValueOnce();
 
         await republishEvent("e-republish-up", cancelledUpcoming, fixedNow);
@@ -1802,6 +1895,31 @@ describe("Milestone 20 — Unit 20.3: Event Service", () => {
             updatedAt: expect.objectContaining({ _methodName: "serverTimestamp" }),
           }
         );
+      });
+
+      it("republishes event and atomically supersedes active delivery ledger", async () => {
+        mocks.getDoc.mockResolvedValueOnce({
+          exists: () => true,
+          data: () => ({ status: "in_progress" }),
+        });
+
+        await republishEvent("e-republish-up", cancelledUpcoming, fixedNow);
+
+        expect(mocks.mockBatch.update).toHaveBeenCalledWith(
+          expect.objectContaining({ path: "events/e-republish-up" }),
+          {
+            status: EVENT_STATUSES.PUBLISHED,
+            updatedAt: expect.objectContaining({ _methodName: "serverTimestamp" }),
+          }
+        );
+        expect(mocks.mockBatch.update).toHaveBeenCalledWith(
+          expect.objectContaining({ path: "eventNotificationDeliveries/e-republish-up" }),
+          {
+            status: "superseded",
+            updatedAt: expect.objectContaining({ _methodName: "serverTimestamp" }),
+          }
+        );
+        expect(mocks.mockBatch.commit).toHaveBeenCalledTimes(1);
       });
 
       it("rejects republishing if event is not cancelled (e.g. published)", async () => {
@@ -1853,6 +1971,15 @@ describe("Milestone 20 — Unit 20.3: Event Service", () => {
         endAt: new Date("2026-10-15T16:00:00.000Z"),
       };
 
+      beforeEach(() => {
+        mocks.mockBatch.delete.mockClear();
+        mocks.mockBatch.update.mockClear();
+        mocks.mockBatch.commit.mockClear();
+        mocks.mockBatch.commit.mockResolvedValue();
+        mocks.deleteDoc.mockClear();
+        mocks.getDoc.mockResolvedValue({ exists: () => false });
+      });
+
       it("deletes a published upcoming event", async () => {
         mocks.deleteDoc.mockResolvedValueOnce();
 
@@ -1863,7 +1990,7 @@ describe("Milestone 20 — Unit 20.3: Event Service", () => {
         );
       });
 
-      it("deletes a cancelled upcoming event", async () => {
+      it("deletes a cancelled upcoming event without active ledger via deleteDoc", async () => {
         mocks.deleteDoc.mockResolvedValueOnce();
 
         await deleteEvent("e-del-canc", upcomingCancelled, fixedNow);
@@ -1871,6 +1998,27 @@ describe("Milestone 20 — Unit 20.3: Event Service", () => {
         expect(mocks.deleteDoc).toHaveBeenCalledWith(
           expect.objectContaining({ path: "events/e-del-canc" })
         );
+      });
+
+      it("deletes cancelled event and atomically supersedes active delivery ledger", async () => {
+        mocks.getDoc.mockResolvedValueOnce({
+          exists: () => true,
+          data: () => ({ status: "in_progress" }),
+        });
+
+        await deleteEvent("e-del-canc", upcomingCancelled, fixedNow);
+
+        expect(mocks.mockBatch.delete).toHaveBeenCalledWith(
+          expect.objectContaining({ path: "events/e-del-canc" })
+        );
+        expect(mocks.mockBatch.update).toHaveBeenCalledWith(
+          expect.objectContaining({ path: "eventNotificationDeliveries/e-del-canc" }),
+          {
+            status: "superseded",
+            updatedAt: expect.objectContaining({ _methodName: "serverTimestamp" }),
+          }
+        );
+        expect(mocks.mockBatch.commit).toHaveBeenCalledTimes(1);
       });
 
       it("rejects deletion for events with unexpected status (draft, completed, etc.)", async () => {

@@ -28,17 +28,26 @@ function requireDb() {
  * @returns {object}
  */
 export function normalizeNotification(id, data) {
-  return {
+  const normalized = {
     id,
     recipientId: data.recipientId,
     actorId: data.actorId,
     actorName: data.actorName || "CampusConnect Student",
     actorAvatar: data.actorAvatar || null,
-    type: data.type, // "connection_request" | "connection_accepted"
+    type: data.type, // "connection_request" | "connection_accepted" | "event_rsvp" | "event_cancelled"
     referenceId: data.referenceId,
     isRead: Boolean(data.isRead),
     createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : null,
   };
+
+  if (data.referenceTitle !== undefined) {
+    normalized.referenceTitle = data.referenceTitle;
+  }
+  if (data.cycleId !== undefined) {
+    normalized.cycleId = data.cycleId;
+  }
+
+  return normalized;
 }
 
 /**

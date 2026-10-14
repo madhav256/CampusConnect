@@ -56,7 +56,10 @@ export default function EventRsvpButton({
     propIsMutating === undefined &&
     Boolean(eventId);
 
-  const hookResult = useEventRsvp(shouldHook ? eventId : null);
+  const hookResult = useEventRsvp(
+    shouldHook ? eventId : null,
+    shouldHook ? event : null
+  );
 
   const isGoing =
     propIsGoing !== undefined

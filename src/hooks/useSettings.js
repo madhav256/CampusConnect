@@ -50,6 +50,10 @@ export function useSettings() {
         profile?.notificationPreferences?.connectionRequests !== false,
       connectionAccepted:
         profile?.notificationPreferences?.connectionAccepted !== false,
+      eventRsvps:
+        profile?.notificationPreferences?.eventRsvps !== false,
+      eventCancellations:
+        profile?.notificationPreferences?.eventCancellations !== false,
     },
   };
 

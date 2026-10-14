@@ -14,13 +14,15 @@ import {
   setDoc,
   updateDoc,
   deleteDoc,
+  writeBatch,
   onSnapshot,
   query,
   where,
   serverTimestamp,
   Timestamp,
 } from "firebase/firestore";
-import { db, isFirebaseConfigured } from "../firebase/config";
+import { auth, db, isFirebaseConfigured } from "../firebase/config";
+import { fetchUserById } from "./userService.js";
 import {
   EVENT_CATEGORY_LIST,
   EVENT_STATUSES,
@@ -1050,7 +1052,49 @@ export async function updateEvent(eventId, updates, currentEvent, referenceNow =
  * @param {Date|number|string} [referenceNow=new Date()]
  * @returns {Promise<void>}
  */
-export async function cancelEvent(eventId, currentEvent, referenceNow = new Date()) {
+/**
+ * Returns a DocumentReference for the event's notification delivery ledger.
+ * Root collection: eventNotificationDeliveries/{eventId}
+ *
+ * @param {string} eventId
+ * @returns {import("firebase/firestore").DocumentReference}
+ */
+export function deliveryLedgerDocRef(eventId) {
+  if (!eventId || typeof eventId !== "string" || !eventId.trim()) {
+    throw new Error("Event ID is required to resolve delivery ledger document reference.");
+  }
+  return doc(requireDb(), "eventNotificationDeliveries", eventId.trim());
+}
+
+/**
+ * Generates a collision-resistant cancellation cycle ID satisfying the [10, 64] char constraint.
+ *
+ * @returns {string}
+ */
+export function generateCycleId() {
+  const rand = Math.random().toString(36).substring(2, 12);
+  const now = Date.now();
+  return `cycle_${now}_${rand}`;
+}
+
+/**
+ * Cancels an event by transitioning its status from 'published' to 'cancelled'
+ * while atomically creating or reinitializing its delivery ledger at
+ * eventNotificationDeliveries/{eventId} (Pathway B two-way atomic handshake).
+ * Permitted only while upcoming or ongoing (now <= endAt).
+ *
+ * @param {string} eventId
+ * @param {object} currentEvent
+ * @param {Date|number|string} [referenceNow=new Date()]
+ * @param {object|null} [actorProfile=null]
+ * @returns {Promise<{ cycleId: string }>}
+ */
+export async function cancelEvent(
+  eventId,
+  currentEvent,
+  referenceNow = new Date(),
+  actorProfile = null
+) {
   if (!eventId || typeof eventId !== "string" || !eventId.trim()) {
     throw new Error("Event ID is required to cancel an event.");
   }
@@ -1084,16 +1128,92 @@ export async function cancelEvent(eventId, currentEvent, referenceNow = new Date
     throw new Error("Completed events cannot be cancelled.");
   }
 
-  const eRef = eventDocRef(eventId);
-  await updateDoc(eRef, {
+  const firestore = requireDb();
+  const trimmedEventId = eventId.trim();
+  const eRef = eventDocRef(trimmedEventId);
+  const ledgerRef = deliveryLedgerDocRef(trimmedEventId);
+
+  // Resolve actor identity
+  const currentUid = auth?.currentUser?.uid || null;
+  let profile = actorProfile;
+  if (!profile && currentUid && typeof fetchUserById === "function") {
+    try {
+      profile = await fetchUserById(currentUid);
+    } catch {
+      profile = null;
+    }
+  }
+
+  const actorId = currentUid || profile?.uid || profile?.id || currentEvent.createdBy;
+  const actorName = profile?.displayName || "CampusConnect Student";
+  const actorAvatar = profile?.photoURL || null;
+
+  const cycleId = generateCycleId();
+
+  // Inspect existing ledger state
+  let existingLedgerSnap;
+  try {
+    existingLedgerSnap = await getDoc(ledgerRef);
+  } catch {
+    existingLedgerSnap = null;
+  }
+
+  const batch = writeBatch(firestore);
+
+  batch.update(eRef, {
     status: EVENT_STATUSES.CANCELLED,
     updatedAt: serverTimestamp(),
   });
+
+  if (!existingLedgerSnap || !existingLedgerSnap.exists()) {
+    // Initial ledger creation
+    const initialLedger = {
+      id: trimmedEventId,
+      eventId: trimmedEventId,
+      cycleId,
+      campusId: currentEvent.campusId,
+      communityId: currentEvent.communityId,
+      actorId,
+      actorName,
+      actorAvatar,
+      status: "pending",
+      checkpointVersion: 0,
+      lastProcessedRsvpId: null,
+      processedCount: 0,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    };
+    batch.set(ledgerRef, initialLedger);
+  } else {
+    // Repeat cancellation after republication
+    const ledgerData = existingLedgerSnap.data();
+    if (ledgerData.status !== "completed" && ledgerData.status !== "superseded") {
+      throw new Error(
+        `Cannot cancel event while a delivery cycle is currently active (${ledgerData.status}).`
+      );
+    }
+    const repeatLedgerUpdates = {
+      cycleId,
+      actorId,
+      actorName,
+      actorAvatar,
+      status: "pending",
+      checkpointVersion: 0,
+      lastProcessedRsvpId: null,
+      processedCount: 0,
+      updatedAt: serverTimestamp(),
+    };
+    batch.update(ledgerRef, repeatLedgerUpdates);
+  }
+
+  await batch.commit();
+  return { cycleId };
 }
 
 /**
  * Republishes a cancelled event by transitioning its status from 'cancelled' to 'published'.
  * Permitted only while upcoming (now < startAt).
+ * If an active delivery ledger exists, marks it 'superseded' atomically in the same batch.
  *
  * @param {string} eventId
  * @param {object} currentEvent
@@ -1134,7 +1254,35 @@ export async function republishEvent(eventId, currentEvent, referenceNow = new D
     throw new Error("Only upcoming cancelled events can be republished.");
   }
 
-  const eRef = eventDocRef(eventId);
+  const firestore = requireDb();
+  const trimmedEventId = eventId.trim();
+  const eRef = eventDocRef(trimmedEventId);
+  const ledgerRef = deliveryLedgerDocRef(trimmedEventId);
+
+  let ledgerSnap;
+  try {
+    ledgerSnap = await getDoc(ledgerRef);
+  } catch {
+    ledgerSnap = null;
+  }
+
+  if (ledgerSnap && ledgerSnap.exists()) {
+    const ledgerData = ledgerSnap.data();
+    if (ledgerData.status === "pending" || ledgerData.status === "in_progress") {
+      const batch = writeBatch(firestore);
+      batch.update(eRef, {
+        status: EVENT_STATUSES.PUBLISHED,
+        updatedAt: serverTimestamp(),
+      });
+      batch.update(ledgerRef, {
+        status: "superseded",
+        updatedAt: serverTimestamp(),
+      });
+      await batch.commit();
+      return;
+    }
+  }
+
   await updateDoc(eRef, {
     status: EVENT_STATUSES.PUBLISHED,
     updatedAt: serverTimestamp(),
@@ -1144,6 +1292,8 @@ export async function republishEvent(eventId, currentEvent, referenceNow = new D
 /**
  * Hard deletes an event document.
  * Permitted only while upcoming (now < startAt) and with valid status (published or cancelled).
+ * If the event is cancelled and has an active delivery ledger, supersedes the ledger atomically
+ * alongside event deletion to prevent leaving an orphaned active ledger.
  * Authoritative admin role check is enforced by Firestore Security Rules.
  *
  * @param {string} eventId
@@ -1188,6 +1338,33 @@ export async function deleteEvent(eventId, currentEvent, referenceNow = new Date
     throw new Error("Only upcoming events can be deleted.");
   }
 
-  const eRef = eventDocRef(eventId);
+  const firestore = requireDb();
+  const trimmedEventId = eventId.trim();
+  const eRef = eventDocRef(trimmedEventId);
+
+  if (currentEvent.status === EVENT_STATUSES.CANCELLED) {
+    const ledgerRef = deliveryLedgerDocRef(trimmedEventId);
+    let ledgerSnap;
+    try {
+      ledgerSnap = await getDoc(ledgerRef);
+    } catch {
+      ledgerSnap = null;
+    }
+
+    if (ledgerSnap && ledgerSnap.exists()) {
+      const ledgerData = ledgerSnap.data();
+      if (ledgerData.status === "pending" || ledgerData.status === "in_progress") {
+        const batch = writeBatch(firestore);
+        batch.delete(eRef);
+        batch.update(ledgerRef, {
+          status: "superseded",
+          updatedAt: serverTimestamp(),
+        });
+        await batch.commit();
+        return;
+      }
+    }
+  }
+
   await deleteDoc(eRef);
 }

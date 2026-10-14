@@ -79,3 +79,24 @@ export const EVENT_VISIBILITIES = {
 };
 
 export const EVENT_VISIBILITY_LIST = Object.values(EVENT_VISIBILITIES);
+
+// Notification Domain Constants (Milestone 23 - Notifications & Delivery Ledger)
+export const NOTIFICATION_TYPES = {
+  CONNECTION_REQUEST: "connection_request",
+  CONNECTION_ACCEPTED: "connection_accepted",
+  EVENT_RSVP: "event_rsvp",
+  EVENT_CANCELLED: "event_cancelled",
+};
+
+export const NOTIFICATION_TYPE_LIST = Object.values(NOTIFICATION_TYPES);
+
+export const DELIVERY_LEDGER_STATUSES = {
+  PENDING: "pending",
+  IN_PROGRESS: "in_progress",
+  COMPLETED: "completed",
+  SUPERSEDED: "superseded",
+};
+
+export const DELIVERY_LEDGER_STATUS_LIST = Object.values(DELIVERY_LEDGER_STATUSES);
+
+export const CANCELLATION_DELIVERY_CHUNK_SIZE = 8;

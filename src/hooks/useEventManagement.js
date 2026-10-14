@@ -30,6 +30,11 @@ import {
   republishEvent,
   deleteEvent,
 } from "../services/eventService.js";
+import {
+  deliverCancellationNotifications,
+  resumeCancellationDelivery,
+  subscribeToDeliveryLedger,
+} from "../services/eventNotificationDeliveryService.js";
 
 /**
  * Hook providing authority resolution, campus tenant parity, reactive lifecycle permissions,
@@ -206,6 +211,11 @@ export function useEventManagement(event, explicitUser = null, explicitCampusId 
   const [isMutating, setIsMutating] = useState(false);
   const [mutationError, setMutationError] = useState(null);
 
+  // M23.4: Cancellation notification delivery state
+  const [deliveryLedger, setDeliveryLedger] = useState(null);
+  const [isDelivering, setIsDelivering] = useState(false);
+  const [deliveryError, setDeliveryError] = useState(null);
+
   // Synchronize activeEventIdRef synchronously during commit phase via useLayoutEffect
   const activeEventIdRef = useRef(event?.id);
   useLayoutEffect(() => {
@@ -219,7 +229,7 @@ export function useEventManagement(event, explicitUser = null, explicitCampusId 
     };
   }, []);
 
-  // Clear mutation display state synchronously during render if event identity changes
+  // Clear mutation and delivery display state synchronously during render if event identity changes
   // CRITICAL: Switching event identity does NOT release isMutatingRef.current!
   // The in-flight mutation on the prior event still holds the concurrency lock until it settles.
   const [prevEventId, setPrevEventId] = useState(event?.id);
@@ -227,8 +237,38 @@ export function useEventManagement(event, explicitUser = null, explicitCampusId 
     setPrevEventId(event?.id);
     setMutationError(null);
     setIsMutating(false);
+    setDeliveryError(null);
+    setIsDelivering(false);
+    setDeliveryLedger(null);
     // Do NOT reset isMutatingRef.current here!
   }
+
+  // Subscribe to delivery ledger changes when event is cancelled
+  const isCancelled =
+    event?.status === EVENT_STATUSES.CANCELLED || event?.status === "cancelled";
+
+  useEffect(() => {
+    if (!event?.id || !isCancelled) {
+      return;
+    }
+
+    const unsubscribe = subscribeToDeliveryLedger(
+      event.id,
+      (ledger) => {
+        if (isMountedRef.current && activeEventIdRef.current === event.id) {
+          setDeliveryLedger(ledger);
+        }
+      },
+      (err) => {
+        // Silently capture permission or non-existing errors without crashing
+        console.warn("Delivery ledger subscription notice:", err?.message);
+      }
+    );
+
+    return () => unsubscribe();
+  }, [event?.id, isCancelled]);
+
+  const effectiveDeliveryLedger = isCancelled ? deliveryLedger : null;
 
   const clearError = useCallback(() => {
     setMutationError(null);
@@ -275,6 +315,7 @@ export function useEventManagement(event, explicitUser = null, explicitCampusId 
       isMutatingRef.current = true;
       setIsMutating(true);
       setMutationError(null);
+      setDeliveryError(null);
       try {
         await cancelEvent(targetEventId, event);
       } catch (err) {
@@ -288,8 +329,59 @@ export function useEventManagement(event, explicitUser = null, explicitCampusId 
           setIsMutating(false);
         }
       }
+
+      // Cancellation succeeded atomically in Firestore.
+      // Now start notification delivery fan-out as a distinct, resumable operation.
+      setIsDelivering(true);
+      try {
+        await deliverCancellationNotifications(targetEventId, {
+          eventTitle: event.title,
+        });
+      } catch (delivErr) {
+        console.error("Cancellation notification delivery interrupted:", delivErr);
+        if (isMountedRef.current && activeEventIdRef.current === targetEventId) {
+          setDeliveryError(
+            delivErr?.message || "Cancellation notification delivery could not be completed."
+          );
+        }
+      } finally {
+        if (isMountedRef.current && activeEventIdRef.current === targetEventId) {
+          setIsDelivering(false);
+        }
+      }
     },
     [event]
+  );
+
+  const resumeDelivery = useCallback(
+    async () => {
+      if (isDelivering) {
+        return;
+      }
+      if (!event?.id) {
+        throw new Error("No active event to resume delivery for.");
+      }
+      const targetEventId = event.id;
+      setIsDelivering(true);
+      setDeliveryError(null);
+      try {
+        const result = await resumeCancellationDelivery(targetEventId, {
+          eventTitle: event.title,
+        });
+        return result;
+      } catch (err) {
+        console.error("Failed to resume delivery:", err);
+        if (isMountedRef.current && activeEventIdRef.current === targetEventId) {
+          setDeliveryError(err?.message || "Failed to resume notification delivery.");
+        }
+        throw err;
+      } finally {
+        if (isMountedRef.current && activeEventIdRef.current === targetEventId) {
+          setIsDelivering(false);
+        }
+      }
+    },
+    [event, isDelivering]
   );
 
   const republishCurrentEvent = useCallback(
@@ -368,6 +460,13 @@ export function useEventManagement(event, explicitUser = null, explicitCampusId 
     isMutating,
     mutationError,
     clearError,
+
+    // M23.4: Delivery state & recovery
+    deliveryLedger: effectiveDeliveryLedger,
+    isDelivering,
+    deliveryError,
+    resumeDelivery,
+    clearDeliveryError: () => setDeliveryError(null),
 
     editDetails,
     cancelCurrentEvent,

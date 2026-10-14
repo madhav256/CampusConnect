@@ -6,14 +6,22 @@ import {
 } from "../../src/data/eventRsvps.js";
 
 const mocks = vi.hoisted(() => ({
-  doc: vi.fn((_db, coll, id) => ({
-    path: `${coll}/${id}`,
-    id,
-    collection: coll,
-  })),
+  doc: vi.fn((_db, coll, id, ...rest) => {
+    const fullPath = rest.length ? `${coll}/${id}/${rest.join("/")}` : `${coll}/${id}`;
+    return {
+      path: fullPath,
+      id: rest.length ? rest[rest.length - 1] : id,
+      collection: coll,
+    };
+  }),
   collection: vi.fn((_db, name) => ({ path: name, name })),
   deleteDoc: vi.fn(),
   setDoc: vi.fn(),
+  mockBatch: {
+    set: vi.fn(),
+    commit: vi.fn(() => Promise.resolve()),
+  },
+  writeBatch: vi.fn(),
   onSnapshot: vi.fn(),
   query: vi.fn((ref, ...constraints) => ({ ref, constraints })),
   where: vi.fn((field, op, val) => ({ type: "where", field, op, val })),
@@ -21,6 +29,8 @@ const mocks = vi.hoisted(() => ({
   serverTimestamp: vi.fn(() => ({ _methodName: "serverTimestamp" })),
   mockDb: { id: "mock-db" },
 }));
+
+mocks.writeBatch.mockImplementation(() => mocks.mockBatch);
 
 vi.mock("../../src/firebase/config", () => ({
   db: mocks.mockDb,
@@ -32,6 +42,7 @@ vi.mock("firebase/firestore", () => ({
   collection: mocks.collection,
   deleteDoc: mocks.deleteDoc,
   setDoc: mocks.setDoc,
+  writeBatch: mocks.writeBatch,
   onSnapshot: mocks.onSnapshot,
   query: mocks.query,
   where: mocks.where,
@@ -592,9 +603,13 @@ describe("Milestone 21 — Unit 21.3: Event RSVP Service", () => {
   });
 
   describe("Mutations: createEventRsvp & deleteEventRsvp", () => {
-    it("createEventRsvp sets document with deterministic path, exactly 5 fields, and serverTimestamp()", async () => {
-      mocks.setDoc.mockResolvedValueOnce();
+    beforeEach(() => {
+      mocks.mockBatch.set.mockClear();
+      mocks.mockBatch.commit.mockClear();
+      mocks.mockBatch.commit.mockResolvedValue();
+    });
 
+    it("createEventRsvp sets document with deterministic path, exactly 5 fields, and serverTimestamp()", async () => {
       const result = await createEventRsvp({
         eventId: "event-ai",
         userId: "student-1",
@@ -607,7 +622,7 @@ describe("Milestone 21 — Unit 21.3: Event RSVP Service", () => {
         "event-ai_student-1"
       );
 
-      expect(mocks.setDoc).toHaveBeenCalledWith(
+      expect(mocks.mockBatch.set).toHaveBeenCalledWith(
         expect.objectContaining({ path: "eventRsvps/event-ai_student-1" }),
         {
           id: "event-ai_student-1",
@@ -617,6 +632,7 @@ describe("Milestone 21 — Unit 21.3: Event RSVP Service", () => {
           createdAt: { _methodName: "serverTimestamp" },
         }
       );
+      expect(mocks.mockBatch.commit).toHaveBeenCalled();
 
       expect(result).toEqual({
         id: "event-ai_student-1",
@@ -634,6 +650,77 @@ describe("Milestone 21 — Unit 21.3: Event RSVP Service", () => {
       ]);
     });
 
+    it("createEventRsvp atomically writes organizer notification when student RSVPs to another user's event", async () => {
+      const event = {
+        id: "event-ai",
+        title: "AI Workshop",
+        createdBy: "organizer-9",
+        campusId: APEX_CAMPUS_ID,
+      };
+      const userProfile = {
+        displayName: "Alice Student",
+        photoURL: "https://avatar.test/alice.png",
+      };
+
+      await createEventRsvp({
+        eventId: "event-ai",
+        userId: "student-1",
+        campusId: APEX_CAMPUS_ID,
+        event,
+        userProfile,
+      });
+
+      expect(mocks.mockBatch.set).toHaveBeenCalledTimes(2);
+
+      // RSVP write
+      expect(mocks.mockBatch.set).toHaveBeenCalledWith(
+        expect.objectContaining({ path: "eventRsvps/event-ai_student-1" }),
+        expect.objectContaining({ id: "event-ai_student-1" })
+      );
+
+      // Notification write
+      expect(mocks.mockBatch.set).toHaveBeenCalledWith(
+        expect.objectContaining({ path: "users/organizer-9/notifications/rsvp_event-ai_student-1" }),
+        {
+          id: "rsvp_event-ai_student-1",
+          recipientId: "organizer-9",
+          actorId: "student-1",
+          actorName: "Alice Student",
+          actorAvatar: "https://avatar.test/alice.png",
+          type: "event_rsvp",
+          referenceId: "event-ai",
+          referenceTitle: "AI Workshop",
+          isRead: false,
+          createdAt: { _methodName: "serverTimestamp" },
+        }
+      );
+
+      expect(mocks.mockBatch.commit).toHaveBeenCalledTimes(1);
+    });
+
+    it("createEventRsvp suppresses notification when organizer is the actor (self-RSVP)", async () => {
+      const event = {
+        id: "event-ai",
+        title: "AI Workshop",
+        createdBy: "student-1",
+        campusId: APEX_CAMPUS_ID,
+      };
+
+      await createEventRsvp({
+        eventId: "event-ai",
+        userId: "student-1",
+        campusId: APEX_CAMPUS_ID,
+        event,
+      });
+
+      expect(mocks.mockBatch.set).toHaveBeenCalledTimes(1);
+      expect(mocks.mockBatch.set).toHaveBeenCalledWith(
+        expect.objectContaining({ path: "eventRsvps/event-ai_student-1" }),
+        expect.any(Object)
+      );
+      expect(mocks.mockBatch.commit).toHaveBeenCalledTimes(1);
+    });
+
     it("createEventRsvp throws on missing required parameters", async () => {
       await expect(
         createEventRsvp({ eventId: "", userId: "u1", campusId: APEX_CAMPUS_ID })
@@ -648,8 +735,8 @@ describe("Milestone 21 — Unit 21.3: Event RSVP Service", () => {
       ).rejects.toThrow();
     });
 
-    it("createEventRsvp propagates Firestore errors", async () => {
-      mocks.setDoc.mockRejectedValueOnce(
+    it("createEventRsvp propagates Firestore errors and commits atomically", async () => {
+      mocks.mockBatch.commit.mockRejectedValueOnce(
         new Error("permission-denied: event has ended")
       );
 

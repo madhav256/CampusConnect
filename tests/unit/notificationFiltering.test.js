@@ -15,6 +15,12 @@ export function filterNotificationsByPreferences(rawNotifications, preferences) 
     if (n.type === "connection_accepted" && preferences?.connectionAccepted === false) {
       return false;
     }
+    if (n.type === "event_rsvp" && preferences?.eventRsvps === false) {
+      return false;
+    }
+    if (n.type === "event_cancelled" && preferences?.eventCancellations === false) {
+      return false;
+    }
     return true;
   });
 }
@@ -104,5 +110,68 @@ describe("Milestone 14B — Recipient Client Notification Filtering", () => {
     const filtered2 = filterNotificationsByPreferences(sampleNotifications, prefs2);
     const unreadCount2 = filtered2.filter((n) => !n.isRead).length;
     expect(unreadCount2).toBe(1);
+  });
+
+  describe("Milestone 23.3 — Event Notification Filtering & Preference Normalization", () => {
+    const eventNotifications = [
+      {
+        id: "rsvp_event1_alice",
+        recipientId: "organizer1",
+        actorId: "alice",
+        type: "event_rsvp",
+        isRead: false,
+      },
+      {
+        id: "cancel_event1_cycle123",
+        recipientId: "attendee1",
+        actorId: "organizer1",
+        type: "event_cancelled",
+        isRead: false,
+      },
+      {
+        id: "cancel_event2_cycle456",
+        recipientId: "attendee1",
+        actorId: "organizer2",
+        type: "event_cancelled",
+        isRead: true,
+      },
+    ];
+
+    it("surfaces event notifications when preferences are enabled or unset", () => {
+      const filteredUnset = filterNotificationsByPreferences(eventNotifications, {});
+      expect(filteredUnset).toHaveLength(3);
+
+      const filteredEnabled = filterNotificationsByPreferences(eventNotifications, {
+        eventRsvps: true,
+        eventCancellations: true,
+      });
+      expect(filteredEnabled).toHaveLength(3);
+    });
+
+    it("filters out event_rsvp notifications when eventRsvps is false", () => {
+      const filtered = filterNotificationsByPreferences(eventNotifications, {
+        eventRsvps: false,
+        eventCancellations: true,
+      });
+      expect(filtered).toHaveLength(2);
+      expect(filtered.every((n) => n.type === "event_cancelled")).toBe(true);
+    });
+
+    it("filters out event_cancelled notifications when eventCancellations is false", () => {
+      const filtered = filterNotificationsByPreferences(eventNotifications, {
+        eventRsvps: true,
+        eventCancellations: false,
+      });
+      expect(filtered).toHaveLength(1);
+      expect(filtered[0].id).toBe("rsvp_event1_alice");
+    });
+
+    it("filters out all event notifications when both are false", () => {
+      const filtered = filterNotificationsByPreferences(eventNotifications, {
+        eventRsvps: false,
+        eventCancellations: false,
+      });
+      expect(filtered).toHaveLength(0);
+    });
   });
 });

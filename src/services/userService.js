@@ -66,6 +66,10 @@ export function normalizeUserSettings(uid, data) {
         data?.notificationPreferences?.connectionRequests !== false,
       connectionAccepted:
         data?.notificationPreferences?.connectionAccepted !== false,
+      eventRsvps:
+        data?.notificationPreferences?.eventRsvps !== false,
+      eventCancellations:
+        data?.notificationPreferences?.eventCancellations !== false,
     },
     ...(data?.campusId ? { campusId: data.campusId } : {}),
     createdAt: data?.createdAt || null,
@@ -107,6 +111,8 @@ export async function createUserProfile({
     notificationPreferences: {
       connectionRequests: true,
       connectionAccepted: true,
+      eventRsvps: true,
+      eventCancellations: true,
     },
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
@@ -333,6 +339,20 @@ export async function updateUserSettings(uid, settingsUpdates) {
     ) {
       prefs.connectionAccepted =
         settingsUpdates.notificationPreferences.connectionAccepted;
+    }
+    if (
+      typeof settingsUpdates.notificationPreferences.eventRsvps ===
+      "boolean"
+    ) {
+      prefs.eventRsvps =
+        settingsUpdates.notificationPreferences.eventRsvps;
+    }
+    if (
+      typeof settingsUpdates.notificationPreferences.eventCancellations ===
+      "boolean"
+    ) {
+      prefs.eventCancellations =
+        settingsUpdates.notificationPreferences.eventCancellations;
     }
     if (Object.keys(prefs).length > 0) {
       updates.notificationPreferences = prefs;

@@ -35,6 +35,13 @@ export default function NotificationItem({
 
   const isRequest = notification.type === "connection_request";
   const isAccepted = notification.type === "connection_accepted";
+  const isEventRsvp = notification.type === "event_rsvp";
+  const isEventCancelled = notification.type === "event_cancelled";
+
+  const trimmedActorName =
+    typeof notification.actorName === "string" ? notification.actorName.trim() : "";
+  const actorDisplayName =
+    trimmedActorName || (isEventCancelled ? "an organizer" : "CampusConnect Student");
 
   async function handleAccept() {
     if (!currentUid || isBusy) return;
@@ -81,9 +88,12 @@ export default function NotificationItem({
       )}
 
       {/* Actor Avatar */}
-      <Link to={`/users/${notification.actorId}`} className="shrink-0">
+      <Link
+        to={notification.actorId ? `/users/${notification.actorId}` : "#"}
+        className="shrink-0"
+      >
         <Avatar
-          name={notification.actorName}
+          name={actorDisplayName}
           photoURL={notification.actorAvatar}
           size="md"
         />
@@ -92,15 +102,59 @@ export default function NotificationItem({
       {/* Body Content */}
       <div className="min-w-0 flex-1">
         <div className="text-sm text-ink">
-          <Link
-            to={`/users/${notification.actorId}`}
-            className="font-semibold text-ink hover:underline"
-          >
-            {notification.actorName}
-          </Link>{" "}
-          {isRequest && <span>sent you a connection request.</span>}
-          {isAccepted && <span>accepted your connection request.</span>}
-          {!isRequest && !isAccepted && <span>interacted with you.</span>}
+          {isEventCancelled ? (
+            <span>
+              The event{" "}
+              {notification.referenceTitle ? (
+                <span className="font-semibold text-ink">
+                  &ldquo;{notification.referenceTitle}&rdquo;
+                </span>
+              ) : (
+                "session"
+              )}{" "}
+              was cancelled by{" "}
+              {notification.actorId ? (
+                <Link
+                  to={`/users/${notification.actorId}`}
+                  className="font-semibold text-ink hover:underline"
+                >
+                  {actorDisplayName}
+                </Link>
+              ) : (
+                <span className="font-semibold text-ink">{actorDisplayName}</span>
+              )}
+              .
+            </span>
+          ) : (
+            <>
+              {notification.actorId ? (
+                <Link
+                  to={`/users/${notification.actorId}`}
+                  className="font-semibold text-ink hover:underline"
+                >
+                  {actorDisplayName}
+                </Link>
+              ) : (
+                <span className="font-semibold text-ink">{actorDisplayName}</span>
+              )}{" "}
+              {isRequest && <span>sent you a connection request.</span>}
+              {isAccepted && <span>accepted your connection request.</span>}
+              {isEventRsvp && (
+                <span>
+                  RSVP'd to your event{" "}
+                  {notification.referenceTitle ? (
+                    <span className="font-semibold text-ink">
+                      &ldquo;{notification.referenceTitle}&rdquo;
+                    </span>
+                  ) : (
+                    "session"
+                  )}
+                  .
+                </span>
+              )}
+              {!isRequest && !isAccepted && !isEventRsvp && <span>interacted with you.</span>}
+            </>
+          )}
         </div>
 
         <div className="mt-1 flex items-center gap-2 text-xs text-ink-muted">
@@ -145,6 +199,16 @@ export default function NotificationItem({
               className="inline-flex items-center justify-center rounded-xl border border-border-warm bg-surface px-3 py-1.5 text-xs font-medium text-ink transition hover:border-stone-300 hover:text-terracotta-700"
             >
               View Profile
+            </Link>
+          )}
+
+          {(isEventRsvp || isEventCancelled) && (
+            <Link
+              to={`/events/${notification.referenceId}`}
+              data-testid={`notif-view-event-${notification.id}`}
+              className="inline-flex items-center justify-center rounded-xl border border-border-warm bg-surface px-3 py-1.5 text-xs font-medium text-ink transition hover:border-stone-300 hover:text-terracotta-700"
+            >
+              View Event
             </Link>
           )}
 

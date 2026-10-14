@@ -20,6 +20,8 @@ import {
   Lock,
   RefreshCw,
   Building2,
+  Loader2,
+  CheckCircle,
 } from "lucide-react";
 import { useEvent } from "../hooks/useEvent.js";
 import { useEventRsvp } from "../hooks/useEventRsvp.js";
@@ -115,6 +117,10 @@ export default function EventDetail() {
     isMutating,
     mutationError,
     clearError,
+    deliveryLedger,
+    isDelivering,
+    deliveryError,
+    resumeDelivery,
     editDetails,
     cancelCurrentEvent,
     republishCurrentEvent,
@@ -282,6 +288,85 @@ export default function EventDetail() {
                   for informational purposes.
                 </p>
               </div>
+            </div>
+          )}
+
+          {/* Cancellation Notification Delivery Status (For Authorized Leaders/Admins) */}
+          {isCancelled && (isLeader || isAdmin || canRepublish || canDelete) && (
+            <div className="space-y-2">
+              {isDelivering && (
+                <div
+                  data-testid="cancellation-delivery-in-progress"
+                  className="flex items-center gap-2.5 rounded-2xl border border-amber-200 bg-amber-50/90 p-3.5 text-xs sm:text-sm text-amber-900 shadow-xs"
+                >
+                  <Loader2 className="h-4 w-4 shrink-0 animate-spin text-amber-600" aria-hidden="true" />
+                  <span>
+                    Delivering cancellation notifications to attendees...
+                    {deliveryLedger?.processedCount !== undefined ? ` (${deliveryLedger.processedCount} processed)` : ""}
+                  </span>
+                </div>
+              )}
+
+              {!isDelivering && (deliveryError || (deliveryLedger && (deliveryLedger.status === "pending" || deliveryLedger.status === "in_progress"))) && (
+                <div
+                  data-testid="cancellation-delivery-pending-card"
+                  role="status"
+                  className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-2xl border border-amber-300 bg-amber-50 p-4 text-xs sm:text-sm text-amber-950 shadow-xs"
+                >
+                  <div className="flex items-start gap-2.5">
+                    <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" aria-hidden="true" />
+                    <div>
+                      <p className="font-semibold text-amber-900">
+                        Cancellation notification delivery incomplete
+                      </p>
+                      <p className="mt-0.5 text-xs text-amber-800">
+                        {deliveryError
+                          ? deliveryError
+                          : `Delivery was interrupted. ${deliveryLedger?.processedCount || 0} attendees notified so far.`}
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    data-testid="resume-delivery-btn"
+                    disabled={isDelivering || isMutating}
+                    onClick={async () => {
+                      try {
+                        await resumeDelivery();
+                      } catch {
+                        // error captured in hook state
+                      }
+                    }}
+                    className="shrink-0 gap-1.5 border-amber-400 bg-white text-amber-900 hover:bg-amber-100"
+                  >
+                    <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+                    <span>Resume Delivery</span>
+                  </Button>
+                </div>
+              )}
+
+              {!isDelivering && deliveryLedger?.status === "completed" && (
+                <div
+                  data-testid="cancellation-delivery-completed"
+                  className="flex items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 px-3.5 py-2 text-xs font-medium text-emerald-800 shadow-xs"
+                >
+                  <CheckCircle className="h-3.5 w-3.5 text-emerald-600 shrink-0" aria-hidden="true" />
+                  <span>
+                    Cancellation notifications delivered ({deliveryLedger.processedCount} attendee{deliveryLedger.processedCount === 1 ? "" : "s"} notified).
+                  </span>
+                </div>
+              )}
+
+              {!isDelivering && deliveryLedger?.status === "superseded" && (
+                <div
+                  data-testid="cancellation-delivery-superseded"
+                  className="rounded-2xl border border-stone-200 bg-stone-50 px-3.5 py-2 text-xs text-stone-600"
+                >
+                  Notification delivery superseded by republishing or lifecycle update.
+                </div>
+              )}
             </div>
           )}
 

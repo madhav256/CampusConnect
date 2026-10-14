@@ -159,6 +159,8 @@ describe("userService — Pure Normalizers & Projections", () => {
         notificationPreferences: {
           connectionRequests: false,
           connectionAccepted: true,
+          eventRsvps: true,
+          eventCancellations: true,
         },
         createdAt: null,
         updatedAt: null,
@@ -178,9 +180,30 @@ describe("userService — Pure Normalizers & Projections", () => {
         notificationPreferences: {
           connectionRequests: true,
           connectionAccepted: true,
+          eventRsvps: true,
+          eventCancellations: true,
         },
         createdAt: null,
         updatedAt: null,
+      });
+    });
+
+    it("preserves explicit false for event preferences", () => {
+      const rawData = {
+        notificationPreferences: {
+          connectionRequests: true,
+          connectionAccepted: false,
+          eventRsvps: false,
+          eventCancellations: false,
+        },
+      };
+
+      const settings = normalizeUserSettings("student-3", rawData);
+      expect(settings.notificationPreferences).toEqual({
+        connectionRequests: true,
+        connectionAccepted: false,
+        eventRsvps: false,
+        eventCancellations: false,
       });
     });
   });
@@ -498,6 +521,8 @@ describe("userService — Firestore Service Methods", () => {
       expect(userSetCall[1].notificationPreferences).toEqual({
         connectionRequests: true,
         connectionAccepted: true,
+        eventRsvps: true,
+        eventCancellations: true,
       });
 
       // 2. publicProfiles/{uid} set call: strict 8 public fields

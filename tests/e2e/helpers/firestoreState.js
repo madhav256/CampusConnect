@@ -6,6 +6,7 @@ import { seedEventRsvps } from "../../../scripts/seedEventRsvps.mjs";
 import { EVENT_RSVP_DEFINITIONS } from "../../../src/data/eventRsvps.js";
 import { seedEvents } from "../../../scripts/seedEvents.mjs";
 import { seedCommunityMembers } from "../../../scripts/seedCommunityMembers.mjs";
+import { COMMUNITY_MEMBER_LIST } from "../../../src/data/communityMembers.js";
 
 process.env.GOOGLE_AUTH_SUPPRESS_CREDENTIALS_WARNINGS = "true";
 
@@ -453,11 +454,118 @@ export async function setCommunityMemberRole(communityId, userId, role, status =
 }
 
 /**
+ * Removes a community membership document.
+ *
+ * @param {string} communityId
+ * @param {string} userId
+ */
+export async function removeCommunityMember(communityId, userId) {
+  if (!process.env.FIRESTORE_EMULATOR_HOST) {
+    throw new Error("[removeCommunityMember] Refusing to run outside emulator environment.");
+  }
+  const memberId = `${communityId}_${userId}`;
+  await db.collection("communityMembers").doc(memberId).delete();
+}
+
+/**
  * Restores community membership documents to their approved baseline state.
  */
 export async function restoreCommunityMembers() {
   if (!process.env.FIRESTORE_EMULATOR_HOST) {
     throw new Error("[restoreCommunityMembers] Refusing to run outside emulator environment.");
   }
+  const snap = await db.collection("communityMembers").get();
+  const baselineIds = new Set(COMMUNITY_MEMBER_LIST.map((m) => m.id));
+  const batch = db.batch();
+  for (const doc of snap.docs) {
+    if (!baselineIds.has(doc.id)) {
+      batch.delete(doc.ref);
+    }
+  }
+  await batch.commit();
   await seedCommunityMembers(db);
+}
+
+/**
+ * Cleans up any delivery ledgers and user notifications related to a given event.
+ *
+ * @param {string} eventId
+ * @param {string[]} [userIds=[]]
+ */
+export async function cleanupEventNotifications(eventId, userIds = []) {
+  if (!process.env.FIRESTORE_EMULATOR_HOST) {
+    throw new Error("[cleanupEventNotifications] Refusing to run outside emulator environment.");
+  }
+  if (!eventId) return;
+
+  // 1. Delete delivery ledger
+  await db.collection("eventNotificationDeliveries").doc(eventId).delete();
+
+  // 2. Clean notifications for specified users
+  for (const uid of userIds) {
+    const querySnap = await db
+      .collection("users")
+      .doc(uid)
+      .collection("notifications")
+      .where("referenceId", "==", eventId)
+      .get();
+    if (!querySnap.empty) {
+      const batch = db.batch();
+      querySnap.docs.forEach((d) => batch.delete(d.ref));
+      await batch.commit();
+    }
+  }
+}
+
+/**
+ * Updates a user's notification preferences directly in Firestore for deterministic E2E setup.
+ *
+ * @param {string} userId
+ * @param {object} prefs
+ */
+export async function setUserPreferences(userId, prefs) {
+  if (!process.env.FIRESTORE_EMULATOR_HOST) {
+    throw new Error("[setUserPreferences] Refusing to run outside emulator environment.");
+  }
+  await db.collection("users").doc(userId).set(
+    {
+      notificationPreferences: prefs,
+      updatedAt: Timestamp.now(),
+    },
+    { merge: true }
+  );
+}
+
+/**
+ * Resets user preferences to the default all-enabled state.
+ *
+ * @param {string} userId
+ */
+export async function resetUserPreferences(userId) {
+  if (!process.env.FIRESTORE_EMULATOR_HOST) {
+    throw new Error("[resetUserPreferences] Refusing to run outside emulator environment.");
+  }
+  await setUserPreferences(userId, {
+    connectionRequests: true,
+    connectionAccepted: true,
+    eventRsvps: true,
+    eventCancellations: true,
+  });
+}
+
+/**
+ * Deletes all notifications for a given user.
+ *
+ * @param {string} userId
+ */
+export async function clearUserNotifications(userId) {
+  if (!process.env.FIRESTORE_EMULATOR_HOST) {
+    throw new Error("[clearUserNotifications] Refusing to run outside emulator environment.");
+  }
+  const snap = await db.collection("users").doc(userId).collection("notifications").get();
+  if (!snap.empty) {
+    const batch = db.batch();
+    snap.docs.forEach((d) => batch.delete(d.ref));
+    await batch.commit();
+  }
 }

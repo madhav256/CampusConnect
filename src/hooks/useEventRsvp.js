@@ -27,9 +27,14 @@ import {
  *   cancelRsvp: () => Promise<void>,
  * }}
  */
-export function useEventRsvp(eventId) {
+export function useEventRsvp(eventId, event = null) {
   const { user: authUser } = useAuth();
   const campusCtx = useOptionalCampus();
+
+  const eventRef = useRef(event);
+  useEffect(() => {
+    eventRef.current = event;
+  }, [event]);
 
   const userId = authUser?.uid || null;
   const campusId = campusCtx?.campusId || null;
@@ -115,7 +120,11 @@ export function useEventRsvp(eventId) {
     setError(null);
 
     try {
-      return await createEventRsvp({ eventId, userId, campusId });
+      const payload = { eventId, userId, campusId };
+      if (eventRef.current) {
+        payload.event = eventRef.current;
+      }
+      return await createEventRsvp(payload);
     } catch (err) {
       if (activeKeyRef.current === mutationKey) {
         setError(err?.message || "Failed to RSVP to event.");

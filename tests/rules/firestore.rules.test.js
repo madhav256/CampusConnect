@@ -32,6 +32,9 @@ import {
   communityMemberFixture,
   eventFixture,
   eventRsvpFixture,
+  eventNotificationDeliveryFixture,
+  eventRsvpNotificationFixture,
+  eventCancelledNotificationFixture,
 } from "./fixtures.js";
 
 const serverTimestamp = () => firebase.firestore.FieldValue.serverTimestamp();
@@ -66,6 +69,11 @@ function eventRef(context, eventId) {
 function eventRsvpRef(context, rsvpId) {
   return context.firestore().collection("eventRsvps").doc(rsvpId);
 }
+
+function deliveryLedgerRef(context, eventId) {
+  return context.firestore().collection("eventNotificationDeliveries").doc(eventId);
+}
+
 
 
 function userRef(context, uid) {
@@ -5067,32 +5075,50 @@ describe("Milestone 18 — Unit 18.2: Campuses & Multi-Tenancy Rules", () => {
 
       it("creator can cancel event", async () => {
         const alice = contextFor(aliceUid);
-        await assertSucceeds(
-          eventRef(alice, "alice-event-1").update({
-            status: "cancelled",
-            updatedAt: serverTimestamp(),
-          })
-        );
+        const db = alice.firestore();
+        const batch = db.batch();
+        batch.update(eventRef(alice, "alice-event-1"), {
+          status: "cancelled",
+          updatedAt: serverTimestamp(),
+        });
+        batch.set(deliveryLedgerRef(alice, "alice-event-1"), {
+          ...eventNotificationDeliveryFixture("alice-event-1", aliceUid, APEX_CAMPUS_ID, "apex-ai-club"),
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+        await assertSucceeds(batch.commit());
       });
 
       it("active community moderator can cancel event", async () => {
         const bob = contextFor(bobUid); // Moderator
-        await assertSucceeds(
-          eventRef(bob, "alice-event-1").update({
-            status: "cancelled",
-            updatedAt: serverTimestamp(),
-          })
-        );
+        const db = bob.firestore();
+        const batch = db.batch();
+        batch.update(eventRef(bob, "alice-event-1"), {
+          status: "cancelled",
+          updatedAt: serverTimestamp(),
+        });
+        batch.set(deliveryLedgerRef(bob, "alice-event-1"), {
+          ...eventNotificationDeliveryFixture("alice-event-1", bobUid, APEX_CAMPUS_ID, "apex-ai-club"),
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+        await assertSucceeds(batch.commit());
       });
 
       it("active community admin can cancel event", async () => {
         const alice = contextFor(aliceUid); // Admin
-        await assertSucceeds(
-          eventRef(alice, "bob-event-1").update({
-            status: "cancelled",
-            updatedAt: serverTimestamp(),
-          })
-        );
+        const db = alice.firestore();
+        const batch = db.batch();
+        batch.update(eventRef(alice, "bob-event-1"), {
+          status: "cancelled",
+          updatedAt: serverTimestamp(),
+        });
+        batch.set(deliveryLedgerRef(alice, "bob-event-1"), {
+          ...eventNotificationDeliveryFixture("bob-event-1", aliceUid, APEX_CAMPUS_ID, "apex-ai-club"),
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+        await assertSucceeds(batch.commit());
       });
 
       it("ordinary member cannot cancel event", async () => {
@@ -6877,9 +6903,25 @@ describe("Milestone 18 — Unit 18.2: Campuses & Multi-Tenancy Rules", () => {
         });
       });
 
-      it("upcoming: moderator can cancel event changing only status and updatedAt", async () => {
+      it("upcoming: moderator can cancel event changing only status and updatedAt with atomic ledger", async () => {
         const bob = contextFor(bobUid);
-        await assertSucceeds(
+        const db = bob.firestore();
+        const batch = db.batch();
+        batch.update(eventRef(bob, "pb-upcoming-1"), {
+          status: "cancelled",
+          updatedAt: serverTimestamp(),
+        });
+        batch.set(deliveryLedgerRef(bob, "pb-upcoming-1"), {
+          ...eventNotificationDeliveryFixture("pb-upcoming-1", bobUid, APEX_CAMPUS_ID, "apex-ai-club"),
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+        await assertSucceeds(batch.commit());
+      });
+
+      it("upcoming: cancelling event without atomic ledger creation is denied", async () => {
+        const bob = contextFor(bobUid);
+        await expectPermissionDenied(() =>
           eventRef(bob, "pb-upcoming-1").update({
             status: "cancelled",
             updatedAt: serverTimestamp(),
@@ -6887,15 +6929,22 @@ describe("Milestone 18 — Unit 18.2: Campuses & Multi-Tenancy Rules", () => {
         );
       });
 
-      it("ongoing: moderator can cancel event changing only status and updatedAt", async () => {
+      it("ongoing: moderator can cancel event changing only status and updatedAt with atomic ledger", async () => {
         const bob = contextFor(bobUid);
-        await assertSucceeds(
-          eventRef(bob, "pb-ongoing-1").update({
-            status: "cancelled",
-            updatedAt: serverTimestamp(),
-          })
-        );
+        const db = bob.firestore();
+        const batch = db.batch();
+        batch.update(eventRef(bob, "pb-ongoing-1"), {
+          status: "cancelled",
+          updatedAt: serverTimestamp(),
+        });
+        batch.set(deliveryLedgerRef(bob, "pb-ongoing-1"), {
+          ...eventNotificationDeliveryFixture("pb-ongoing-1", bobUid, APEX_CAMPUS_ID, "apex-ai-club"),
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+        await assertSucceeds(batch.commit());
       });
+
 
       it("completed: cancelling completed event is denied", async () => {
         const alice = contextFor(aliceUid);
@@ -7272,6 +7321,1225 @@ describe("Milestone 18 — Unit 18.2: Campuses & Multi-Tenancy Rules", () => {
             createdAt: serverTimestamp(),
           })
         );
+      });
+    });
+  });
+
+  describe("Milestone 23 — Unit 23.2: Event Notifications & Delivery Ledger Security Rules", () => {
+    const aliceUid = TEST_UIDS.alice; // Apex student, admin of apex-ai-club
+    const bobUid = TEST_UIDS.bob; // Apex student, moderator of apex-ai-club
+    const carolUid = TEST_UIDS.carol; // Apex student, regular member of apex-ai-club
+    const davidUid = "m23-uid-david"; // Apex student, attendee
+    const eveUid = "m23-uid-eve"; // St. Jude student (cross-campus)
+    const chunkAttendeeUids = Array.from({ length: 8 }, (_, i) => `m23-chunk-att-${i + 1}`);
+
+    const now = Date.now();
+    const upcomingStart = firebase.firestore.Timestamp.fromMillis(now + 24 * 60 * 60 * 1000);
+    const upcomingEnd = firebase.firestore.Timestamp.fromMillis(now + 48 * 60 * 60 * 1000);
+
+    beforeEach(async () => {
+      await testEnvironment.withSecurityRulesDisabled(async (context) => {
+        const db = context.firestore();
+        const batch = db.batch();
+
+        const allM23Users = [aliceUid, bobUid, carolUid, davidUid, eveUid, ...chunkAttendeeUids];
+        const names = {
+          [aliceUid]: "Alice Test",
+          [bobUid]: "Bob Test",
+          [carolUid]: "Carol Test",
+        };
+        for (const uid of allM23Users) {
+          const isEve = uid === eveUid;
+          const campusId = isEve ? ST_JUDE_CAMPUS_ID : APEX_CAMPUS_ID;
+          batch.set(db.collection("users").doc(uid), userFixture(uid, { campusId }));
+          batch.set(
+            db.collection("publicProfiles").doc(uid),
+            publicProfileFixture(uid, {
+              campusId,
+              displayName: names[uid] || `${uid} Student`,
+            })
+          );
+          batch.set(
+            db.collection("directoryIndex").doc(uid),
+            directoryIndexFixture(uid, {
+              campusId,
+              displayName: names[uid] || `${uid} Student`,
+            })
+          );
+        }
+
+        // Community memberships
+        batch.set(
+          db.collection("communityMembers").doc(`apex-ai-club_${aliceUid}`),
+          communityMemberFixture("apex-ai-club", aliceUid, {
+            role: COMMUNITY_MEMBER_ROLES.ADMIN,
+            status: COMMUNITY_MEMBER_STATUSES.ACTIVE,
+            campusId: APEX_CAMPUS_ID,
+          })
+        );
+        batch.set(
+          db.collection("communityMembers").doc(`apex-ai-club_${bobUid}`),
+          communityMemberFixture("apex-ai-club", bobUid, {
+            role: COMMUNITY_MEMBER_ROLES.MODERATOR,
+            status: COMMUNITY_MEMBER_STATUSES.ACTIVE,
+            campusId: APEX_CAMPUS_ID,
+          })
+        );
+        batch.set(
+          db.collection("communityMembers").doc(`apex-ai-club_${carolUid}`),
+          communityMemberFixture("apex-ai-club", carolUid, {
+            role: COMMUNITY_MEMBER_ROLES.MEMBER,
+            status: COMMUNITY_MEMBER_STATUSES.ACTIVE,
+            campusId: APEX_CAMPUS_ID,
+          })
+        );
+
+        await batch.commit();
+      });
+    });
+
+    async function seedEventDoc(eventId, creatorId, status = "published", overrides = {}) {
+      await testEnvironment.withSecurityRulesDisabled(async (context) => {
+        const db = context.firestore();
+        await db.collection("events").doc(eventId).set(
+          eventFixture(eventId, creatorId, "apex-ai-club", {
+            campusId: APEX_CAMPUS_ID,
+            status,
+            startAt: upcomingStart,
+            endAt: upcomingEnd,
+            ...overrides,
+          })
+        );
+      });
+    }
+
+    async function seedRsvpDoc(rsvpId, eventId, userId, overrides = {}) {
+      await testEnvironment.withSecurityRulesDisabled(async (context) => {
+        const db = context.firestore();
+        await db.collection("eventRsvps").doc(rsvpId).set(
+          eventRsvpFixture(eventId, userId, APEX_CAMPUS_ID, {
+            id: rsvpId,
+            ...overrides,
+          })
+        );
+      });
+    }
+
+    async function seedLedgerDoc(eventId, actorId, cycleId, status = "pending", overrides = {}) {
+      await testEnvironment.withSecurityRulesDisabled(async (context) => {
+        const db = context.firestore();
+        await db.collection("eventNotificationDeliveries").doc(eventId).set(
+          eventNotificationDeliveryFixture(eventId, actorId, APEX_CAMPUS_ID, "apex-ai-club", {
+            cycleId,
+            status,
+            ...overrides,
+          })
+        );
+      });
+    }
+
+    describe("1. Notification Preferences Schema & Compatibility", () => {
+      it("allows user update with eventRsvps and eventCancellations booleans", async () => {
+        const context = contextFor(aliceUid);
+        await assertSucceeds(
+          userRef(context, aliceUid).update({
+            notificationPreferences: {
+              connectionRequests: true,
+              connectionAccepted: true,
+              eventRsvps: false,
+              eventCancellations: true,
+            },
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("allows partial user preference update with only eventRsvps", async () => {
+        const context = contextFor(aliceUid);
+        await assertSucceeds(
+          userRef(context, aliceUid).update({
+            notificationPreferences: {
+              eventRsvps: false,
+            },
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("rejects non-boolean eventRsvps update", async () => {
+        const context = contextFor(aliceUid);
+        await expectPermissionDenied(() =>
+          userRef(context, aliceUid).update({
+            notificationPreferences: {
+              eventRsvps: "disabled",
+            },
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("rejects unknown preference keys on update", async () => {
+        const context = contextFor(aliceUid);
+        await expectPermissionDenied(() =>
+          userRef(context, aliceUid).update({
+            notificationPreferences: {
+              pushNotifications: true,
+            },
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+    });
+
+    describe("2. Atomic Event Cancellation and Ledger Creation (Section 7.A)", () => {
+      beforeEach(async () => {
+        await seedEventDoc("m23-cancel-event-1", aliceUid, "published");
+      });
+
+      it("valid event cancellation and matching ledger creation succeed atomically", async () => {
+        const bob = contextFor(bobUid);
+        const db = bob.firestore();
+        const batch = db.batch();
+
+        batch.update(eventRef(bob, "m23-cancel-event-1"), {
+          status: "cancelled",
+          updatedAt: serverTimestamp(),
+        });
+        batch.set(deliveryLedgerRef(bob, "m23-cancel-event-1"), {
+          ...eventNotificationDeliveryFixture(
+            "m23-cancel-event-1",
+            bobUid,
+            APEX_CAMPUS_ID,
+            "apex-ai-club",
+            { cycleId: "cycle_init_1234567890" }
+          ),
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+
+        await assertSucceeds(batch.commit());
+      });
+
+      it("cancellation without matching ledger write is rejected", async () => {
+        const bob = contextFor(bobUid);
+        await expectPermissionDenied(() =>
+          eventRef(bob, "m23-cancel-event-1").update({
+            status: "cancelled",
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("ledger creation without event cancellation in the batch is rejected", async () => {
+        const bob = contextFor(bobUid);
+        await expectPermissionDenied(() =>
+          deliveryLedgerRef(bob, "m23-cancel-event-1").set({
+            ...eventNotificationDeliveryFixture(
+              "m23-cancel-event-1",
+              bobUid,
+              APEX_CAMPUS_ID,
+              "apex-ai-club",
+              { cycleId: "cycle_init_1234567890" }
+            ),
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("mismatched event ID between event and ledger is rejected", async () => {
+        const bob = contextFor(bobUid);
+        const db = bob.firestore();
+        const batch = db.batch();
+
+        batch.update(eventRef(bob, "m23-cancel-event-1"), {
+          status: "cancelled",
+          updatedAt: serverTimestamp(),
+        });
+        batch.set(deliveryLedgerRef(bob, "m23-cancel-event-1"), {
+          ...eventNotificationDeliveryFixture(
+            "m23-cancel-event-1",
+            bobUid,
+            APEX_CAMPUS_ID,
+            "apex-ai-club",
+            { eventId: "m23-mismatched-event", cycleId: "cycle_init_1234567890" }
+          ),
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+
+        await expectPermissionDenied(() => batch.commit());
+      });
+
+      it("mismatched campus between event and ledger is rejected", async () => {
+        const bob = contextFor(bobUid);
+        const db = bob.firestore();
+        const batch = db.batch();
+
+        batch.update(eventRef(bob, "m23-cancel-event-1"), {
+          status: "cancelled",
+          updatedAt: serverTimestamp(),
+        });
+        batch.set(deliveryLedgerRef(bob, "m23-cancel-event-1"), {
+          ...eventNotificationDeliveryFixture(
+            "m23-cancel-event-1",
+            bobUid,
+            ST_JUDE_CAMPUS_ID,
+            "apex-ai-club",
+            { cycleId: "cycle_init_1234567890" }
+          ),
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+
+        await expectPermissionDenied(() => batch.commit());
+      });
+
+      it("mismatched community between event and ledger is rejected", async () => {
+        const bob = contextFor(bobUid);
+        const db = bob.firestore();
+        const batch = db.batch();
+
+        batch.update(eventRef(bob, "m23-cancel-event-1"), {
+          status: "cancelled",
+          updatedAt: serverTimestamp(),
+        });
+        batch.set(deliveryLedgerRef(bob, "m23-cancel-event-1"), {
+          ...eventNotificationDeliveryFixture(
+            "m23-cancel-event-1",
+            bobUid,
+            APEX_CAMPUS_ID,
+            "other-club",
+            { cycleId: "cycle_init_1234567890" }
+          ),
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+
+        await expectPermissionDenied(() => batch.commit());
+      });
+
+      it("forged actor profile on ledger creation is rejected", async () => {
+        const bob = contextFor(bobUid);
+        const db = bob.firestore();
+        const batch = db.batch();
+
+        batch.update(eventRef(bob, "m23-cancel-event-1"), {
+          status: "cancelled",
+          updatedAt: serverTimestamp(),
+        });
+        batch.set(deliveryLedgerRef(bob, "m23-cancel-event-1"), {
+          ...eventNotificationDeliveryFixture(
+            "m23-cancel-event-1",
+            bobUid,
+            APEX_CAMPUS_ID,
+            "apex-ai-club",
+            { actorName: "Forged Bob Name", cycleId: "cycle_init_1234567890" }
+          ),
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+
+        await expectPermissionDenied(() => batch.commit());
+      });
+
+      it("actorId not matching request.auth.uid on ledger creation is rejected", async () => {
+        const bob = contextFor(bobUid);
+        const db = bob.firestore();
+        const batch = db.batch();
+
+        batch.update(eventRef(bob, "m23-cancel-event-1"), {
+          status: "cancelled",
+          updatedAt: serverTimestamp(),
+        });
+        batch.set(deliveryLedgerRef(bob, "m23-cancel-event-1"), {
+          ...eventNotificationDeliveryFixture(
+            "m23-cancel-event-1",
+            aliceUid,
+            APEX_CAMPUS_ID,
+            "apex-ai-club",
+            { cycleId: "cycle_init_1234567890" }
+          ),
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+
+        await expectPermissionDenied(() => batch.commit());
+      });
+
+      it("non-admin regular member cannot cancel event and create ledger", async () => {
+        const carol = contextFor(carolUid);
+        const db = carol.firestore();
+        const batch = db.batch();
+
+        batch.update(eventRef(carol, "m23-cancel-event-1"), {
+          status: "cancelled",
+          updatedAt: serverTimestamp(),
+        });
+        batch.set(deliveryLedgerRef(carol, "m23-cancel-event-1"), {
+          ...eventNotificationDeliveryFixture(
+            "m23-cancel-event-1",
+            carolUid,
+            APEX_CAMPUS_ID,
+            "apex-ai-club",
+            { cycleId: "cycle_init_1234567890" }
+          ),
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+
+        await expectPermissionDenied(() => batch.commit());
+      });
+
+      it("initial ledger with status other than pending is rejected", async () => {
+        const bob = contextFor(bobUid);
+        const db = bob.firestore();
+        const batch = db.batch();
+
+        batch.update(eventRef(bob, "m23-cancel-event-1"), {
+          status: "cancelled",
+          updatedAt: serverTimestamp(),
+        });
+        batch.set(deliveryLedgerRef(bob, "m23-cancel-event-1"), {
+          ...eventNotificationDeliveryFixture(
+            "m23-cancel-event-1",
+            bobUid,
+            APEX_CAMPUS_ID,
+            "apex-ai-club",
+            { status: "completed", cycleId: "cycle_init_1234567890" }
+          ),
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+
+        await expectPermissionDenied(() => batch.commit());
+      });
+
+      it("initial ledger with cycleId shorter than 10 characters is rejected", async () => {
+        const bob = contextFor(bobUid);
+        const db = bob.firestore();
+        const batch = db.batch();
+
+        batch.update(eventRef(bob, "m23-cancel-event-1"), {
+          status: "cancelled",
+          updatedAt: serverTimestamp(),
+        });
+        batch.set(deliveryLedgerRef(bob, "m23-cancel-event-1"), {
+          ...eventNotificationDeliveryFixture(
+            "m23-cancel-event-1",
+            bobUid,
+            APEX_CAMPUS_ID,
+            "apex-ai-club",
+            { cycleId: "short" }
+          ),
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+
+        await expectPermissionDenied(() => batch.commit());
+      });
+    });
+
+    describe("3. Delivery Ledger Authorization, Checkpoint CAS & State Machine (Section 7.B)", () => {
+      beforeEach(async () => {
+        await seedEventDoc("m23-ledger-event", aliceUid, "cancelled");
+        await seedLedgerDoc("m23-ledger-event", aliceUid, "cycle_test_1234567890", "pending", {
+          checkpointVersion: 0,
+          processedCount: 0,
+        });
+      });
+
+      it("unauthenticated user cannot read ledger", async () => {
+        await expectPermissionDenied(() =>
+          deliveryLedgerRef(unauthenticated(), "m23-ledger-event").get()
+        );
+        await expectPermissionDenied(() =>
+          deliveryLedgerRef(unauthenticated(), "nonexistent-event").get()
+        );
+      });
+
+      it("unrelated student cannot read existing ledger", async () => {
+        const david = contextFor(davidUid);
+        await expectPermissionDenied(() =>
+          deliveryLedgerRef(david, "m23-ledger-event").get()
+        );
+      });
+
+      it("cross-campus student cannot read existing foreign-campus ledger", async () => {
+        const eve = contextFor(eveUid);
+        await expectPermissionDenied(() =>
+          deliveryLedgerRef(eve, "m23-ledger-event").get()
+        );
+      });
+
+      it("authorized community admin or actor can read existing ledger", async () => {
+        const alice = contextFor(aliceUid);
+        const bob = contextFor(bobUid);
+        await assertSucceeds(deliveryLedgerRef(alice, "m23-ledger-event").get());
+        await assertSucceeds(deliveryLedgerRef(bob, "m23-ledger-event").get());
+      });
+
+      it("authorized manager can read existing orphaned ledger after event deletion", async () => {
+        await seedEventDoc("m23-deleted-event", aliceUid, "cancelled");
+        await seedLedgerDoc("m23-deleted-event", aliceUid, "cycle_del_1234567890", "superseded", {
+          checkpointVersion: 1,
+          processedCount: 2,
+        });
+        // Delete parent event
+        await testEnvironment.withSecurityRulesDisabled(async (context) => {
+          await context.firestore().collection("events").doc("m23-deleted-event").delete();
+        });
+
+        const alice = contextFor(aliceUid);
+        const snap = await assertSucceeds(deliveryLedgerRef(alice, "m23-deleted-event").get());
+        expect(snap.exists).toBe(true);
+        expect(snap.data().status).toBe("superseded");
+      });
+
+      it("authorized manager can read nonexistent ledger for an event they manage", async () => {
+        await seedEventDoc("m23-alice-managed-event", aliceUid, "published");
+        const alice = contextFor(aliceUid);
+        const snap = await assertSucceeds(
+          deliveryLedgerRef(alice, "m23-alice-managed-event").get()
+        );
+        expect(snap.exists).toBe(false);
+      });
+
+      it("unauthorized user cannot probe nonexistent ledger (no cross-campus existence disclosure)", async () => {
+        const eve = contextFor(eveUid);
+        const david = contextFor(davidUid);
+        // Existing foreign-campus ledger is denied
+        await expectPermissionDenied(() =>
+          deliveryLedgerRef(eve, "m23-ledger-event").get()
+        );
+        // Nonexistent ledger on another campus is ALSO denied (no existence oracle)
+        await expectPermissionDenied(() =>
+          deliveryLedgerRef(eve, "m23-nonexistent-event").get()
+        );
+        // Same-campus unauthorized student reading nonexistent ledger is ALSO denied
+        await expectPermissionDenied(() =>
+          deliveryLedgerRef(david, "m23-nonexistent-event").get()
+        );
+      });
+
+      it("event creator without active leadership role cannot read existing ledger cancelled by another manager", async () => {
+        // Event created by Carol (regular member), cancelled by Alice (admin)
+        await seedEventDoc("m23-carol-event-existing", carolUid, "cancelled");
+        await seedLedgerDoc("m23-carol-event-existing", aliceUid, "cycle_carol_existing1", "pending");
+
+        const carol = contextFor(carolUid);
+        await expectPermissionDenied(() =>
+          deliveryLedgerRef(carol, "m23-carol-event-existing").get()
+        );
+      });
+
+      it("event creator without active leadership role cannot read nonexistent ledger for an event they created", async () => {
+        // Event created by Carol (regular member), published, no ledger exists
+        await seedEventDoc("m23-carol-event-nonexistent", carolUid, "published");
+
+        const carol = contextFor(carolUid);
+        await expectPermissionDenied(() =>
+          deliveryLedgerRef(carol, "m23-carol-event-nonexistent").get()
+        );
+      });
+
+      it("demoted creator who was the cancelling actor retains read access to existing signed ledger", async () => {
+        // Carol cancelled the event when she was leader, then was demoted to regular member
+        await seedEventDoc("m23-carol-actor-ledger", carolUid, "cancelled");
+        await seedLedgerDoc("m23-carol-actor-ledger", carolUid, "cycle_carol_actor1", "pending");
+
+        const carol = contextFor(carolUid);
+        const snap = await assertSucceeds(
+          deliveryLedgerRef(carol, "m23-carol-actor-ledger").get()
+        );
+        expect(snap.exists).toBe(true);
+        expect(snap.data().actorId).toBe(carolUid);
+      });
+
+      it("point-listing / collection query on delivery ledgers is denied", async () => {
+        const alice = contextFor(aliceUid);
+        await expectPermissionDenied(() =>
+          alice.firestore().collection("eventNotificationDeliveries").get()
+        );
+      });
+
+      it("ledger hard deletion is strictly denied", async () => {
+        const alice = contextFor(aliceUid);
+        await expectPermissionDenied(() =>
+          deliveryLedgerRef(alice, "m23-ledger-event").delete()
+        );
+      });
+
+      it("valid checkpoint update advancing version by exactly 1 succeeds", async () => {
+        const bob = contextFor(bobUid);
+        await assertSucceeds(
+          deliveryLedgerRef(bob, "m23-ledger-event").update({
+            status: "in_progress",
+            checkpointVersion: 1,
+            lastProcessedRsvpId: "m23-ledger-event_carol",
+            processedCount: 1,
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("checkpoint update attempting to skip version (0 to 2) is rejected", async () => {
+        const bob = contextFor(bobUid);
+        await expectPermissionDenied(() =>
+          deliveryLedgerRef(bob, "m23-ledger-event").update({
+            status: "in_progress",
+            checkpointVersion: 2,
+            processedCount: 1,
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("stale checkpoint update attempting to reuse same version (0 to 0) is rejected", async () => {
+        const bob = contextFor(bobUid);
+        await expectPermissionDenied(() =>
+          deliveryLedgerRef(bob, "m23-ledger-event").update({
+            status: "in_progress",
+            checkpointVersion: 0,
+            processedCount: 1,
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("checkpoint update decreasing processedCount is rejected", async () => {
+        await seedLedgerDoc("m23-ledger-event", aliceUid, "cycle_test_1234567890", "in_progress", {
+          checkpointVersion: 1,
+          processedCount: 5,
+        });
+
+        const bob = contextFor(bobUid);
+        await expectPermissionDenied(() =>
+          deliveryLedgerRef(bob, "m23-ledger-event").update({
+            checkpointVersion: 2,
+            processedCount: 3,
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("checkpoint update attempting to mutate immutable cycleId is rejected", async () => {
+        const bob = contextFor(bobUid);
+        await expectPermissionDenied(() =>
+          deliveryLedgerRef(bob, "m23-ledger-event").update({
+            cycleId: "cycle_tampered_1234567890",
+            checkpointVersion: 1,
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("checkpoint update injecting unknown fields is rejected", async () => {
+        const bob = contextFor(bobUid);
+        await expectPermissionDenied(() =>
+          deliveryLedgerRef(bob, "m23-ledger-event").update({
+            checkpointVersion: 1,
+            status: "in_progress",
+            processedCount: 1,
+            injectedField: "malicious",
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("checkpoint update transitioning status to completed succeeds", async () => {
+        await seedLedgerDoc("m23-ledger-event", aliceUid, "cycle_test_1234567890", "in_progress", {
+          checkpointVersion: 1,
+          processedCount: 5,
+        });
+
+        const bob = contextFor(bobUid);
+        await assertSucceeds(
+          deliveryLedgerRef(bob, "m23-ledger-event").update({
+            status: "completed",
+            checkpointVersion: 2,
+            processedCount: 5,
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+    });
+
+    describe("4. Repeat Cancellation & Republication Supersession (Section 7.A & 7.C)", () => {
+      beforeEach(async () => {
+        await seedEventDoc("m23-repub-event", aliceUid, "cancelled");
+        await seedLedgerDoc("m23-repub-event", aliceUid, "cycle_repub_1234567890", "in_progress", {
+          checkpointVersion: 1,
+          processedCount: 3,
+        });
+      });
+
+      it("atomic republishing updates event to published and ledger to superseded", async () => {
+        const bob = contextFor(bobUid);
+        const db = bob.firestore();
+        const batch = db.batch();
+
+        batch.update(eventRef(bob, "m23-repub-event"), {
+          status: "published",
+          updatedAt: serverTimestamp(),
+        });
+        batch.update(deliveryLedgerRef(bob, "m23-repub-event"), {
+          status: "superseded",
+          updatedAt: serverTimestamp(),
+        });
+
+        await assertSucceeds(batch.commit());
+      });
+
+      it("lazy supersession of ledger succeeds after event is already published", async () => {
+        await testEnvironment.withSecurityRulesDisabled(async (context) => {
+          await context
+            .firestore()
+            .collection("events")
+            .doc("m23-repub-event")
+            .update({ status: "published" });
+        });
+
+        const bob = contextFor(bobUid);
+        await assertSucceeds(
+          deliveryLedgerRef(bob, "m23-repub-event").update({
+            status: "superseded",
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("atomic event deletion and ledger supersession succeeds for community admin", async () => {
+        const alice = contextFor(aliceUid);
+        const db = alice.firestore();
+        const batch = db.batch();
+
+        batch.delete(eventRef(alice, "m23-repub-event"));
+        batch.update(deliveryLedgerRef(alice, "m23-repub-event"), {
+          status: "superseded",
+          updatedAt: serverTimestamp(),
+        });
+
+        await assertSucceeds(batch.commit());
+      });
+
+      it("lazy supersession of ledger succeeds after event is already deleted", async () => {
+        await testEnvironment.withSecurityRulesDisabled(async (context) => {
+          await context
+            .firestore()
+            .collection("events")
+            .doc("m23-repub-event")
+            .delete();
+        });
+
+        const bob = contextFor(bobUid);
+        await assertSucceeds(
+          deliveryLedgerRef(bob, "m23-repub-event").update({
+            status: "superseded",
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("checkpoint update fails-closed once event is deleted", async () => {
+        await testEnvironment.withSecurityRulesDisabled(async (context) => {
+          await context
+            .firestore()
+            .collection("events")
+            .doc("m23-repub-event")
+            .delete();
+        });
+
+        const bob = contextFor(bobUid);
+        await expectPermissionDenied(() =>
+          deliveryLedgerRef(bob, "m23-repub-event").update({
+            checkpointVersion: 2,
+            processedCount: 4,
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("checkpoint update fails-closed once event is published", async () => {
+        await testEnvironment.withSecurityRulesDisabled(async (context) => {
+          await context
+            .firestore()
+            .collection("events")
+            .doc("m23-repub-event")
+            .update({ status: "published" });
+        });
+
+        const bob = contextFor(bobUid);
+        await expectPermissionDenied(() =>
+          deliveryLedgerRef(bob, "m23-repub-event").update({
+            checkpointVersion: 2,
+            processedCount: 4,
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("repeat cancellation with fresh cycleId succeeds after event was republished", async () => {
+        await testEnvironment.withSecurityRulesDisabled(async (context) => {
+          const db = context.firestore();
+          await db.collection("events").doc("m23-repub-event").update({ status: "published" });
+          await db.collection("eventNotificationDeliveries").doc("m23-repub-event").update({ status: "superseded" });
+        });
+
+        const alice = contextFor(aliceUid);
+        const db = alice.firestore();
+        const batch = db.batch();
+
+        batch.update(eventRef(alice, "m23-repub-event"), {
+          status: "cancelled",
+          updatedAt: serverTimestamp(),
+        });
+        batch.update(deliveryLedgerRef(alice, "m23-repub-event"), {
+          cycleId: "cycle_second_9876543210",
+          actorId: aliceUid,
+          actorName: "Alice Test",
+          actorAvatar: null,
+          status: "pending",
+          checkpointVersion: 0,
+          lastProcessedRsvpId: null,
+          processedCount: 0,
+          updatedAt: serverTimestamp(),
+        });
+
+        await assertSucceeds(batch.commit());
+      });
+
+      it("repeat cancellation reusing identical cycleId is rejected", async () => {
+        await testEnvironment.withSecurityRulesDisabled(async (context) => {
+          const db = context.firestore();
+          await db.collection("events").doc("m23-repub-event").update({ status: "published" });
+          await db.collection("eventNotificationDeliveries").doc("m23-repub-event").update({ status: "superseded" });
+        });
+
+        const alice = contextFor(aliceUid);
+        const db = alice.firestore();
+        const batch = db.batch();
+
+        batch.update(eventRef(alice, "m23-repub-event"), {
+          status: "cancelled",
+          updatedAt: serverTimestamp(),
+        });
+        batch.update(deliveryLedgerRef(alice, "m23-repub-event"), {
+          cycleId: "cycle_repub_1234567890",
+          actorId: aliceUid,
+          actorName: "Alice Test",
+          actorAvatar: null,
+          status: "pending",
+          checkpointVersion: 0,
+          lastProcessedRsvpId: null,
+          processedCount: 0,
+          updatedAt: serverTimestamp(),
+        });
+
+        await expectPermissionDenied(() => batch.commit());
+      });
+
+      it("attempting repeat cancellation update while previous cycle is still in_progress is rejected", async () => {
+        await testEnvironment.withSecurityRulesDisabled(async (context) => {
+          await context.firestore().collection("events").doc("m23-repub-event").update({ status: "published" });
+        });
+
+        const alice = contextFor(aliceUid);
+        const db = alice.firestore();
+        const batch = db.batch();
+
+        batch.update(eventRef(alice, "m23-repub-event"), {
+          status: "cancelled",
+          updatedAt: serverTimestamp(),
+        });
+        batch.update(deliveryLedgerRef(alice, "m23-repub-event"), {
+          cycleId: "cycle_second_9876543210",
+          status: "pending",
+          checkpointVersion: 0,
+          processedCount: 0,
+          updatedAt: serverTimestamp(),
+        });
+
+        await expectPermissionDenied(() => batch.commit());
+      });
+    });
+
+    describe("5. Event RSVP Notification Authorization (Section 7.D)", () => {
+      beforeEach(async () => {
+        await seedEventDoc("m23-rsvp-event", aliceUid, "published", {
+          title: "Apex Tech Symposium",
+        });
+      });
+
+      it("valid atomic RSVP and organizer notification creation succeeds", async () => {
+        const carol = contextFor(carolUid);
+        const db = carol.firestore();
+        const batch = db.batch();
+
+        const rsvpId = `m23-rsvp-event_${carolUid}`;
+        batch.set(eventRsvpRef(carol, rsvpId), {
+          id: rsvpId,
+          eventId: "m23-rsvp-event",
+          campusId: APEX_CAMPUS_ID,
+          userId: carolUid,
+          createdAt: serverTimestamp(),
+        });
+        batch.set(
+          notificationRef(carol, aliceUid, `rsvp_m23-rsvp-event_${carolUid}`),
+          {
+            ...eventRsvpNotificationFixture(aliceUid, carolUid, "m23-rsvp-event", {
+              referenceTitle: "Apex Tech Symposium",
+            }),
+            createdAt: serverTimestamp(),
+          }
+        );
+
+        await assertSucceeds(batch.commit());
+      });
+
+      it("creating RSVP notification without atomic RSVP document creation is denied", async () => {
+        const carol = contextFor(carolUid);
+        await expectPermissionDenied(() =>
+          notificationRef(carol, aliceUid, `rsvp_m23-rsvp-event_${carolUid}`).set({
+            ...eventRsvpNotificationFixture(aliceUid, carolUid, "m23-rsvp-event"),
+            createdAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("self-notification (creator sending RSVP notice to themselves) is denied", async () => {
+        const alice = contextFor(aliceUid);
+        const db = alice.firestore();
+        const batch = db.batch();
+
+        const rsvpId = `m23-rsvp-event_${aliceUid}`;
+        batch.set(eventRsvpRef(alice, rsvpId), {
+          id: rsvpId,
+          eventId: "m23-rsvp-event",
+          campusId: APEX_CAMPUS_ID,
+          userId: aliceUid,
+          createdAt: serverTimestamp(),
+        });
+        batch.set(
+          notificationRef(alice, aliceUid, `rsvp_m23-rsvp-event_${aliceUid}`),
+          {
+            ...eventRsvpNotificationFixture(aliceUid, aliceUid, "m23-rsvp-event"),
+            createdAt: serverTimestamp(),
+          }
+        );
+
+        await expectPermissionDenied(() => batch.commit());
+      });
+
+      it("including cycleId on event_rsvp notification is denied", async () => {
+        const carol = contextFor(carolUid);
+        const db = carol.firestore();
+        const batch = db.batch();
+
+        const rsvpId = `m23-rsvp-event_${carolUid}`;
+        batch.set(eventRsvpRef(carol, rsvpId), {
+          id: rsvpId,
+          eventId: "m23-rsvp-event",
+          campusId: APEX_CAMPUS_ID,
+          userId: carolUid,
+          createdAt: serverTimestamp(),
+        });
+        batch.set(
+          notificationRef(carol, aliceUid, `rsvp_m23-rsvp-event_${carolUid}`),
+          {
+            ...eventRsvpNotificationFixture(aliceUid, carolUid, "m23-rsvp-event", {
+              cycleId: "forbidden_cycle_id",
+            }),
+            createdAt: serverTimestamp(),
+          }
+        );
+
+        await expectPermissionDenied(() => batch.commit());
+      });
+
+      it("RSVP notification with mismatched referenceTitle is denied", async () => {
+        const carol = contextFor(carolUid);
+        const db = carol.firestore();
+        const batch = db.batch();
+
+        const rsvpId = `m23-rsvp-event_${carolUid}`;
+        batch.set(eventRsvpRef(carol, rsvpId), {
+          id: rsvpId,
+          eventId: "m23-rsvp-event",
+          campusId: APEX_CAMPUS_ID,
+          userId: carolUid,
+          createdAt: serverTimestamp(),
+        });
+        batch.set(
+          notificationRef(carol, aliceUid, `rsvp_m23-rsvp-event_${carolUid}`),
+          {
+            ...eventRsvpNotificationFixture(aliceUid, carolUid, "m23-rsvp-event", {
+              referenceTitle: "Mismatched Forged Title",
+            }),
+            createdAt: serverTimestamp(),
+          }
+        );
+
+        await expectPermissionDenied(() => batch.commit());
+      });
+
+      it("cross-campus student cannot create event RSVP notification", async () => {
+        const eve = contextFor(eveUid);
+        const db = eve.firestore();
+        const batch = db.batch();
+
+        const rsvpId = `m23-rsvp-event_${eveUid}`;
+        batch.set(eventRsvpRef(eve, rsvpId), {
+          id: rsvpId,
+          eventId: "m23-rsvp-event",
+          campusId: ST_JUDE_CAMPUS_ID,
+          userId: eveUid,
+          createdAt: serverTimestamp(),
+        });
+        batch.set(
+          notificationRef(eve, aliceUid, `rsvp_m23-rsvp-event_${eveUid}`),
+          {
+            ...eventRsvpNotificationFixture(aliceUid, eveUid, "m23-rsvp-event"),
+            createdAt: serverTimestamp(),
+          }
+        );
+
+        await expectPermissionDenied(() => batch.commit());
+      });
+    });
+
+    describe("6. Event Cancelled Notification Authorization & Multi-Admin Resumption (Section 7.C)", () => {
+      const cycleId = "cycle_canc_1234567890";
+
+      beforeEach(async () => {
+        await seedEventDoc("m23-canc-event", aliceUid, "cancelled", {
+          title: "Annual Campus AI Hackathon",
+        });
+        await seedLedgerDoc("m23-canc-event", aliceUid, cycleId, "in_progress", {
+          checkpointVersion: 1,
+          processedCount: 0,
+        });
+        await seedRsvpDoc(`m23-canc-event_${davidUid}`, "m23-canc-event", davidUid);
+        await seedRsvpDoc(`m23-canc-event_${carolUid}`, "m23-canc-event", carolUid);
+      });
+
+      it("original cancelling admin (alice) can write cancellation notice to attendee", async () => {
+        const alice = contextFor(aliceUid);
+        await assertSucceeds(
+          notificationRef(alice, davidUid, `cancel_m23-canc-event_${cycleId}`).set({
+            ...eventCancelledNotificationFixture(davidUid, aliceUid, "m23-canc-event", cycleId, {
+              referenceTitle: "Annual Campus AI Hackathon",
+            }),
+            createdAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("co-administrator (bob) resuming delivery can write notice bound to original actor (alice)", async () => {
+        const bob = contextFor(bobUid);
+        await assertSucceeds(
+          notificationRef(bob, carolUid, `cancel_m23-canc-event_${cycleId}`).set({
+            ...eventCancelledNotificationFixture(carolUid, aliceUid, "m23-canc-event", cycleId, {
+              referenceTitle: "Annual Campus AI Hackathon",
+            }),
+            createdAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("resuming admin attempting to replace ledger actor with their own identity is denied", async () => {
+        const bob = contextFor(bobUid);
+        await expectPermissionDenied(() =>
+          notificationRef(bob, carolUid, `cancel_m23-canc-event_${cycleId}`).set({
+            ...eventCancelledNotificationFixture(carolUid, bobUid, "m23-canc-event", cycleId),
+            createdAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("unauthorized non-admin student cannot write cancellation notifications", async () => {
+        const david = contextFor(davidUid);
+        await expectPermissionDenied(() =>
+          notificationRef(david, carolUid, `cancel_m23-canc-event_${cycleId}`).set({
+            ...eventCancelledNotificationFixture(carolUid, aliceUid, "m23-canc-event", cycleId),
+            createdAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("writing notice to user without an RSVP is rejected", async () => {
+        const alice = contextFor(aliceUid);
+        await expectPermissionDenied(() =>
+          notificationRef(alice, "unregistered-user", `cancel_m23-canc-event_${cycleId}`).set({
+            ...eventCancelledNotificationFixture("unregistered-user", aliceUid, "m23-canc-event", cycleId),
+            createdAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("notification with mismatched cycleId is rejected", async () => {
+        const alice = contextFor(aliceUid);
+        await expectPermissionDenied(() =>
+          notificationRef(alice, davidUid, "cancel_m23-canc-event_wrong_cycle").set({
+            ...eventCancelledNotificationFixture(davidUid, aliceUid, "m23-canc-event", "wrong_cycle"),
+            createdAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("writing cancellation notice is rejected once ledger is superseded", async () => {
+        await seedLedgerDoc("m23-canc-event", aliceUid, cycleId, "superseded");
+
+        const alice = contextFor(aliceUid);
+        await expectPermissionDenied(() =>
+          notificationRef(alice, davidUid, `cancel_m23-canc-event_${cycleId}`).set({
+            ...eventCancelledNotificationFixture(davidUid, aliceUid, "m23-canc-event", cycleId),
+            createdAt: serverTimestamp(),
+          })
+        );
+      });
+
+      it("writing cancellation notice fails-closed if event status is published", async () => {
+        await seedEventDoc("m23-canc-event", aliceUid, "published");
+
+        const alice = contextFor(aliceUid);
+        await expectPermissionDenied(() =>
+          notificationRef(alice, davidUid, `cancel_m23-canc-event_${cycleId}`).set({
+            ...eventCancelledNotificationFixture(davidUid, aliceUid, "m23-canc-event", cycleId),
+            createdAt: serverTimestamp(),
+          })
+        );
+      });
+    });
+
+    describe("7. Recipient Privacy, Read-State Updates & Legacy Compatibility (Section 7.E)", () => {
+      const cycleId = "cycle_compat_1234567890";
+
+      beforeEach(async () => {
+        await seedEventDoc("m23-compat-event", aliceUid, "cancelled");
+        await seedLedgerDoc("m23-compat-event", aliceUid, cycleId, "in_progress");
+        await seedRsvpDoc(`m23-compat-event_${davidUid}`, "m23-compat-event", davidUid);
+
+        await testEnvironment.withSecurityRulesDisabled(async (context) => {
+          await context
+            .firestore()
+            .collection("users")
+            .doc(davidUid)
+            .collection("notifications")
+            .doc(`cancel_m23-compat-event_${cycleId}`)
+            .set(
+              eventCancelledNotificationFixture(davidUid, aliceUid, "m23-compat-event", cycleId)
+            );
+        });
+      });
+
+      it("recipient can point-read their own notification", async () => {
+        const david = contextFor(davidUid);
+        await assertSucceeds(
+          notificationRef(david, davidUid, `cancel_m23-compat-event_${cycleId}`).get()
+        );
+      });
+
+      it("unrelated user cannot point-read recipient's notification", async () => {
+        const carol = contextFor(carolUid);
+        await expectPermissionDenied(() =>
+          notificationRef(carol, davidUid, `cancel_m23-compat-event_${cycleId}`).get()
+        );
+      });
+
+      it("recipient can update isRead to true", async () => {
+        const david = contextFor(davidUid);
+        await assertSucceeds(
+          notificationRef(david, davidUid, `cancel_m23-compat-event_${cycleId}`).update({
+            isRead: true,
+          })
+        );
+      });
+
+      it("recipient attempting to modify actorName on notification update is rejected", async () => {
+        const david = contextFor(davidUid);
+        await expectPermissionDenied(() =>
+          notificationRef(david, davidUid, `cancel_m23-compat-event_${cycleId}`).update({
+            actorName: "Tampered Name",
+          })
+        );
+      });
+
+      it("other user attempting to mark recipient's notification as read is rejected", async () => {
+        const alice = contextFor(aliceUid);
+        await expectPermissionDenied(() =>
+          notificationRef(alice, davidUid, `cancel_m23-compat-event_${cycleId}`).update({
+            isRead: true,
+          })
+        );
+      });
+
+      it("recipient can delete notification from their inbox", async () => {
+        const david = contextFor(davidUid);
+        await assertSucceeds(
+          notificationRef(david, davidUid, `cancel_m23-compat-event_${cycleId}`).delete()
+        );
+      });
+
+      it("notification with referenceTitle exceeding 100 characters is rejected", async () => {
+        const alice = contextFor(aliceUid);
+        const tooLongTitle = "A".repeat(101);
+        await expectPermissionDenied(() =>
+          notificationRef(alice, davidUid, `cancel_m23-compat-event_${cycleId}`).set({
+            ...eventCancelledNotificationFixture(davidUid, aliceUid, "m23-compat-event", cycleId, {
+              referenceTitle: tooLongTitle,
+            }),
+            createdAt: serverTimestamp(),
+          })
+        );
+      });
+    });
+
+    describe("8. Access-Call Budget & Chunk Size (CHUNK_SIZE = 8) Verification (Section 7.F)", () => {
+      const chunkCycleId = "cycle_chunk_1234567890";
+      const chunkEventId = "m23-chunk-event";
+
+      beforeEach(async () => {
+        await seedEventDoc(chunkEventId, aliceUid, "cancelled", {
+          title: "Grand Campus Hackathon",
+        });
+        await seedLedgerDoc(chunkEventId, aliceUid, chunkCycleId, "in_progress", {
+          checkpointVersion: 0,
+          processedCount: 0,
+        });
+
+        for (const attUid of chunkAttendeeUids) {
+          await seedRsvpDoc(`${chunkEventId}_${attUid}`, chunkEventId, attUid);
+        }
+      });
+
+      it("checkpoint batch of exactly 8 notifications plus 1 ledger update commits within 20-lookup budget", async () => {
+        const bob = contextFor(bobUid);
+        const db = bob.firestore();
+        const batch = db.batch();
+
+        batch.update(deliveryLedgerRef(bob, chunkEventId), {
+          checkpointVersion: 1,
+          status: "in_progress",
+          processedCount: 8,
+          lastProcessedRsvpId: `${chunkEventId}_${chunkAttendeeUids[7]}`,
+          updatedAt: serverTimestamp(),
+        });
+
+        for (const attUid of chunkAttendeeUids) {
+          const notifId = `cancel_${chunkEventId}_${chunkCycleId}`;
+          batch.set(
+            notificationRef(bob, attUid, notifId),
+            {
+              ...eventCancelledNotificationFixture(attUid, aliceUid, chunkEventId, chunkCycleId, {
+                referenceTitle: "Grand Campus Hackathon",
+              }),
+              createdAt: serverTimestamp(),
+            }
+          );
+        }
+
+        await assertSucceeds(batch.commit());
       });
     });
   });

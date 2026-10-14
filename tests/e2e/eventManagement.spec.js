@@ -445,6 +445,7 @@ test.describe("Milestone 22 — Event Lifecycle Management E2E", () => {
       await page.goto(`/events/${isolatedId}`);
       await page.locator("[data-testid='manage-cancel-btn']").click();
       await page.locator("[data-testid='cancel-confirm-btn']").click();
+      await expect(page.locator("[data-testid='event-cancel-modal']")).not.toBeVisible();
       await expect(page.locator("[data-testid='event-cancelled-banner']")).toBeVisible();
       await logout(page);
 

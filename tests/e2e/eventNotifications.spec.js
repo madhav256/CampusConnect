@@ -270,6 +270,14 @@ test.describe("Milestone 23.4 — Event Notifications & Delivery Orchestration E
         });
     }
 
+    // Simulate attendee 2 explicitly dismissing/deleting their notification before recovery
+    await db
+      .collection("users")
+      .doc(chunk1AttendeeIds[1])
+      .collection("notifications")
+      .doc(`cancel_${eventId}_${cycleId}`)
+      .delete();
+
     // Seed reachable 'in_progress' delivery ledger representing the state after exactly 1 successful chunk (8 processed)
     const lastProcessedRsvpId = `${eventId}_${chunk1AttendeeIds[7]}`;
     await db.collection("eventNotificationDeliveries").doc(eventId).set({
@@ -326,7 +334,7 @@ test.describe("Milestone 23.4 — Event Notifications & Delivery Orchestration E
       expect(ledgerData.lastProcessedRsvpId).toBe(`${eventId}_${E2E_USERS.studentB.uid}`);
       expect(ledgerData.processedCount).toBe(9);
 
-      // 6. Verify Chunk 1 attendee read state was preserved and not reset or duplicated
+      // 6. Verify Chunk 1 attendee read state was preserved and deleted notifications not recreated
       const attendee1NotifSnap = await db
         .collection("users")
         .doc(chunk1AttendeeIds[0])
@@ -335,14 +343,24 @@ test.describe("Milestone 23.4 — Event Notifications & Delivery Orchestration E
         .get();
       expect(attendee1NotifSnap.data().isRead).toBe(true);
 
-      for (const attendeeId of chunk1AttendeeIds) {
+      const attendee2NotifSnap = await db
+        .collection("users")
+        .doc(chunk1AttendeeIds[1])
+        .collection("notifications")
+        .doc(`cancel_${eventId}_${cycleId}`)
+        .get();
+      expect(attendee2NotifSnap.exists).toBe(false);
+
+      for (let i = 0; i < chunk1AttendeeIds.length; i++) {
+        const attendeeId = chunk1AttendeeIds[i];
         const notifsSnap = await db
           .collection("users")
           .doc(attendeeId)
           .collection("notifications")
           .where("referenceId", "==", eventId)
           .get();
-        expect(notifsSnap.size).toBe(1);
+        // Attendee 2 deleted their notification, so they have 0; other attendees have 1
+        expect(notifsSnap.size).toBe(i === 1 ? 0 : 1);
       }
 
       // 7. Verify that a superseded cycle cannot resume
@@ -450,6 +468,136 @@ test.describe("Milestone 23.4 — Event Notifications & Delivery Orchestration E
         .collection("notifications")
         .doc(notifId)
         .delete();
+      await logout(page);
+    }
+  });
+
+  test("Journey 5: Live multi-chunk cancellation, republishing supersession, and cycle-isolated repeat cancellation", async ({
+    page,
+  }) => {
+    const eventId = "e2e-isolated-multichunk-repub-evt";
+    const eventTitle = "Multi-Chunk Robotics Showcase";
+
+    // 10 attendee UIDs: crossing the 8-recipient CHUNK_SIZE boundary (8 in Chunk 1, 2 in Chunk 2)
+    const attendeeIds = Array.from(
+      { length: 9 },
+      (_, i) => `e2e-multi-att-${String(i + 1).padStart(2, "0")}`
+    );
+    attendeeIds.push(E2E_USERS.studentB.uid);
+
+    await createIsolatedTestEvent({
+      id: eventId,
+      title: eventTitle,
+      status: "published",
+      createdBy: E2E_USERS.studentA.uid,
+      organizerName: E2E_USERS.studentA.displayName,
+      communityId: "apex-ai-club",
+      campusId: "apex-university",
+    });
+
+    // Seed 10 RSVPs
+    for (const attId of attendeeIds) {
+      await createTestEventRsvp(eventId, attId, "apex-university");
+    }
+
+    try {
+      // 1. Authenticate as Community Admin (Student A)
+      await loginAs(page, E2E_USERS.studentA);
+      await page.goto(`/events/${eventId}`);
+
+      // 2. Perform live cancellation with 10 attendees across 2 chunks (8 + 2)
+      await page.locator("[data-testid='manage-cancel-btn']").click();
+      const cancelModal = page.locator("[data-testid='event-cancel-modal']");
+      await expect(cancelModal).toBeVisible();
+
+      await page.locator("[data-testid='cancel-confirm-btn']").click();
+      await expect(cancelModal).not.toBeVisible();
+
+      // Verify delivery completed card displays all 10 attendees notified
+      const completedCard = page.locator("[data-testid='cancellation-delivery-completed']");
+      await expect(completedCard).toBeVisible();
+      await expect(completedCard).toContainText(
+        "Cancellation notifications delivered (10 attendees notified)."
+      );
+
+      // Verify Firestore ledger reached 'completed' with 10 processed
+      const ledgerSnap1 = await db.collection("eventNotificationDeliveries").doc(eventId).get();
+      const ledgerData1 = ledgerSnap1.data();
+      expect(ledgerData1.status).toBe("completed");
+      expect(ledgerData1.processedCount).toBe(10);
+      const cycleId1 = ledgerData1.cycleId;
+      expect(typeof cycleId1).toBe("string");
+      expect(cycleId1.length).toBeGreaterThanOrEqual(10);
+
+      // Verify attendee received notification for cycle 1
+      const studentBNotifCycle1 = await db
+        .collection("users")
+        .doc(E2E_USERS.studentB.uid)
+        .collection("notifications")
+        .doc(`cancel_${eventId}_${cycleId1}`)
+        .get();
+      expect(studentBNotifCycle1.exists).toBe(true);
+
+      // 3. Republish event: triggers atomic/lazy supersession of ledger
+      await page.locator("[data-testid='manage-republish-btn']").click();
+      const republishModal = page.locator("[data-testid='event-republish-modal']");
+      await expect(republishModal).toBeVisible();
+
+      await page.locator("[data-testid='republish-confirm-btn']").click();
+      await expect(republishModal).not.toBeVisible();
+
+      // Cancellation banner disappears and status badge returns to Upcoming
+      await expect(page.locator("[data-testid='event-cancelled-banner']")).not.toBeVisible();
+      await expect(page.locator("[data-testid='event-status-badge']")).toContainText("Upcoming");
+
+      // Verify ledger preserves completed audit status (or transitions to superseded if pending/in_progress)
+      const ledgerSnap2 = await db.collection("eventNotificationDeliveries").doc(eventId).get();
+      expect(["completed", "superseded"]).toContain(ledgerSnap2.data().status);
+
+      // 4. Second Cancellation: triggers fresh delivery cycle with isolated cycleId
+      await page.locator("[data-testid='manage-cancel-btn']").click();
+      await expect(cancelModal).toBeVisible();
+      await page.locator("[data-testid='cancel-confirm-btn']").click();
+      await expect(cancelModal).not.toBeVisible();
+
+      // Verify completion of cycle 2
+      await expect(completedCard).toBeVisible();
+      await expect(completedCard).toContainText(
+        "Cancellation notifications delivered (10 attendees notified)."
+      );
+
+      const ledgerSnap3 = await db.collection("eventNotificationDeliveries").doc(eventId).get();
+      const ledgerData3 = ledgerSnap3.data();
+      expect(ledgerData3.status).toBe("completed");
+      expect(ledgerData3.processedCount).toBe(10);
+      const cycleId2 = ledgerData3.cycleId;
+      expect(cycleId2).not.toBe(cycleId1);
+
+      // Verify attendee has distinct notifications for both cycles without corruption
+      const studentBNotifCycle2 = await db
+        .collection("users")
+        .doc(E2E_USERS.studentB.uid)
+        .collection("notifications")
+        .doc(`cancel_${eventId}_${cycleId2}`)
+        .get();
+      expect(studentBNotifCycle2.exists).toBe(true);
+
+      const allStudentBNotifs = await db
+        .collection("users")
+        .doc(E2E_USERS.studentB.uid)
+        .collection("notifications")
+        .where("referenceId", "==", eventId)
+        .get();
+      expect(allStudentBNotifs.size).toBe(2);
+    } finally {
+      for (const attId of attendeeIds) {
+        await deleteTestEventRsvp(eventId, attId);
+      }
+      await cleanupEventNotifications(eventId, [
+        E2E_USERS.studentA.uid,
+        ...attendeeIds,
+      ]);
+      await deleteIsolatedTestEvent(eventId);
       await logout(page);
     }
   });

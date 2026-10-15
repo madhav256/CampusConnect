@@ -1,6 +1,6 @@
 # CampusConnect Roadmap
 
-**Status:** Status-aware roadmap (Milestone 22 Delivered)
+**Status:** Status-aware roadmap (Milestone 23 Delivered)
 
 Checked items describe work that exists in the current repository. Unchecked items are proposed or deferred; they are not implemented merely because they appear here.
 
@@ -35,7 +35,9 @@ Checked items describe work that exists in the current repository. Unchecked ite
 - [x] Milestone 19: Student Communities (directory, detail, membership authority, community feed, moderation).
 - [x] Milestone 20: Campus Events (lifecycle, visibility tiers, discovery, community integration, event management).
 - [x] Milestone 21: Event RSVPs & Participation Discovery (RSVP lifecycle, attendee preview, Going tab, badges, resolution pipeline, error recovery).
-- [x] Automated test suites: 835 Vitest unit tests, 420 Firestore Emulator security rules tests, and 69 Playwright E2E browser tests passing.
+- [x] Milestone 22: Event Lifecycle Management (adaptive mutability, cancellation, republishing, hard delete, reactive timers).
+- [x] Milestone 23: Event Notifications & Resumable Cancellation Delivery (RSVP notifications, cancellation fan-out, delivery ledger, point-read security isolation).
+- [x] Automated test suites: 880 Vitest unit tests across 43 files, 486 Firestore Emulator security rules tests across 16 suites, and 74 Playwright E2E browser tests across 12 spec files passing.
 
 ## Current maintenance contract
 
@@ -109,6 +111,16 @@ Checked items describe work that exists in the current repository. Unchecked ite
 - [x] **22.3 Event Management Hooks & Service Integration:** `eventService.js` management methods, `useEventManagement` hook, transactional update/delete operations, and service/hook unit tests (`v22.3.0-event-management-hooks-integration`).
 - [x] **22.4 Event Management UI:** `EventManagementToolbar`, `EventEditModal`, `EventCancelModal`, `EventRepublishModal`, `EventDeleteModal`, integration into `EventDetail.jsx`, and UI unit test suite (`v22.4.0-event-management-ui`).
 - [x] **22.5 E2E Verification & Documentation Reconciliation:** End-to-end verification across 10 lifecycle scenarios (`eventManagement.spec.js`), safe deterministic fixture/membership helpers, full test suite verification (835 unit tests, 420 rules tests, 69 Playwright E2E tests), and complete documentation reconciliation.
+
+### Milestone 23 — Event Notifications & Resumable Cancellation Delivery (Delivered)
+
+- [x] **23.1 Architecture Audit, Lifecycle Enforcement & Delivery Contract Proposal:** Establish event notification contracts (`event_rsvp`, `event_cancelled`), 14-field delivery ledger schema, two-way atomic cancellation handshake, and chunked delivery architecture (`CHUNK_SIZE = 8`).
+- [x] **23.2 Firestore Security Rules & Delivery Ledger Security Authority:** Enforce delivery ledger permissions, atomic cancellation handshake, compare-and-set versioning (`checkpointVersion`), deterministic notification IDs (`cancel_${eventId}_${cycleId}`), recipient eligibility, and 486 security rules regression tests (`v23.2.0-event-notification-rules`).
+- [x] **23.3 Resumable Event Notification Delivery Service & Client Integration:** Implement `eventNotificationDeliveryService.js` with deterministic `documentId()` query ordering, cursor progression (`startAfter`), zero-attendee handling, and interruption recovery (`v23.3.0-event-notification-service`).
+- [x] **23.4 Presentation, Notification Preferences & E2E Verification:** Implement `EventDetail.jsx` cancellation delivery banner, notification preferences (`eventRsvps`, `eventCancellations`), durable `referenceTitle` rendering, and end-to-end regression journeys (`v23.4.0-event-notifications-ui`).
+- [x] **23.4.1 Notification Attribution & Realistic Recovery Verification:** Preserve original cancelling actor attribution during secondary administrator resumption, implement realistic delivery interruption recovery (`v23.4.1-notification-attribution-recovery`).
+- [x] **23.4.2 Delivery Ledger Point-Read Isolation Audit & Resolution:** Resolve cross-campus ledger existence-disclosure side-channel, enforce community leadership check for nonexistent ledger reads, and prevent creator authorization bypass (`v23.4.2-delivery-ledger-point-read-isolation`).
+- [x] **23.5 E2E Verification & Documentation Reconciliation:** Comprehensive E2E regression coverage across multi-chunk boundaries, deleted notification non-recreation, republishing supersession, and cycle-isolated repeat cancellation; reconcile all project documentation; verify complete test suites (880 unit tests across 43 files, 486 rules tests across 16 suites, 74 Playwright E2E tests across 12 spec files).
 
 ## Proposed next engineering milestones
 

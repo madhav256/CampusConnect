@@ -1,6 +1,6 @@
 # CampusConnect Features
 
-**Status:** Current implementation inventory (Milestone 22 Delivered)
+**Status:** Current implementation inventory (Milestone 23 Delivered)
 
 This document distinguishes shipped behavior from deferred ideas. A feature is marked implemented only when it exists in the current application source and active Firebase model.
 
@@ -99,21 +99,26 @@ The product uses the term “connection”; a separate friend-request/friendship
 - Dismiss a notification.
 - Inline accept/decline actions for incoming connection-request notifications.
 - Profile link for the notification actor.
+- Event deep-links and durable `referenceTitle` rendering for event notifications even if parent event is deleted.
 
-The active notification types are only:
+The active notification types are:
 
-- `connection_request`
-- `connection_accepted`
+- `connection_request`: connection request received from peer;
+- `connection_accepted`: connection request accepted by peer;
+- `event_rsvp`: attendee RSVP intent registered on an event created by the current user;
+- `event_cancelled`: registered campus event cancelled by community leadership with cancelling leader attribution.
 
-Like, comment, message, event, and generic social notifications are not implemented.
+Like, comment, message, and generic social notifications are not implemented.
 
 ### Settings and privacy controls
 
 - Settings page at `/settings`.
 - Read-only display of the authenticated email address.
 - Discoverability toggle for student search, maintained in atomic parity with `directoryIndex/{uid}`.
-- Connection-request notification preference.
-- Accepted-connection notification preference.
+- Connection-request notification preference (`connectionRequests`).
+- Accepted-connection notification preference (`connectionAccepted`).
+- Event RSVP notification preference (`eventRsvps`).
+- Event cancellation notification preference (`eventCancellations`).
 - Sign out.
 - Disabled account-deletion control explaining that backend cascade cleanup is deferred.
 
@@ -202,6 +207,22 @@ The discoverability toggle updates `users/{uid}` and atomically adds or removes 
   - Independent retry buttons for RSVP query failures and event resolution errors.
   - Context isolation across user authentication and campus changes, preventing stale cached resolutions.
 
+### Event Notifications & Resumable Cancellation Delivery (Milestone 23 Delivered)
+
+- **Event RSVP Notifications:**
+  - Automatically notifies event organizers upon attendee RSVP intent creation.
+  - Formatted with attendee name and avatar, referenced event title, and direct event deep-link.
+  - Suppressed from visible notifications and unread badges when organizer disables `eventRsvps` preference.
+- **Resumable Cancellation Notification Fan-Out:**
+  - Client-managed fan-out delivering cancellation notices to all confirmed attendees across chunks of 8 (`CHUNK_SIZE = 8`).
+  - Durable delivery state tracked in `eventNotificationDeliveries/{eventId}` with compare-and-set versioning (`checkpointVersion`).
+  - Real-time progress banner on `/events/:eventId` displaying delivery status, processed attendee counts, and completion confirmations.
+  - Interruption recovery allowing community leaders or original event creators to resume incomplete deliveries without duplicate notifications.
+  - Multi-administrator resumption preserving the original cancelling leader's actor attribution on all delivered notifications.
+  - Cancellation-cycle isolation: republishing supersedes pending cycles; subsequent cancellation creates a fresh, isolated cycle without reusing historical state.
+  - Suppressed from visible notifications and unread badges when recipient disables `eventCancellations` preference.
+  - Resilient UI rendering: deleted referenced events gracefully display durable `referenceTitle` snapshot.
+
 ### Interface and accessibility behavior
 
 - Campus Atelier paper/ink/terracotta visual language.
@@ -224,9 +245,9 @@ Settings and Notifications render a development-only `SecurityTestPanel`. The av
 
 Automated verification includes:
 
-- **835 Vitest unit tests** covering cutover, services, messaging, communities, events, event RSVPs, event management, normalization, hooks, and helper logic;
-- **420 Firestore Emulator security rules tests** across 15 suites, covering users, publicProfiles, directoryIndex, discoverability transitions, posts, comments, likes, connections, notifications, conversations, messages, communities, communityMembers, events, and eventRsvps;
-- **69 Playwright E2E browser tests** across 15 spec files executed against the Firebase Emulator suite, verifying authentication, feed, discovery, connections, messaging, communities, events, event RSVPs, and complete event lifecycle management.
+- **880 Vitest unit tests** across 43 files covering cutover, services, messaging, communities, events, event RSVPs, event management, event notifications, delivery ledgers, normalization, hooks, and helper logic;
+- **486 Firestore Emulator security rules tests** across 16 suites, covering users, publicProfiles, directoryIndex, discoverability transitions, posts, comments, likes, connections, notifications, conversations, messages, communities, communityMembers, events, eventRsvps, and eventNotificationDeliveries (including M23.4.2 point-read isolation);
+- **74 Playwright E2E browser tests** across 12 spec files executed against the Firebase Emulator suite, verifying authentication, feed, discovery, connections, messaging, mobile responsiveness, multi-tenancy, notifications, profile, communities, events, event RSVPs, complete event lifecycle management, and event notification delivery orchestration.
 
 ### Recruiter demo and seeding
 
@@ -244,7 +265,7 @@ The following ideas are intentionally outside the current MVP:
 - Image, file, or rich-media uploads.
 - Firebase Storage integration.
 - Group messaging, read receipts, typing indicators, or presence (minimal 1-to-1 private messaging is implemented).
-- Like, comment, message, event, or RSVP notifications.
+- Like, comment, or direct message notifications (connection and event notifications are implemented).
 - Email verification enforcement.
 - Password-change UI.
 - Account deletion and cascading cleanup.

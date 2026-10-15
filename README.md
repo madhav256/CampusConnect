@@ -55,9 +55,10 @@ The demo login is a normal unprivileged Firebase Auth account. The seeding scrip
 ### Notifications and settings
 
 - `/notifications` subscribes to the newest 30 recipient-scoped notifications.
-- Active notification types are connection requests and accepted connections.
+- Active notification types: connection requests, accepted connections, event RSVPs, and event cancellations.
+- Event notifications support deep-links and durable title rendering even if the referenced event is deleted.
 - Mark one/all as read, dismiss, filter all/unread, and act on incoming requests.
-- `/settings` manages search discoverability, connection notification preferences, and sign out.
+- `/settings` manages search discoverability, notification preferences (`connectionRequests`, `connectionAccepted`, `eventRsvps`, `eventCancellations`), and sign out.
 - Account deletion is displayed as deferred because backend cascade cleanup is not implemented.
 
 ### Development security audit
@@ -114,21 +115,22 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the runtime flow and [FIRESTORE_SCHEM
 - Connection Rules restrict pending creation, receiver-only acceptance, and participant deletion.
 - `conversations/{minUid_maxUid}` stores 1-to-1 conversation metadata with bidirectional transactional coupling to immutable message documents, strictly bounded to accepted connections, with 4-key `lastMessage` summaries and read-only archive retention upon disconnection.
 - Notifications live under `users/{recipientUid}/notifications` and list reads are recipient-scoped.
-- Notification creation is tied by Rules to the corresponding connection transaction.
-- User identity fields, setting types, and exact post schemas are strictly validated by Rules.
+- Event cancellation fan-out uses a durable delivery ledger in `eventNotificationDeliveries/{eventId}` with compare-and-set progression, chunking (8 recipients per batch), interruption resumption, and M23.4.2 point-read security isolation.
+- Notification creation is tied by Rules to the corresponding connection transaction, RSVP creation, or cancellation delivery ledger.
+- User identity fields, setting types, exact post schemas, and event lifecycle invariants are strictly validated by Rules.
 
 Private account settings (`users/{uid}`) and public profile fields (`publicProfiles/{uid}`) are strictly decoupled at the Firestore document and security rule layer, ensuring private data like email cannot be accessed by other clients.
 
 ## Current limitations
 
-- Automated test suites include 835 Vitest unit tests, 420 Firestore Emulator rules tests, and 69 Playwright E2E browser tests across 15 spec files, with a continuous integration pipeline.
+- Automated test suites include 880 Vitest unit tests across 43 files, 486 Firestore Emulator rules tests across 16 suites, and 74 Playwright E2E browser tests across 12 spec files, with a continuous integration pipeline.
 - Directory and notification reads are bounded rather than cursor-paginated (the campus feed supports cursor pagination).
 - Discovery uses client-side filtering over the `directoryIndex` projection rather than an external search index.
 - No Firebase Storage integration or media uploads.
 - No post editing, sharing, search, or bookmarks.
 - No presence, read receipts, marketplace, or internship board.
 - No email-verification enforcement, password-change UI, or account-deletion cascade.
-- Notification generation currently occurs in client connection transactions rather than a background event processor.
+- Notification generation currently occurs in client connection transactions and resumable client delivery chunks rather than a background event processor.
 
 These are explicit MVP boundaries, not undocumented missing routes.
 
@@ -185,21 +187,21 @@ The seeder uses explicit demo ID whitelists, merge-only writes, and no bulk dele
 
 ## Verification commands
 
-Unit tests run via Vitest (835 passing tests):
+Unit tests run via Vitest (880 passing tests across 43 files):
 
 ```bash
 npm run test:unit
 ```
 
-Firestore Rules tests run inside the fixed synthetic emulator project `demo-campusconnect-rules-test` (420 passing tests):
+Firestore Rules tests run inside the fixed synthetic emulator project `demo-campusconnect-rules-test` (486 passing tests):
 
 ```bash
 npm run test:rules
 ```
 
-The Rules command starts and stops the Firestore Emulator automatically. It does not read `.env.local`, use service-account credentials, invoke the demo seeder, or connect to the recruiter project. The Rules suite runs 420 passing security regression tests across 15 suites, verifying strict schemas, permissions, immutability, state transitions, and bidirectional transactional message coupling.
+The Rules command starts and stops the Firestore Emulator automatically. It does not read `.env.local`, use service-account credentials, invoke the demo seeder, or connect to the recruiter project. The Rules suite runs 486 passing security regression tests across 16 suites, verifying strict schemas, permissions, immutability, state transitions, and bidirectional transactional message coupling.
 
-End-to-end browser tests run via Playwright against the Firebase Emulator suite (69 passing tests across 15 spec files):
+End-to-end browser tests run via Playwright against the Firebase Emulator suite (74 passing tests across 12 spec files):
 
 ```bash
 npm run test:e2e

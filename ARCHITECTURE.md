@@ -1,6 +1,6 @@
 # CampusConnect Architecture
 
-**Status:** Current implementation reference (Milestone 22 Delivered)
+**Status:** Current implementation reference (Milestone 23 Delivered)
 
 This document describes the architecture that exists in the repository today. It does not describe proposed messaging, media storage, search infrastructure, or other deferred work.
 
@@ -37,7 +37,7 @@ The UI does not use a custom HTTP API or server-rendered backend. Firebase Admin
 | Database | Cloud Firestore |
 | Hosting | Firebase Hosting serving the Vite `dist` output |
 | Admin tooling | Firebase Admin SDK seeding script |
-| Quality checks | ESLint; production Vite build; 835 Vitest unit tests (`npm run test:unit`); 420 Firestore Emulator security rules tests (`npm run test:rules`); Playwright E2E test suite with 69 passing tests across 15 spec files (`npm run test:e2e`); development-only Firestore security audit panel |
+| Quality checks | ESLint; production Vite build; 880 Vitest unit tests across 43 files (`npm run test:unit`); 486 Firestore Emulator security rules tests across 16 suites (`npm run test:rules`); Playwright E2E test suite with 74 passing tests across 12 spec files (`npm run test:e2e`); development-only Firestore security audit panel |
 
 Firebase Storage is not part of the active client architecture. The Firebase configuration contains a storage-bucket value because it is part of the standard web configuration shape, but the application does not initialize the Storage SDK or upload files.
 
@@ -211,14 +211,15 @@ The active collections are:
 - `posts/{postId}/comments/{commentId}`: comments;
 - `posts/{postId}/likes/{uid}`: individual likes;
 - `connections/{canonicalConnectionId}`: one relationship document per pair;
-- `users/{uid}/notifications/{notificationId}`: recipient-scoped connection notifications;
+- `users/{uid}/notifications/{notificationId}`: recipient-scoped notifications for connection requests/acceptances, event RSVPs, and resumable event cancellations;
 - `conversations/{canonicalConnectionId}`: 1-to-1 conversation metadata between connected peers;
 - `conversations/{canonicalConnectionId}/messages/{messageId}`: append-only immutable message subcollection;
 - `campuses/{campusId}`: authoritative campus metadata for multi-tenancy and the CampusNest domain;
 - `communities/{communityId}`: authoritative campus community metadata defining student clubs, societies, and cohorts;
 - `communityMembers/{membershipId}`: authoritative community membership records linking students to campus communities with role-based security authority;
 - `events/{eventId}`: authoritative campus event and student activity records (locked 17 fields);
-- `eventRsvps/{eventId}_{userId}`: authoritative event participation intent records (locked 5 fields).
+- `eventRsvps/{eventId}_{userId}`: authoritative event participation intent records (locked 5 fields);
+- `eventNotificationDeliveries/{eventId}`: authoritative event notification delivery ledger records for resumable cancellation fan-out (locked 14 fields).
 
 The full field-level schema and current rule behavior are documented in [FIRESTORE_SCHEMA.md](FIRESTORE_SCHEMA.md).
 
@@ -384,8 +385,31 @@ Events (events/{eventId})
      - Custom hook evaluating authority hierarchy, campus parity, reactive boundary timers (triggering automatic state transitions without polling), persistent concurrency locks, and zero-flash optimistic state transitions.
      - UI surfaces: `EventManagementToolbar.jsx`, `EventEditModal.jsx`, `EventCancelModal.jsx`, `EventRepublishModal.jsx`, `EventDeleteModal.jsx`.
 
-9. **Deferred Features:**
-   - Capacity limits, waitlists, attendance verification, QR check-ins, ticketing, payment gateways, calendar synchronization (ICS / Google Calendar), notification triggers, recurring schedules, and event comment threads remain explicitly deferred.
+9. **Event Notification & Resumable Cancellation Delivery Architecture (Milestone 23 Delivered):**
+   - **Supported Notification Types & Contracts:**
+     - `event_rsvp`: Generated upon attendee RSVP creation and delivered to the event organizer (`event.createdBy`) with deterministic ID `rsvp_${eventId}_${actorId}`. Contains actor profile snapshot and optional `referenceTitle` strictly matching event title (max 100 characters). Suppressed from visible inbox and unread count when recipient disables `eventRsvp` notification preference.
+     - `event_cancelled`: Generated upon event cancellation fan-out to all confirmed attendees. Keyed deterministically as `cancel_${eventId}_${cycleId}`, guaranteeing at most one notification per attendee per cancellation cycle. Suppressed from visible inbox and unread count when recipient disables `eventCancelled` notification preference.
+     - **Backward Compatibility:** Connection notifications (`connection_request`, `connection_accepted`) strictly omit `cycleId` and `referenceTitle` to maintain backward-compatible schemas.
+   - **Two-Way Atomic Handshake & Cancellation Ledger:**
+     - Event cancellation (Pathway B) atomically transitions `events/{eventId}` to `status: 'cancelled'` and creates/updates `eventNotificationDeliveries/{eventId}` with initial status `pending`, unique `cycleId` (10–64 characters), `checkpointVersion: 0`, and `processedCount: 0`.
+   - **Resumable Fan-Out Orchestration (`CHUNK_SIZE = 8`):**
+     - Client delivery service batches attendee notifications in chunks of 8 to comply with the 20-access Firestore rule limit (`CHUNK_SIZE = 8`, up to 8 attendee writes + 1 ledger update = 9 operations per batch).
+     - Queries `eventRsvps` ordered deterministically by `documentId()` with cursor progression (`startAfter(lastProcessedRsvpId)`).
+     - Concurrency protection: Optimistic compare-and-set updates on `checkpointVersion == resource.checkpointVersion + 1`.
+   - **Cancellation-Cycle Isolation & Republishing Supersession:**
+     - When an in-progress or pending cancellation cycle is superseded by republishing (`published`) or event deletion, the ledger transitions to `status: 'superseded'`, immediately halting further delivery attempts.
+     - Subsequent re-cancellation generates a fresh, isolated `cycleId` (`cycleId != resource.cycleId`), resetting `checkpointVersion: 0`, `processedCount: 0`, and status to `pending`, delivering new notifications without corrupting or reusing historical cycle records.
+   - **Multi-Admin Resumption & Preserved Attribution:**
+     - If cancellation fan-out is interrupted, any authorized community leader (admin or moderator) or the original event creator may resume delivery from the last durable checkpoint.
+     - Security rules enforce that `actorId`, `actorName`, and `actorAvatar` on generated notifications remain permanently bound to the original cancelling actor recorded on the ledger, preventing spoofing or attribution changes during resumption.
+   - **Point-Read Security & Multi-Tenant Isolation (Milestone 23.4.2 Invariants):**
+     - Point reads of existing delivery ledgers require caller to belong to the same campus and be either the original cancelling actor (`actorId`) or an active community leader (`isCommunityModeratorOrAdmin`).
+     - Point reads of nonexistent delivery-ledger documents require an existing parent event in the caller's campus and an active community leadership role (`isCommunityModeratorOrAdmin`).
+     - Creator UID alone without active community leadership authority confers no read access to nonexistent ledgers.
+     - Foreign-campus and unauthorized callers receive `permission-denied` regardless of whether the ledger document exists, eliminating existence-disclosure side-channels.
+
+10. **Deferred Features:**
+    - Capacity limits, waitlists, attendance verification, QR check-ins, ticketing, payment gateways, calendar synchronization (ICS / Google Calendar), background Cloud Functions, push notifications, and event comment threads remain explicitly deferred.
 
 ## Security model
 
@@ -416,7 +440,12 @@ The browser is treated as untrusted. Firestore Rules enforce the active authoriz
 - RSVP creation gated by matching campus, upcoming event (`request.time < event.startAt`), published status, and parent event readability;
 - immutable RSVP documents (`allow update: if false;`);
 - owner-only RSVP deletion authority (`resource.data.userId == request.auth.uid`), preserved after event ends, after cancellation, or after parent deletion;
-- owner and parent-readable non-owner RSVP read boundaries.
+- owner and parent-readable non-owner RSVP read boundaries;
+- delivery ledger collection `eventNotificationDeliveries/{eventId}` with locked 14-field schema, atomic cancellation handshake, and immutable creation identity;
+- compare-and-set versioning (`checkpointVersion + 1`) and chunk size cap (`CHUNK_SIZE = 8`) within Firestore rule call budgets;
+- strict cancellation-cycle isolation preventing stale cycle notification forgery;
+- delivery ledger point-read security isolation (M23.4.2) preventing cross-campus existence disclosure side-channels and requiring active leadership authority for nonexistent document queries;
+- actor attribution preservation ensuring secondary admin resumption retains the original cancelling actor's identity.
 
 The development-only `SecurityTestPanel` exercises selected notification and user/settings rejection scenarios. It is not a production test runner and is not a replacement for automated emulator tests.
 
@@ -430,14 +459,14 @@ The recruiter demo uses a normal Firebase Auth account configured through `VITE_
 
 ## Current limitations
 
-- 835 unit tests, 420 Firestore Emulator rules tests, and 15 Playwright E2E suites (69 passing tests) are active.
+- 880 unit tests across 43 files, 486 Firestore Emulator rules tests across 16 suites, and 12 Playwright E2E spec files (74 passing tests) are active.
 - Email verification is not required after sign-up.
 - Non-discoverable students are excluded from `directoryIndex` search queries; authenticated direct public profile reads (`/users/:uid`) remain accessible by design.
 - Notifications are bounded to the newest 30 items rather than cursor-paginated.
 - No media upload or Firebase Storage integration exists.
 - No post editing, post sharing, post search, bookmarks, marketplace, or direct account deletion exists.
-- Within the Event domain, ticketing, QR check-in, verified attendance, capacity caps, waitlists, calendar sync, notifications, and event comments remain deferred.
-- Notification generation currently originates in client connection transactions rather than a trusted background event processor.
+- Within the Event domain, ticketing, QR check-in, verified attendance, capacity caps, waitlists, calendar sync, push notifications, email delivery, and event comments remain deferred.
+- Event cancellation notification fan-out is managed client-side in chunks of 8 with durable ledger recovery; trusted background event processors (Cloud Functions) remain deferred.
 - The parent-only exact comment-counter limitation remains; a future ledger or server-side event model would be needed to prove arbitrary child causality.
 
 ## Deferred architecture, not current implementation

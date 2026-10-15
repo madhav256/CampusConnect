@@ -1,12 +1,12 @@
 # CampusConnect Project Context
 
-**Status:** Current project brief (Milestone 22 Delivered)
+**Status:** Current project brief (Milestone 23 Delivered)
 
 ## Product
 
-CampusConnect is a multi-tenant university student networking web application. The active application lets authenticated students maintain an academic profile, publish text updates, comment and like posts, discover classmates, manage connection requests, exchange 1-to-1 private messages, join and participate in student communities, discover campus events, and manage their event RSVPs and participation discovery.
+CampusConnect is a multi-tenant university student networking web application. The active application lets authenticated students maintain an academic profile, publish text updates, comment and like posts, discover classmates, manage connection requests, exchange 1-to-1 private messages, join and participate in student communities, discover campus events, manage their event RSVPs and participation discovery, and receive in-app notifications for connection updates, event RSVPs, and event cancellations with preference controls and resumable cancellation delivery.
 
-The current product boundary encompasses student profiles, public campus feeds, discovery, connections, notifications, direct 1-to-1 messaging, student communities, campus events, and event RSVPs. Rich media/image uploads, event ticketing/QR check-in, capacity caps, external search engines, and automated account deletion remain deferred.
+The current product boundary encompasses student profiles, public campus feeds, discovery, connections, notifications, direct 1-to-1 messaging, student communities, campus events, event RSVPs, and in-app event notifications with resumable delivery ledgers. Rich media/image uploads, event ticketing/QR check-in, capacity caps, external search engines, and automated account deletion remain deferred.
 
 ## Active stack
 
@@ -57,6 +57,7 @@ The active Firestore collections are:
 - `communityMembers/{membershipId}`: community membership records with roles (`member`, `moderator`, `admin`);
 - `events/{eventId}`: campus events with lifecycle statuses (`published`, `cancelled`) and visibility tiers (`campus-public`, `community-only`);
 - `eventRsvps/{rsvpId}`: deterministic `{eventId}_{userId}` RSVP participation records;
+- `eventNotificationDeliveries/{eventId}`: durable delivery ledger tracking multi-chunk event cancellation notification fan-out, cursor progression, idempotency, and M23.4.2 point-read security isolation;
 - `users/{uid}`: private user account authority;
 - `publicProfiles/{uid}`: public profile information for authenticated student networking;
 - `directoryIndex/{uid}`: discoverability projection for search;
@@ -64,9 +65,9 @@ The active Firestore collections are:
 - `connections/{canonicalConnectionId}`: pairwise student connection relationships (`min_max` sorted UIDs);
 - `conversations/{canonicalConversationId}`: pairwise 1-to-1 messaging conversations;
 - `messages/{messageId}`: append-only conversation messages;
-- `users/{uid}/notifications/{notificationId}`: recipient-scoped connection notifications.
+- `users/{uid}/notifications/{notificationId}`: recipient-scoped in-app notifications (connection requests, accepted connections, event RSVPs, event cancellations).
 
-Firestore Rules enforce multi-tenancy, authentication, ownership, canonical relationships, notification scoping, message coupling, event visibility, and RSVP invariants. The browser is treated as untrusted.
+Firestore Rules enforce multi-tenancy, authentication, ownership, canonical relationships, notification scoping, message coupling, event visibility, RSVP invariants, and delivery ledger authorization. The browser is treated as untrusted.
 
 ## Design direction
 
@@ -102,6 +103,6 @@ The application is deployed as a Firebase Hosting SPA. The login page can option
 The repository maintains five automated verification gates:
 - **ESLint**: clean linting across application and test source.
 - **Production build**: Vite bundle generation.
-- **Unit tests**: 835 Vitest tests covering cutover, services, messaging, communities, events, event RSVPs, event management, hooks, and helpers.
-- **Firestore security rules tests**: 420 rules tests across 15 suites executed against the Firebase Emulator using the synthetic `demo-campusconnect-rules-test` project.
-- **Playwright E2E browser tests**: 69 automated tests across 15 spec files covering authentication, feed, discovery, connections, messaging, communities, events, event RSVPs, and event lifecycle management against the Firebase Emulator suite.
+- **Unit tests**: 880 Vitest tests covering cutover, services, messaging, communities, events, event RSVPs, event management, event notifications, delivery ledgers, hooks, and helpers across 43 files.
+- **Firestore security rules tests**: 486 rules tests across 16 suites executed against the Firebase Emulator using the synthetic `demo-campusconnect-rules-test` project.
+- **Playwright E2E browser tests**: 74 automated tests across 12 spec files covering authentication, feed, discovery, connections, messaging, communities, events, event RSVPs, event lifecycle management, and event notifications with resumable delivery ledger progression against the Firebase Emulator suite.

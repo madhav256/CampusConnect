@@ -1,6 +1,6 @@
 # CampusConnect Firestore Schema
 
-**Status:** Active client schema and Rule reference (Milestone 22 Delivered)
+**Status:** Active client schema and Rule reference (Milestone 23 Delivered)
 
 This document describes the collections used by the current browser application. Firebase Admin SDK demo seeding can add deterministic metadata outside the client write path; those seeder-only details are called out explicitly.
 
@@ -39,6 +39,7 @@ communities/{communityId} (campus community authority)
 communityMembers/{membershipId} (community membership authority)
 events/{eventId} (campus events & activities authority)
 eventRsvps/{eventId}_{userId} (event participation intent authority)
+eventNotificationDeliveries/{eventId} (event cancellation delivery ledger authority)
 ```
 
 
@@ -56,7 +57,7 @@ Stores private account metadata, authentication email, search discoverability st
 | `email` | string | Authenticated email address |
 | `campusId` | string (optional) | Tenant campus anchor (`campuses/{campusId}`); validated against existing campus documents |
 | `isDiscoverable` | boolean | Controls discoverability and directory index projection |
-| `notificationPreferences` | map | `connectionRequests` (bool) and `connectionAccepted` (bool) |
+| `notificationPreferences` | map | `connectionRequests` (bool), `connectionAccepted` (bool), `eventRsvps` (optional bool), `eventCancellations` (optional bool) |
 | `createdAt` | timestamp | Account profile creation time |
 | `updatedAt` | timestamp | Last settings update time |
 
@@ -271,12 +272,16 @@ The same sorted-pair ID is used regardless of which student initiates the reques
 
 ## 8. `users/{uid}/notifications/{notificationId}`
 
-Stores connection notifications under the intended recipient's user document.
+Stores scoped in-app notifications under the intended recipient's user document.
 
-### Document IDs
+### Supported Notification Types & Document IDs
 
-- Request: `req_{connectionId}`
-- Acceptance: `acc_{connectionId}`
+| Type | Document ID Pattern | Purpose & Trigger |
+| --- | --- | --- |
+| `connection_request` | `req_{connectionId}` | Connection request received from peer |
+| `connection_accepted` | `acc_{connectionId}` | Connection request accepted by peer |
+| `event_rsvp` | `rsvp_{eventId}_{actorId}` | Student registered to attend an event created by recipient |
+| `event_cancelled` | `cancel_{eventId}_{cycleId}` | Event registered by student was cancelled by community organizers |
 
 ### Fields
 
@@ -284,37 +289,51 @@ Stores connection notifications under the intended recipient's user document.
 | --- | --- | --- |
 | `id` | string | Must equal the notification document ID |
 | `recipientId` | string | Must equal the parent `uid` |
-| `actorId` | string | Student who caused the event |
-| `actorName` | string | Denormalized actor name from `publicProfiles` |
-| `actorAvatar` | string or `null` | Denormalized actor avatar from `publicProfiles` |
-| `type` | string | `connection_request` or `connection_accepted` |
-| `referenceId` | string | Canonical connection ID |
+| `actorId` | string | Student or community leader who caused the notification event |
+| `actorName` | string | Denormalized actor display name from `publicProfiles` authority |
+| `actorAvatar` | string or `null` | Denormalized actor avatar URL from `publicProfiles` authority |
+| `type` | string | One of `connection_request`, `connection_accepted`, `event_rsvp`, `event_cancelled` |
+| `referenceId` | string | Referenced entity ID: canonical connection ID for connections; `eventId` for event notifications |
+| `cycleId` | string (optional) | Cancellation delivery cycle ID (10–64 characters). Required for `event_cancelled`; strictly omitted for connection notifications and `event_rsvp` |
+| `referenceTitle` | string (optional) | Bounded string (1–100 characters) matching the parent event's title. Supported for `event_rsvp` and `event_cancelled`; strictly omitted for connection notifications |
 | `isRead` | boolean | Recipient read state |
-| `createdAt` | timestamp | Creation time |
+| `createdAt` | timestamp | Notification creation time |
+
+### Schema Backward Compatibility
+
+Legacy connection notifications (`connection_request`, `connection_accepted`) strictly require the exact original 9-key schema and strictly forbid `cycleId` and `referenceTitle`. Event notifications allow `referenceTitle` validated against the parent event title. `event_cancelled` notifications additionally require `cycleId` to enforce deterministic cancellation-cycle isolation.
 
 The current notification service orders by `createdAt` descending and limits subscriptions to 30 documents.
 
-### Transaction behavior
+### Notification Preferences & Visible Inbox Filtering
 
-`connectionService` may write notifications in the same transaction as the corresponding connection transition:
+Notification preferences (`users/{uid}.notificationPreferences`) control whether received notifications appear in the visible notifications list and Navbar unread count:
+- `connectionRequests` (bool): suppresses incoming connection request notifications when false;
+- `connectionAccepted` (bool): suppresses connection acceptance notifications when false;
+- `eventRsvps` (bool): suppresses event RSVP notifications when false;
+- `eventCancellations` (bool): suppresses event cancellation notifications when false.
 
-- send request: create the pending connection and optional recipient request notification;
-- cancel request: delete the connection and existing request notification;
-- accept request: update the connection, remove the incoming request notification, and optionally create an acceptance notification;
-- reject request: delete the connection and incoming request notification.
+Disabling a preference suppresses display without deleting persisted notification records.
 
-Notification preferences are read before the connection transaction and determine whether the optional notification write is included.
+### Transaction & Delivery Behavior
+
+- **Connection Notifications:** `connectionService` writes or cleans up notifications atomically in the same transaction as the connection transition (send, cancel, accept, decline).
+- **Event RSVP Notifications:** `eventRsvpService` writes the `event_rsvp` notification in the atomic write batch creating the attendee's `eventRsvps/{eventId}_{userId}` document.
+- **Event Cancellation Notifications:** `eventNotificationDeliveryService` orchestrates client-side resumable delivery batches (up to 8 attendees per chunk) reading `eventRsvps` and updating `eventNotificationDeliveries/{eventId}` atomically.
 
 ### Rule behavior
 
 - Notification list queries are recipient-only.
 - Both notification list queries and point reads are recipient-only; actors and unrelated users cannot read a notification.
-- Creates require the exact schema, recipient path, actor identity, verified actor profile values from `publicProfiles/{actorId}`, deterministic ID/type, and the corresponding connection state in the same transaction using `existsAfter()`/`getAfter()`.
-- The recipient can normally update only `isRead`. During the pending-to-accepted transition, the accepting actor may also refresh an existing deterministic acceptance notification in that same transaction; the full schema, actor profile, and connection before/after relationship remain validated.
-- The recipient can delete notifications. The request sender may delete a request notification only while atomically deleting its still-pending connection; an absent deterministic request-notification delete remains idempotent.
-- `cancelConnectionRequest` therefore reads only the connection as the sender and directly deletes the deterministic notification path without pre-reading it.
+- Creates require the exact validated schema, recipient path, verified actor profile snapshot from `publicProfiles/{actorId}`, deterministic ID/type, and verified parent entity state in the same atomic operation:
+  - `connection_request` / `connection_accepted`: verified against `connections/{connectionId}` state;
+  - `event_rsvp`: verified against matching campus, published event status, recipient creator identity, and `eventRsvps` creation in the same transaction;
+  - `event_cancelled`: verified against matching campus, cancelled event status, active delivery ledger in `pending` or `in_progress` status with matching `cycleId` and actor attribution, and existing attendee RSVP document.
+- The recipient can normally update only `isRead`. During the pending-to-accepted transition, the accepting actor may also refresh an existing deterministic acceptance notification in that same transaction.
+- The recipient can delete notifications. Deletion of a notification does not re-trigger delivery, and subsequent delivery retries or cycles will not recreate deleted notifications.
+- The request sender may delete a request notification only while atomically deleting its still-pending connection.
 
-The Admin SDK demo seeder writes two deterministic notifications directly and may include `isDemo`; Admin credentials bypass client Rules. `isDemo` is not part of the normal client notification schema.
+The Admin SDK demo seeder writes deterministic notifications directly and may include `isDemo`; Admin credentials bypass client Rules. `isDemo` is not part of the normal client notification schema.
 
 ## 9. `conversations/{conversationId}`
 
@@ -680,6 +699,76 @@ Documents are keyed by the deterministic composite ID `{eventId}_{userId}`:
   - Parent visibility: student must have access to read the parent event (`campus_public` or active community member via `isCommunityActiveMember`).
 - **Update Authorization:** Denied unconditionally (`allow update: if false;`). Documents are strictly immutable.
 - **Delete Authorization:** Allowed exclusively for the RSVP owner (`resource.data.userId == request.auth.uid`). Deletion is permitted even after the event ends, after event cancellation, or after the parent event is hard-deleted.
+
+## 16. `eventNotificationDeliveries/{eventId}` (Delivery Ledger Authority)
+
+Stores authoritative delivery state for resumable client-orchestrated event cancellation notification fan-out. Keyed directly by `eventId` (one ledger document per event).
+
+### Locked 14-Field Schema
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `id` | string | Canonical document identifier; must equal `eventId`; immutable |
+| `eventId` | string | Identifier of the cancelled parent event (`events/{eventId}`); immutable |
+| `cycleId` | string | Cancellation delivery cycle token (10–64 characters). Unique per cancellation cycle; immutable during checkpoint progression |
+| `campusId` | string | Tenant campus anchor (`campuses/{campusId}`); must match event campus; immutable |
+| `communityId` | string | Sponsoring community identifier (`communities/{communityId}`); immutable |
+| `actorId` | string | Firebase Auth UID of the cancelling community leader; immutable during checkpoint progression |
+| `actorName` | string | Denormalized display name of the cancelling actor from `publicProfiles`; immutable during checkpoint progression |
+| `actorAvatar` | string or `null` | Denormalized avatar URL of the cancelling actor from `publicProfiles`; immutable during checkpoint progression |
+| `status` | string | Lifecycle state: `pending`, `in_progress`, `completed`, `superseded` |
+| `checkpointVersion` | integer | Optimistic compare-and-set version counter. Initialized to 0; increments by exactly 1 on each checkpoint |
+| `lastProcessedRsvpId` | string or `null` | Document ID cursor of the last successfully processed RSVP (`eventRsvps/{eventId}_{userId}`). Null on initial creation |
+| `processedCount` | integer | Nonnegative cumulative count of attendee notifications written in the current cycle. Initialized to 0; monotonically non-decreasing |
+| `createdAt` | timestamp | Timestamp recording initial ledger creation; immutable |
+| `updatedAt` | timestamp | Timestamp recording latest ledger checkpoint update |
+
+### Lifecycle State Transitions
+
+```text
+Event Cancellation (Pathway B) ─▶ pending (checkpointVersion: 0, cycleId: C1)
+                                      │
+                                      ▼
+                      in_progress (checkpointVersion: N, processedCount: P)
+                                      │
+                       ┌──────────────┴──────────────┐
+                       ▼                             ▼
+                  completed                      superseded
+        (all attendees notified)         (republished or deleted)
+                       │                             │
+                       └──────────────┬──────────────┘
+                                      ▼
+                      Repeat Cancellation (Pathway B)
+                   pending (checkpointVersion: 0, cycleId: C2)
+```
+
+1. **`pending`:** Initial state written in the atomic cancellation batch with `events/{eventId}` (`status: 'cancelled'`).
+2. **`in_progress`:** Active delivery processing chunks of up to 8 attendees (`CHUNK_SIZE = 8`). Checkpoint updates increment `checkpointVersion` by 1 and advance `lastProcessedRsvpId` and `processedCount`.
+3. **`completed`:** Terminal state reached when all eligible attendees have received notification documents.
+4. **`superseded`:** Administrative state entered if the event is republished (`published`) or hard-deleted before delivery completes, preventing stale in-flight batches.
+5. **Repeat Cancellation:** When an event in `completed` or `superseded` status is cancelled again after republishing, a fresh cycle is initialized with a new unique `cycleId` (`cycleId != resource.cycleId`), resetting `checkpointVersion: 0`, `processedCount: 0`, and `status: 'pending'`.
+
+### Resumption & Concurrency Guarantees
+
+- **Configured Chunk Size (`CHUNK_SIZE = 8`):** Each delivery batch commits up to 8 recipient notification writes and exactly 1 ledger checkpoint update (at most 9 operations total), ensuring deterministic compliance with Firestore Security Rules' 20-call access budget.
+- **Compare-and-Set Concurrency Protection:** Every progress update asserts `request.resource.data.checkpointVersion == resource.data.checkpointVersion + 1`, preventing split-brain execution from simultaneous browser windows.
+- **Deterministic Notification Identifiers:** Notifications are keyed as `cancel_${eventId}_${cycleId}` per attendee, guaranteeing idempotent writes during retry without duplicate notifications.
+- **Secondary Administrator Resumption:** Any authorized community leader (moderator or admin) or the original event creator can resume an interrupted delivery. The security rules strictly preserve the original cancelling `actorId`, `actorName`, and `actorAvatar` on all delivered notifications regardless of who triggered resumption.
+
+### Security Rules Behavior (Milestone 23.4.2 Invariants)
+
+- **Point-Read Isolation:**
+  - Existing ledger (`resource != null`): Readable only by authenticated users belonging to the same campus who are either the original cancelling actor (`request.auth.uid == resource.data.actorId`) or an active leader of the sponsoring community (`isCommunityModeratorOrAdmin(communityId)`).
+  - Nonexistent ledger (`resource == null`): Readable only when the parent event exists in `events/{eventId}`, belongs to the caller's campus, and the caller is an active leader of the sponsoring community (`isCommunityModeratorOrAdmin(communityId)`).
+  - Creator UID alone without an active community leadership role confers no read access to nonexistent ledgers.
+  - Foreign-campus and unauthorized callers receive `permission-denied` unconditionally on all point reads, eliminating existence-disclosure side-channels.
+- **Collection Query Authorization:** Collection-level queries (`list`) are denied unconditionally (`allow list: if false;`).
+- **Create Authorization:** Allowed exclusively during atomic event cancellation (Pathway B) where the caller is an active community leader (`isCommunityModeratorOrAdmin`), `events/{eventId}` transitions to `cancelled`, `status == 'pending'`, `checkpointVersion == 0`, and actor profile matches caller's public profile.
+- **Update Authorization:**
+  - *Checkpoint progression:* Allowed for active community leaders or original event creator; requires `checkpointVersion == resource.checkpointVersion + 1`, `processedCount >= resource.processedCount`, and immutable identity fields.
+  - *Repeat cancellation:* Allowed for active community leaders on published-to-cancelled events where prior ledger is `completed` or `superseded`; requires new `cycleId`.
+  - *Supersession:* Allowed for active community leaders when event transitions to `published` or is hard-deleted.
+- **Delete Authorization:** Denied unconditionally (`allow delete: if false;`).
 
 ## Demo-only metadata
 

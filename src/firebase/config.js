@@ -1,6 +1,7 @@
 import { initializeApp } from "firebase/app";
 import { getAuth, connectAuthEmulator } from "firebase/auth";
 import { getFirestore, connectFirestoreEmulator } from "firebase/firestore";
+import { getFunctions, connectFunctionsEmulator } from "firebase/functions";
 
 const isEmulator = import.meta.env.VITE_USE_FIREBASE_EMULATOR === "true";
 
@@ -34,6 +35,8 @@ export const auth = firebaseApp ? getAuth(firebaseApp) : null;
 
 export const db = firebaseApp ? getFirestore(firebaseApp) : null;
 
+export const functions = firebaseApp ? getFunctions(firebaseApp) : null;
+
 if (firebaseApp && isEmulator) {
   if (db && !db._emulatorConfigured) {
     try {
@@ -47,6 +50,14 @@ if (firebaseApp && isEmulator) {
     try {
       connectAuthEmulator(auth, "http://localhost:9099", { disableWarnings: true });
       auth._emulatorConfigured = true;
+    } catch {
+      // Ignore if already connected in hot reload
+    }
+  }
+  if (functions && !functions._emulatorConfigured) {
+    try {
+      connectFunctionsEmulator(functions, "localhost", 5001);
+      functions._emulatorConfigured = true;
     } catch {
       // Ignore if already connected in hot reload
     }

@@ -185,22 +185,25 @@ service cloud.firestore {
     }
 
     function isCommunityModeratorOrAdmin(communityId) {
+      let memberPath = /databases/$(database)/documents/communityMembers/$(communityId + '_' + request.auth.uid);
+      let memberDoc = exists(memberPath) ? get(memberPath) : null;
       return communityId is string &&
              communityId.size() > 0 &&
-             exists(/databases/$(database)/documents/communityMembers/$(communityId + '_' + request.auth.uid)) &&
-             get(/databases/$(database)/documents/communityMembers/$(communityId + '_' + request.auth.uid)).data.status == 'active' &&
-             get(/databases/$(database)/documents/communityMembers/$(communityId + '_' + request.auth.uid)).data.campusId == getUserCampusId() &&
-             (get(/databases/$(database)/documents/communityMembers/$(communityId + '_' + request.auth.uid)).data.role == 'admin' ||
-              get(/databases/$(database)/documents/communityMembers/$(communityId + '_' + request.auth.uid)).data.role == 'moderator');
+             memberDoc != null &&
+             memberDoc.data.status == 'active' &&
+             memberDoc.data.campusId == getUserCampusId() &&
+             (memberDoc.data.role == 'admin' || memberDoc.data.role == 'moderator');
     }
 
     function isCommunityAdmin(communityId) {
+      let memberPath = /databases/$(database)/documents/communityMembers/$(communityId + '_' + request.auth.uid);
+      let memberDoc = exists(memberPath) ? get(memberPath) : null;
       return communityId is string &&
              communityId.size() > 0 &&
-             exists(/databases/$(database)/documents/communityMembers/$(communityId + '_' + request.auth.uid)) &&
-             get(/databases/$(database)/documents/communityMembers/$(communityId + '_' + request.auth.uid)).data.status == 'active' &&
-             get(/databases/$(database)/documents/communityMembers/$(communityId + '_' + request.auth.uid)).data.campusId == getUserCampusId() &&
-             get(/databases/$(database)/documents/communityMembers/$(communityId + '_' + request.auth.uid)).data.role == 'admin';
+             memberDoc != null &&
+             memberDoc.data.status == 'active' &&
+             memberDoc.data.campusId == getUserCampusId() &&
+             memberDoc.data.role == 'admin';
     }
 
     function hasValidStoredChronology(r) {
@@ -1014,16 +1017,44 @@ service cloud.firestore {
       );
     }
 
-    // 9. Events collection (Campus Events & Activities - Milestone 20)
+    // 9. Events collection (Milestone 20.3, Milestone 22.1 & Milestone 24)
     match /events/{eventId} {
       function isValidEventCreate(eId) {
         let d = request.resource.data;
-        let communityPath = /databases/$(database)/documents/communities/$(d.communityId);
+        let capPath = /databases/$(database)/documents/eventCapacities/$(eId);
+        let isCapped = ('capacity' in d) && d.capacity != null;
+        let capDoc = (isCapped && existsAfter(capPath)) ? getAfter(capPath) : null;
+
+        let communityPath = ('communityId' in d && d.communityId is string) ?
+          /databases/$(database)/documents/communities/$(d.communityId) : null;
+        let hasValidCommunityAuthority =
+          communityPath != null &&
+          exists(communityPath) &&
+          get(communityPath).data.campusId == getUserCampusId() &&
+          isCommunityModeratorOrAdmin(d.communityId);
+
+        let isCapCoordAtomic =
+          (
+            isCapped &&
+            d.capacity is int && d.capacity > 0 && d.capacity <= 10000 &&
+            !exists(capPath) && existsAfter(capPath) &&
+            capDoc != null &&
+            capDoc.data.id == eId &&
+            capDoc.data.eventId == eId &&
+            capDoc.data.campusId == d.campusId &&
+            capDoc.data.confirmedCount == 0 &&
+            capDoc.data.offeredCount == 0 &&
+            capDoc.data.waitlistCount == 0 &&
+            capDoc.data.headSequence == 1 &&
+            capDoc.data.nextSequence == 1
+          ) ||
+          (!isCapped && !exists(capPath) && !existsAfter(capPath));
+
         return d.keys().hasOnly([
                  'id', 'campusId', 'communityId', 'title', 'slug', 'description',
                  'category', 'location', 'startAt', 'endAt', 'imageURL',
                  'createdBy', 'organizerName', 'status', 'visibility',
-                 'createdAt', 'updatedAt'
+                 'createdAt', 'updatedAt', 'capacity'
                ]) &&
                d.keys().hasAll([
                  'id', 'campusId', 'communityId', 'title', 'slug', 'description',
@@ -1036,10 +1067,7 @@ service cloud.firestore {
                d.campusId is string &&
                getUserCampusId() != null &&
                d.campusId == getUserCampusId() &&
-               d.communityId is string &&
-               exists(communityPath) &&
-               get(communityPath).data.campusId == d.campusId &&
-               isCommunityModeratorOrAdmin(d.communityId) &&
+               hasValidCommunityAuthority &&
                d.title is string &&
                d.title.size() >= 3 &&
                d.title.size() <= 100 &&
@@ -1064,55 +1092,64 @@ service cloud.firestore {
                d.status == 'published' &&
                d.visibility in ['campus_public', 'community_only'] &&
                d.createdAt == request.time &&
-               d.updatedAt == request.time;
+               d.updatedAt == request.time &&
+               isCapCoordAtomic;
       }
 
-      function isValidPathwayA(d, r, affected) {
-        return (
-          // Upcoming Event Branch (now < r.startAt)
-          (
-            request.time < r.startAt &&
-            affected.hasOnly([
-              'title', 'slug', 'description', 'category', 'location',
-              'startAt', 'endAt', 'imageURL', 'organizerName', 'updatedAt'
-            ]) &&
-            affected.hasAny([
-              'title', 'slug', 'description', 'category', 'location',
-              'startAt', 'endAt', 'imageURL', 'organizerName'
-            ]) &&
-            (!affected.hasAny(['startAt']) || (d.startAt is timestamp && d.startAt > request.time)) &&
-            (!affected.hasAny(['startAt', 'endAt']) || (d.endAt is timestamp && d.endAt >= d.startAt)) &&
-            d.title is string && d.title.size() >= 3 && d.title.size() <= 100 &&
-            d.slug is string && d.slug.size() > 0 &&
-            d.description is string && d.description.size() > 0 && d.description.size() <= 3000 &&
-            d.category in [
-              'academic', 'tech', 'cultural', 'sports',
-              'career', 'workshop', 'social', 'competition'
-            ] &&
-            d.location is string && d.location.size() > 0 && d.location.size() <= 200 &&
-            d.organizerName is string && d.organizerName.size() > 0 &&
-            (d.imageURL == null || (d.imageURL is string && d.imageURL.size() > 0))
-          ) ||
-          // Ongoing Event Branch (r.startAt <= now <= r.endAt)
-          (
-            request.time >= r.startAt &&
-            request.time <= r.endAt &&
-            affected.hasOnly(['location', 'description', 'imageURL', 'endAt', 'updatedAt']) &&
-            affected.hasAny(['location', 'description', 'imageURL', 'endAt']) &&
-            d.startAt == r.startAt &&
-            d.title == r.title &&
-            d.slug == r.slug &&
-            d.category == r.category &&
-            d.organizerName == r.organizerName &&
-            d.description is string && d.description.size() > 0 && d.description.size() <= 3000 &&
-            d.location is string && d.location.size() > 0 && d.location.size() <= 200 &&
-            (d.imageURL == null || (d.imageURL is string && d.imageURL.size() > 0)) &&
-            (
-              (affected.hasAny(['endAt']) && d.endAt is timestamp && d.endAt >= r.endAt && d.endAt > request.time) ||
-              (!affected.hasAny(['endAt']) && d.endAt == r.endAt)
-            )
-          )
-        );
+      function isValidPathwayA(eId, d, r, affected) {
+        let capPath = /databases/$(database)/documents/eventCapacities/$(eId);
+        let capDoc = affected.hasAny(['capacity']) && exists(capPath) ? get(capPath) : null;
+
+        let isCapacityUnchanged = !affected.hasAny(['capacity']);
+        let isCapacityValidlyUpdated =
+          affected.hasAny(['capacity']) &&
+          ('capacity' in r) && ('capacity' in d) &&
+          d.capacity is int && d.capacity > 0 && d.capacity <= 10000 &&
+          d.capacity != r.capacity &&
+          capDoc != null &&
+          d.capacity >= (capDoc.data.confirmedCount + capDoc.data.offeredCount);
+
+        let hasValidFieldTypes =
+          d.title is string && d.title.size() >= 3 && d.title.size() <= 100 &&
+          d.slug is string && d.slug.size() > 0 &&
+          d.description is string && d.description.size() > 0 && d.description.size() <= 3000 &&
+          d.category in ['academic', 'tech', 'cultural', 'sports', 'career', 'workshop', 'social', 'competition'] &&
+          d.location is string && d.location.size() > 0 && d.location.size() <= 200 &&
+          (d.imageURL == null || (d.imageURL is string && d.imageURL.size() > 0)) &&
+          d.organizerName is string && d.organizerName.size() > 0;
+
+        let hasValidTimeTransition =
+          (request.time < r.startAt &&
+           (!affected.hasAny(['startAt']) || (d.startAt is timestamp && d.startAt > request.time)) &&
+           (!affected.hasAny(['startAt', 'endAt']) || (d.endAt is timestamp && d.endAt >= d.startAt))) ||
+          (request.time >= r.startAt &&
+           request.time <= r.endAt &&
+           d.startAt == r.startAt &&
+           d.title == r.title &&
+           d.slug == r.slug &&
+           d.category == r.category &&
+           d.organizerName == r.organizerName &&
+           (!affected.hasAny(['endAt']) || (d.endAt is timestamp && d.endAt >= r.endAt && d.endAt > request.time)));
+
+        return affected.hasOnly([
+                 'title', 'slug', 'description', 'category', 'location',
+                 'startAt', 'endAt', 'imageURL', 'organizerName',
+                 'updatedAt', 'capacity'
+               ]) &&
+               affected.hasAny([
+                 'title', 'slug', 'description', 'category', 'location',
+                 'startAt', 'endAt', 'imageURL', 'organizerName',
+                 'capacity'
+               ]) &&
+               d.visibility == r.visibility &&
+               d.campusId == r.campusId &&
+               d.communityId == r.communityId &&
+               d.createdBy == r.createdBy &&
+               d.createdAt == r.createdAt &&
+               d.updatedAt == request.time &&
+               hasValidFieldTypes &&
+               hasValidTimeTransition &&
+               (isCapacityUnchanged || isCapacityValidlyUpdated);
       }
 
       function hasValidInitialLedger(eId, r) {
@@ -1188,40 +1225,22 @@ service cloud.firestore {
         let diff = d.diff(r);
         let affected = diff.affectedKeys();
 
-        let commonInvariants =
-          d.id == r.id &&
-          d.id == eId &&
-          d.campusId == r.campusId &&
-          d.communityId == r.communityId &&
-          d.createdBy == r.createdBy &&
-          d.createdAt == r.createdAt &&
-          d.visibility == r.visibility &&
-          d.updatedAt == request.time &&
-          r.campusId == getUserCampusId() &&
-          isCommunityModeratorOrAdmin(r.communityId) &&
-          hasValidStoredChronology(r) &&
-          d.keys().hasOnly([
-            'id', 'campusId', 'communityId', 'title', 'slug', 'description',
-            'category', 'location', 'startAt', 'endAt', 'imageURL',
-            'createdBy', 'organizerName', 'status', 'visibility',
-            'createdAt', 'updatedAt'
-          ]) &&
-          d.keys().hasAll([
-            'id', 'campusId', 'communityId', 'title', 'slug', 'description',
-            'category', 'location', 'startAt', 'endAt', 'imageURL',
-            'createdBy', 'organizerName', 'status', 'visibility',
-            'createdAt', 'updatedAt'
-          ]);
+        let isLeader = r.communityId != null && isCommunityModeratorOrAdmin(r.communityId);
 
-        return commonInvariants && (
-          (r.status == 'published' && d.status == 'published' && isValidPathwayA(d, r, affected)) ||
-          (r.status == 'published' && d.status == 'cancelled' && isValidPathwayB(eId, d, r, affected)) ||
-          (r.status == 'cancelled' && d.status == 'published' && isValidPathwayC(d, r, affected))
-        );
+        return isLeader &&
+               r.campusId == getUserCampusId() &&
+               d.campusId == getUserCampusId() &&
+               r.get('registrationStatus', null) != 'migration_locked' &&
+               hasValidStoredChronology(r) &&
+               (
+                 (r.status == 'published' && d.status == 'published' && isValidPathwayA(eId, d, r, affected)) ||
+                 (r.status == 'published' && d.status == 'cancelled' && isValidPathwayB(eId, d, r, affected)) ||
+                 (r.status == 'cancelled' && d.status == 'published' && isValidPathwayC(d, r, affected))
+               );
       }
 
       allow read: if isAuthenticated() && (
-        resource.data.campusId == getUserCampusId() && (
+        (!('campusId' in resource.data) || resource.data.campusId == getUserCampusId()) && (
           resource.data.visibility == 'campus_public' ||
           (
             resource.data.visibility == 'community_only' &&
@@ -1236,54 +1255,103 @@ service cloud.firestore {
 
       allow delete: if isAuthenticated() &&
                        resource.data.campusId == getUserCampusId() &&
+                       resource.data.get('registrationStatus', null) != 'migration_locked' &&
                        isCommunityAdmin(resource.data.communityId) &&
                        resource.data.status in ['published', 'cancelled'] &&
                        hasValidStoredChronology(resource.data) &&
-                       request.time < resource.data.startAt;
+                       request.time < resource.data.startAt &&
+                       !exists(/databases/$(database)/documents/eventCapacities/$(eventId));
     }
 
-    // 10. Event RSVPs collection (Milestone 21 - Unit 21.2: RSVP Security Authority & Rules)
+    // 10. Event RSVPs collection (Milestone 21, 22 & Milestone 24)
     match /eventRsvps/{rsvpId} {
       function isParentEventReadable(eventId) {
         let eventPath = /databases/$(database)/documents/events/$(eventId);
-        return exists(eventPath) &&
-               get(eventPath).data.campusId == getUserCampusId() &&
+        let eventDoc = exists(eventPath) ? get(eventPath) : null;
+        return eventDoc != null &&
+               eventDoc.data.campusId == getUserCampusId() &&
                (
-                 get(eventPath).data.visibility == 'campus_public' ||
-                 (
-                   get(eventPath).data.visibility == 'community_only' &&
-                   isCommunityActiveMember(get(eventPath).data.communityId)
-                 )
+                 eventDoc.data.visibility == 'campus_public' ||
+                 (eventDoc.data.visibility == 'community_only' && isCommunityActiveMember(eventDoc.data.communityId))
                );
       }
 
       function isValidRsvpCreate(rId) {
         let d = request.resource.data;
         let eventPath = /databases/$(database)/documents/events/$(d.eventId);
-        return d.keys().hasOnly(['id', 'eventId', 'campusId', 'userId', 'createdAt']) &&
-               d.keys().hasAll(['id', 'eventId', 'campusId', 'userId', 'createdAt']) &&
-               d.id == rId &&
-               d.id is string &&
-               d.eventId is string &&
-               d.campusId is string &&
-               d.userId is string &&
-               d.createdAt is timestamp &&
-               d.userId == request.auth.uid &&
-               d.id == d.eventId + '_' + d.userId &&
-               getUserCampusId() != null &&
-               d.campusId == getUserCampusId() &&
-               d.createdAt == request.time &&
-               exists(eventPath) &&
-               get(eventPath).data.campusId == d.campusId &&
-               get(eventPath).data.status == 'published' &&
-               request.time < get(eventPath).data.startAt &&
-               (
-                 get(eventPath).data.visibility == 'campus_public' ||
-                 (
-                   get(eventPath).data.visibility == 'community_only' &&
-                   isCommunityActiveMember(get(eventPath).data.communityId)
-                 )
-               );
+        let capPath = /databases/$(database)/documents/eventCapacities/$(d.eventId);
+        let eventDoc = exists(eventPath) ? get(eventPath) : null;
+        let isCapped = eventDoc != null && ('capacity' in eventDoc.data) && eventDoc.data.capacity != null;
+        let capDoc = (isCapped && exists(capPath)) ? get(capPath) : null;
+        let capAfter = (isCapped && existsAfter(capPath)) ? getAfter(capPath) : null;
+
+        let isCommunityMember =
+          eventDoc != null && eventDoc.data.visibility == 'community_only' ?
+            isCommunityActiveMember(eventDoc.data.communityId) :
+            true;
+
+        let isRsvpBaseValid =
+          d.keys().hasOnly(['id', 'eventId', 'campusId', 'userId', 'createdAt']) &&
+          d.keys().hasAll(['id', 'eventId', 'campusId', 'userId', 'createdAt']) &&
+          d.id == rId &&
+          d.id is string &&
+          d.eventId is string &&
+          d.campusId is string &&
+          d.userId is string &&
+          d.createdAt is timestamp &&
+          d.userId == request.auth.uid &&
+          d.id == d.eventId + '_' + d.userId &&
+          getUserCampusId() != null &&
+          d.campusId == getUserCampusId() &&
+          d.createdAt == request.time &&
+          eventDoc != null &&
+          eventDoc.data.campusId == d.campusId &&
+          eventDoc.data.status == 'published' &&
+          request.time < eventDoc.data.startAt &&
+          eventDoc.data.get('registrationStatus', null) != 'migration_locked' &&
+          (eventDoc.data.visibility == 'campus_public' || (eventDoc.data.visibility == 'community_only' && isCommunityMember));
+
+        let isDirectAdmission =
+          isCapped && capDoc != null && capAfter != null &&
+          capDoc.data.confirmedCount + capDoc.data.offeredCount < eventDoc.data.capacity &&
+          capAfter.data.confirmedCount == capDoc.data.confirmedCount + 1 &&
+          capAfter.data.offeredCount == capDoc.data.offeredCount &&
+          capAfter.data.waitlistCount == capDoc.data.waitlistCount &&
+          capAfter.data.headSequence == capDoc.data.headSequence &&
+          capAfter.data.nextSequence == capDoc.data.nextSequence;
+
+        let isUncappedCreate = !isCapped && !exists(capPath) && !existsAfter(capPath);
+
+        return isRsvpBaseValid && (isUncappedCreate || isDirectAdmission);
+      }
+
+      function isValidRsvpDelete(rId) {
+        let r = resource.data;
+        let eventPath = /databases/$(database)/documents/events/$(r.eventId);
+        let capPath = /databases/$(database)/documents/eventCapacities/$(r.eventId);
+        let eventDoc = exists(eventPath) ? get(eventPath) : null;
+        let isCapped = eventDoc != null && ('capacity' in eventDoc.data) && eventDoc.data.capacity != null;
+        let capDoc = (isCapped && exists(capPath)) ? get(capPath) : null;
+        let capAfter = (isCapped && existsAfter(capPath)) ? getAfter(capPath) : null;
+
+        let isUncappedDelete =
+          !isCapped && !exists(capPath);
+
+        let isCappedZeroWaitlistDelete =
+          isCapped && capDoc != null && capAfter != null &&
+          request.time < eventDoc.data.startAt &&
+          capDoc.data.waitlistCount == 0 &&
+          capAfter.data.waitlistCount == 0 &&
+          capAfter.data.confirmedCount == capDoc.data.confirmedCount - 1 &&
+          capAfter.data.confirmedCount >= 0 &&
+          capAfter.data.offeredCount == capDoc.data.offeredCount &&
+          capAfter.data.headSequence == capDoc.data.headSequence &&
+          capAfter.data.nextSequence == capDoc.data.nextSequence;
+
+        return r.id == rId &&
+               r.userId == request.auth.uid &&
+               (eventDoc == null || eventDoc.data.get('registrationStatus', null) != 'migration_locked') &&
+               (isUncappedDelete || isCappedZeroWaitlistDelete);
       }
 
       allow get: if isAuthenticated() && (
@@ -1300,11 +1368,380 @@ service cloud.firestore {
       );
 
       allow create: if isAuthenticated() && isValidRsvpCreate(rsvpId);
-
       allow update: if false;
+      allow delete: if isAuthenticated() && isValidRsvpDelete(rsvpId);
+    }
 
-      allow delete: if isAuthenticated() &&
-                    resource.data.userId == request.auth.uid;
+    // 12. Event Capacity Coordinators collection (Milestone 24)
+    match /eventCapacities/{eventId} {
+      function isValidCoordinatorCreate(eId) {
+        let d = request.resource.data;
+        let eventPath = /databases/$(database)/documents/events/$(eId);
+        let capPath = /databases/$(database)/documents/eventCapacities/$(eId);
+        let eventDoc = existsAfter(eventPath) ? getAfter(eventPath) : null;
+
+        return !exists(eventPath) && existsAfter(eventPath) &&
+               !exists(capPath) &&
+               d.keys().hasOnly([
+                 'id', 'eventId', 'campusId', 'confirmedCount', 'offeredCount',
+                 'waitlistCount', 'headSequence', 'nextSequence', 'createdAt', 'updatedAt'
+               ]) &&
+               d.keys().hasAll([
+                 'id', 'eventId', 'campusId', 'confirmedCount', 'offeredCount',
+                 'waitlistCount', 'headSequence', 'nextSequence', 'createdAt', 'updatedAt'
+               ]) &&
+               d.id == eId &&
+               d.eventId == eId &&
+               d.campusId == getUserCampusId() &&
+               d.confirmedCount == 0 &&
+               d.offeredCount == 0 &&
+               d.waitlistCount == 0 &&
+               d.headSequence == 1 &&
+               d.nextSequence == 1 &&
+               d.createdAt == request.time &&
+               d.updatedAt == request.time &&
+               eventDoc != null &&
+               eventDoc.data.campusId == getUserCampusId() &&
+               eventDoc.data.createdBy == request.auth.uid &&
+               eventDoc.data.communityId != null &&
+               isCommunityModeratorOrAdmin(eventDoc.data.communityId);
+      }
+
+      function isCoordinatorDirectAdmission(eId, d, r, affected, eventDoc) {
+        let rsvpPath = /databases/$(database)/documents/eventRsvps/$(eId + '_' + request.auth.uid);
+        return affected.hasOnly(['confirmedCount', 'updatedAt']) &&
+               eventDoc.data.status == 'published' &&
+               request.time < eventDoc.data.startAt &&
+               r.confirmedCount + r.offeredCount < eventDoc.data.capacity &&
+               r.waitlistCount == 0 &&
+               d.confirmedCount == r.confirmedCount + 1 &&
+               d.offeredCount == r.offeredCount &&
+               d.waitlistCount == 0 &&
+               d.headSequence == r.headSequence &&
+               d.nextSequence == r.nextSequence &&
+               !exists(rsvpPath) && existsAfter(rsvpPath);
+      }
+
+      function isCoordinatorWaitlistJoin(eId, d, r, affected, eventDoc) {
+        let memberPath = /databases/$(database)/documents/eventWaitlistMembers/$(eId + '_' + request.auth.uid);
+        let slotPath = /databases/$(database)/documents/eventWaitlistSlots/$(eId + '_' + string(r.nextSequence));
+        let rsvpPath = /databases/$(database)/documents/eventRsvps/$(eId + '_' + request.auth.uid);
+        let memAfter = existsAfter(memberPath) ? getAfter(memberPath) : null;
+        let slotAfter = existsAfter(slotPath) ? getAfter(slotPath) : null;
+
+        return eventDoc.data.status == 'published' &&
+               request.time < eventDoc.data.startAt &&
+               (r.confirmedCount + r.offeredCount >= eventDoc.data.capacity || r.waitlistCount > 0) &&
+               d.waitlistCount == r.waitlistCount + 1 &&
+               d.nextSequence == r.nextSequence + 1 &&
+               d.confirmedCount == r.confirmedCount &&
+               d.offeredCount == r.offeredCount &&
+               d.headSequence == r.headSequence &&
+               !exists(memberPath) && memAfter != null &&
+               memAfter.data.sequenceNumber == r.nextSequence &&
+               memAfter.data.status == 'waiting' &&
+               !exists(slotPath) && slotAfter != null &&
+               slotAfter.data.userId == request.auth.uid &&
+               slotAfter.data.sequenceNumber == r.nextSequence &&
+               slotAfter.data.status == 'waiting' &&
+               !exists(rsvpPath) && !existsAfter(rsvpPath);
+      }
+
+      function isCoordinatorWithdrawal(eId, d, r, affected, eventDoc) {
+        let rsvpPath = /databases/$(database)/documents/eventRsvps/$(eId + '_' + request.auth.uid);
+
+        return affected.hasOnly(['confirmedCount', 'updatedAt']) &&
+               eventDoc.data.status == 'published' &&
+               request.time < eventDoc.data.startAt &&
+               exists(rsvpPath) && !existsAfter(rsvpPath) &&
+               r.waitlistCount == 0 &&
+               d.waitlistCount == 0 &&
+               d.confirmedCount == r.confirmedCount - 1 &&
+               d.confirmedCount >= 0 &&
+               d.offeredCount == r.offeredCount &&
+               d.headSequence == r.headSequence &&
+               d.nextSequence == r.nextSequence;
+      }
+
+      function isCoordinatorNonHeadWaitingWithdrawal(eId, d, r, affected, eventDoc) {
+        let memberPath = /databases/$(database)/documents/eventWaitlistMembers/$(eId + '_' + request.auth.uid);
+        let memberDoc = exists(memberPath) ? get(memberPath) : null;
+        let slotPath = memberDoc != null ?
+          /databases/$(database)/documents/eventWaitlistSlots/$(eId + '_' + string(memberDoc.data.sequenceNumber)) : null;
+        let slotAfter = slotPath != null && existsAfter(slotPath) ? getAfter(slotPath) : null;
+
+        return eventDoc.data.status == 'published' &&
+               request.time < eventDoc.data.startAt &&
+               memberDoc != null &&
+               memberDoc.data.sequenceNumber > r.headSequence &&
+               memberDoc.data.status == 'waiting' &&
+               d.waitlistCount == r.waitlistCount - 1 &&
+               d.waitlistCount >= 0 &&
+               d.confirmedCount == r.confirmedCount &&
+               d.offeredCount == r.offeredCount &&
+               d.headSequence == r.headSequence &&
+               d.nextSequence == r.nextSequence &&
+               exists(memberPath) && !existsAfter(memberPath) &&
+               slotPath != null && exists(slotPath) &&
+               slotAfter != null &&
+               slotAfter.data.status == 'withdrawn' &&
+               slotAfter.data.resolvedAt == request.time;
+      }
+
+      function isValidCoordinatorUpdate(eId) {
+        let d = request.resource.data;
+        let r = resource.data;
+        let diff = d.diff(r);
+        let affected = diff.affectedKeys();
+        let eventPath = /databases/$(database)/documents/events/$(eId);
+        let eventDoc = exists(eventPath) ? get(eventPath) : null;
+
+        return eventDoc != null &&
+               r.campusId == getUserCampusId() &&
+               d.campusId == getUserCampusId() &&
+               d.id == r.id &&
+               d.eventId == r.eventId &&
+               d.createdAt == r.createdAt &&
+               d.updatedAt == request.time &&
+               eventDoc.data.campusId == getUserCampusId() &&
+               eventDoc.data.get('registrationStatus', null) != 'migration_locked' &&
+               (
+                 (affected.hasOnly(['waitlistCount', 'updatedAt']) &&
+                  isCoordinatorNonHeadWaitingWithdrawal(eId, d, r, affected, eventDoc)) ||
+                 (affected.hasOnly(['confirmedCount', 'updatedAt']) &&
+                  (isCoordinatorDirectAdmission(eId, d, r, affected, eventDoc) ||
+                   isCoordinatorWithdrawal(eId, d, r, affected, eventDoc))) ||
+                 (affected.hasOnly(['waitlistCount', 'nextSequence', 'updatedAt']) &&
+                  isCoordinatorWaitlistJoin(eId, d, r, affected, eventDoc))
+               );
+      }
+
+      allow read: if isAuthenticated() && resource.data.campusId == getUserCampusId();
+      allow create: if isAuthenticated() && isValidCoordinatorCreate(eventId);
+      allow update: if isAuthenticated() && isValidCoordinatorUpdate(eventId);
+      allow delete: if false;
+    }
+
+    // 13. Event Waitlist Slots collection (Milestone 24)
+    match /eventWaitlistSlots/{slotId} {
+      function isValidSlotCreate(sId) {
+        let d = request.resource.data;
+        let capPath = /databases/$(database)/documents/eventCapacities/$(d.eventId);
+        let memberPath = /databases/$(database)/documents/eventWaitlistMembers/$(d.eventId + '_' + d.userId);
+        let rsvpPath = /databases/$(database)/documents/eventRsvps/$(d.eventId + '_' + d.userId);
+        let eventDoc = exists(/databases/$(database)/documents/events/$(d.eventId)) ?
+          get(/databases/$(database)/documents/events/$(d.eventId)) : null;
+        let capDoc = exists(capPath) ? get(capPath) : null;
+        let capAfter = existsAfter(capPath) ? getAfter(capPath) : null;
+        let memAfter = existsAfter(memberPath) ? getAfter(memberPath) : null;
+
+        return d.keys().hasOnly([
+                 'id', 'eventId', 'campusId', 'userId', 'sequenceNumber',
+                 'status', 'joinedAt', 'offeredAt', 'offerExpiresAt', 'resolvedAt'
+               ]) &&
+               d.keys().hasAll([
+                 'id', 'eventId', 'campusId', 'userId', 'sequenceNumber',
+                 'status', 'joinedAt'
+               ]) &&
+               d.id == sId &&
+               d.userId == request.auth.uid &&
+               d.campusId == getUserCampusId() &&
+               d.status == 'waiting' &&
+               d.joinedAt == request.time &&
+               !('offeredAt' in d) &&
+               !('offerExpiresAt' in d) &&
+               !('resolvedAt' in d) &&
+               eventDoc != null &&
+               eventDoc.data.status == 'published' &&
+               eventDoc.data.campusId == getUserCampusId() &&
+               eventDoc.data.get('registrationStatus', null) != 'migration_locked' &&
+               request.time < eventDoc.data.startAt &&
+               capDoc != null &&
+               d.sequenceNumber == capDoc.data.nextSequence &&
+               sId == d.eventId + '_' + string(d.sequenceNumber) &&
+               capAfter != null &&
+               capAfter.data.waitlistCount == capDoc.data.waitlistCount + 1 &&
+               capAfter.data.nextSequence == capDoc.data.nextSequence + 1 &&
+               capAfter.data.headSequence == capDoc.data.headSequence &&
+               !exists(memberPath) && memAfter != null &&
+               memAfter.data.sequenceNumber == d.sequenceNumber &&
+               memAfter.data.status == 'waiting' &&
+               !exists(rsvpPath) && !existsAfter(rsvpPath);
+      }
+
+      function isSlotWithdrawUpdate(sId, d, r, affected, eventDoc) {
+        let capPath = /databases/$(database)/documents/eventCapacities/$(r.eventId);
+        let capDoc = exists(capPath) ? get(capPath) : null;
+        let capAfter = existsAfter(capPath) ? getAfter(capPath) : null;
+        let memberPath = /databases/$(database)/documents/eventWaitlistMembers/$(r.eventId + '_' + r.userId);
+
+        return r.status == 'waiting' &&
+               d.status == 'withdrawn' &&
+               affected.hasOnly(['status', 'resolvedAt']) &&
+               r.userId == request.auth.uid &&
+               request.time < eventDoc.data.startAt &&
+               d.resolvedAt == request.time &&
+               capDoc != null &&
+               r.sequenceNumber > capDoc.data.headSequence &&
+               capAfter != null &&
+               capAfter.data.waitlistCount == capDoc.data.waitlistCount - 1 &&
+               capAfter.data.headSequence == capDoc.data.headSequence &&
+               !existsAfter(memberPath);
+      }
+
+      function isValidSlotUpdate(sId) {
+        let d = request.resource.data;
+        let r = resource.data;
+        let diff = d.diff(r);
+        let affected = diff.affectedKeys();
+        let eventPath = /databases/$(database)/documents/events/$(r.eventId);
+        let eventDoc = exists(eventPath) ? get(eventPath) : null;
+
+        return eventDoc != null &&
+               r.campusId == getUserCampusId() &&
+               d.campusId == getUserCampusId() &&
+               d.id == r.id &&
+               d.eventId == r.eventId &&
+               d.userId == r.userId &&
+               d.sequenceNumber == r.sequenceNumber &&
+               d.joinedAt == r.joinedAt &&
+               eventDoc.data.campusId == getUserCampusId() &&
+               eventDoc.data.get('registrationStatus', null) != 'migration_locked' &&
+               isSlotWithdrawUpdate(sId, d, r, affected, eventDoc);
+      }
+
+      function isSlotParentEventLeader(eventId) {
+        let eventPath = /databases/$(database)/documents/events/$(eventId);
+        let eventDoc = exists(eventPath) ? get(eventPath) : null;
+        return eventDoc != null &&
+               eventDoc.data.campusId == getUserCampusId() &&
+               eventDoc.data.communityId != null &&
+               isCommunityModeratorOrAdmin(eventDoc.data.communityId);
+      }
+
+      allow get: if isAuthenticated() && resource.data.campusId == getUserCampusId() && (
+        resource.data.userId == request.auth.uid ||
+        isSlotParentEventLeader(resource.data.eventId)
+      );
+
+      allow list: if isAuthenticated() && resource.data.campusId == getUserCampusId() && (
+        resource.data.userId == request.auth.uid ||
+        isSlotParentEventLeader(resource.data.eventId)
+      );
+
+      allow create: if isAuthenticated() && isValidSlotCreate(slotId);
+      allow update: if isAuthenticated() && isValidSlotUpdate(slotId);
+      allow delete: if false;
+    }
+
+    // 14. Event Waitlist Members collection (Milestone 24)
+    match /eventWaitlistMembers/{memberId} {
+      function isValidMemberCreate(mId) {
+        let d = request.resource.data;
+        let capPath = /databases/$(database)/documents/eventCapacities/$(d.eventId);
+        let slotPath = /databases/$(database)/documents/eventWaitlistSlots/$(d.eventId + '_' + string(d.sequenceNumber));
+        let rsvpPath = /databases/$(database)/documents/eventRsvps/$(d.eventId + '_' + d.userId);
+        let eventDoc = exists(/databases/$(database)/documents/events/$(d.eventId)) ?
+          get(/databases/$(database)/documents/events/$(d.eventId)) : null;
+        let capDoc = exists(capPath) ? get(capPath) : null;
+        let capAfter = existsAfter(capPath) ? getAfter(capPath) : null;
+        let slotAfter = existsAfter(slotPath) ? getAfter(slotPath) : null;
+
+        return d.keys().hasOnly([
+                 'id', 'eventId', 'campusId', 'userId', 'sequenceNumber',
+                 'status', 'joinedAt', 'updatedAt'
+               ]) &&
+               d.keys().hasAll([
+                 'id', 'eventId', 'campusId', 'userId', 'sequenceNumber',
+                 'status', 'joinedAt', 'updatedAt'
+               ]) &&
+               d.id == mId &&
+               mId == d.eventId + '_' + d.userId &&
+               d.userId == request.auth.uid &&
+               d.campusId == getUserCampusId() &&
+               d.status == 'waiting' &&
+               d.joinedAt == request.time &&
+               d.updatedAt == request.time &&
+               eventDoc != null &&
+               eventDoc.data.campusId == getUserCampusId() &&
+               eventDoc.data.status == 'published' &&
+               eventDoc.data.get('registrationStatus', null) != 'migration_locked' &&
+               request.time < eventDoc.data.startAt &&
+               capDoc != null &&
+               d.sequenceNumber == capDoc.data.nextSequence &&
+               capAfter != null &&
+               capAfter.data.waitlistCount == capDoc.data.waitlistCount + 1 &&
+               capAfter.data.nextSequence == capDoc.data.nextSequence + 1 &&
+               capAfter.data.headSequence == capDoc.data.headSequence &&
+               !exists(slotPath) && slotAfter != null &&
+               slotAfter.data.userId == d.userId &&
+               slotAfter.data.sequenceNumber == d.sequenceNumber &&
+               slotAfter.data.status == 'waiting' &&
+               !exists(rsvpPath) && !existsAfter(rsvpPath);
+      }
+
+      function isValidMemberDelete(mId) {
+        let r = resource.data;
+        let slotPath = /databases/$(database)/documents/eventWaitlistSlots/$(r.eventId + '_' + string(r.sequenceNumber));
+        let eventPath = /databases/$(database)/documents/events/$(r.eventId);
+        let eventDoc = exists(eventPath) ? get(eventPath) : null;
+        let capPath = /databases/$(database)/documents/eventCapacities/$(r.eventId);
+        let capDoc = exists(capPath) ? get(capPath) : null;
+        let capAfter = existsAfter(capPath) ? getAfter(capPath) : null;
+        let slotAfter = existsAfter(slotPath) ? getAfter(slotPath) : null;
+
+        let isNonHeadWithdrawal =
+          r.status == 'waiting' &&
+          r.userId == request.auth.uid &&
+          capDoc != null &&
+          r.sequenceNumber > capDoc.data.headSequence &&
+          slotAfter != null &&
+          slotAfter.data.status == 'withdrawn' &&
+          capAfter != null &&
+          capAfter.data.waitlistCount == capDoc.data.waitlistCount - 1 &&
+          capAfter.data.headSequence == capDoc.data.headSequence;
+
+        return eventDoc != null &&
+               r.campusId == getUserCampusId() &&
+               eventDoc.data.campusId == getUserCampusId() &&
+               eventDoc.data.get('registrationStatus', null) != 'migration_locked' &&
+               request.time < eventDoc.data.startAt &&
+               isNonHeadWithdrawal;
+      }
+
+      function isMemberParentEventLeader(eventId) {
+        let eventPath = /databases/$(database)/documents/events/$(eventId);
+        let eventDoc = exists(eventPath) ? get(eventPath) : null;
+        return eventDoc != null &&
+               eventDoc.data.campusId == getUserCampusId() &&
+               eventDoc.data.communityId != null &&
+               isCommunityModeratorOrAdmin(eventDoc.data.communityId);
+      }
+
+      allow get: if isAuthenticated() && resource.data.campusId == getUserCampusId() && (
+        resource.data.userId == request.auth.uid ||
+        isMemberParentEventLeader(resource.data.eventId)
+      );
+
+      allow list: if false;
+      allow create: if isAuthenticated() && isValidMemberCreate(memberId);
+      allow update: if false;
+      allow delete: if isAuthenticated() && isValidMemberDelete(memberId);
+    }
+
+    // 15. Event Waitlist Continuations collection (Milestone 24)
+    match /eventWaitlistContinuations/{continuationId} {
+      allow read, write: if false;
+    }
+
+    // 16. Event Waitlist Outbox collection (Milestone 24)
+    match /eventWaitlistOutbox/{outboxId} {
+      allow read, write: if false;
+    }
+
+    // 17. System Waitlist Jobs collection (Milestone 24)
+    match /systemWaitlistJobs/{jobId} {
+      allow read, write: if false;
     }
 
     // 11. Event Notification Deliveries collection (Milestone 23.2: Delivery Ledger Security Authority)

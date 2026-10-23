@@ -481,9 +481,12 @@ describe("Milestone 22 — Unit 22.4: Event Management UI", () => {
       });
 
       // Extend endAt to a future date beyond current endAt
+      const futureExtendedEndAt = new Date(new Date(EVENT_AI_HACKATHON.endAt).getTime() + 24 * 60 * 60 * 1000)
+        .toISOString()
+        .slice(0, 16);
       act(() => {
         findByTestId(result.current, "edit-end-at-input").props.onChange({
-          target: { value: "2026-10-25T22:00" },
+          target: { value: futureExtendedEndAt },
         });
       });
 

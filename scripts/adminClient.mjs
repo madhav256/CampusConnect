@@ -49,12 +49,21 @@ export function getAdminApp() {
     return existingApps[0];
   }
 
-  const serviceAccountKeyPath = path.join(__dirname, "credentials", "serviceAccountKey.json");
   const projectId =
+    process.env.TEST_PROJECT_ID ||
+    (process.env.FIRESTORE_EMULATOR_HOST ? (process.env.GCLOUD_PROJECT || "demo-campusconnect-rules-test") : null) ||
+    process.env.GCLOUD_PROJECT ||
     process.env.VITE_FIREBASE_PROJECT_ID ||
     process.env.FIREBASE_PROJECT_ID ||
     "campusconnect-cf191";
 
+  if (process.env.FIRESTORE_EMULATOR_HOST) {
+    return initializeApp({
+      projectId,
+    });
+  }
+
+  const serviceAccountKeyPath = path.join(__dirname, "credentials", "serviceAccountKey.json");
   if (fs.existsSync(serviceAccountKeyPath)) {
     const serviceAccount = JSON.parse(fs.readFileSync(serviceAccountKeyPath, "utf-8"));
     return initializeApp({
@@ -67,12 +76,6 @@ export function getAdminApp() {
     return initializeApp({
       credential: applicationDefault(),
       projectId,
-    });
-  }
-
-  if (process.env.FIRESTORE_EMULATOR_HOST) {
-    return initializeApp({
-      projectId: projectId || "demo-campusconnect",
     });
   }
 

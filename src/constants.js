@@ -86,6 +86,7 @@ export const NOTIFICATION_TYPES = {
   CONNECTION_ACCEPTED: "connection_accepted",
   EVENT_RSVP: "event_rsvp",
   EVENT_CANCELLED: "event_cancelled",
+  WAITLIST_OFFER: "event_waitlist_offer",
 };
 
 export const NOTIFICATION_TYPE_LIST = Object.values(NOTIFICATION_TYPES);
@@ -100,3 +101,59 @@ export const DELIVERY_LEDGER_STATUSES = {
 export const DELIVERY_LEDGER_STATUS_LIST = Object.values(DELIVERY_LEDGER_STATUSES);
 
 export const CANCELLATION_DELIVERY_CHUNK_SIZE = 8;
+
+// Capacity & Waitlist Domain Constants (Milestone 24 — Capacity & Waitlists)
+export const WAITLIST_SLOT_STATUSES = {
+  WAITING: "waiting",
+  OFFERED: "offered",
+  CLAIMED: "claimed",
+  DECLINED: "declined",
+  EXPIRED: "expired",
+  WITHDRAWN: "withdrawn",
+};
+
+export const WAITLIST_SLOT_STATUS_LIST = Object.values(WAITLIST_SLOT_STATUSES);
+
+export const WAITLIST_TERMINAL_STATUSES = Object.freeze([
+  WAITLIST_SLOT_STATUSES.CLAIMED,
+  WAITLIST_SLOT_STATUSES.DECLINED,
+  WAITLIST_SLOT_STATUSES.EXPIRED,
+  WAITLIST_SLOT_STATUSES.WITHDRAWN,
+]);
+
+export const WAITLIST_ACTIVE_STATUSES = Object.freeze([
+  WAITLIST_SLOT_STATUSES.WAITING,
+  WAITLIST_SLOT_STATUSES.OFFERED,
+]);
+
+export const WAITLIST_MEMBER_STATUSES = {
+  WAITING: "waiting",
+  OFFERED: "offered",
+};
+
+export const WAITLIST_MEMBER_STATUS_LIST = Object.values(WAITLIST_MEMBER_STATUSES);
+
+export const CONTINUATION_STATUSES = {
+  PENDING: "pending",
+  PROCESSING: "processing",
+  COMPLETED: "completed",
+  FAILED_INTEGRITY: "failed_integrity",
+  FAILED_TERMINAL_RETRY: "failed_terminal_retry",
+};
+
+export const CONTINUATION_STATUS_LIST = Object.values(CONTINUATION_STATUSES);
+
+export const CONTINUATION_TYPES = {
+  PROMOTION: "promotion",
+  HEAD_NORMALIZATION: "head_normalization",
+};
+
+export const CONTINUATION_TYPE_LIST = Object.values(CONTINUATION_TYPES);
+
+export const REGISTRATION_STATUSES = {
+  MIGRATION_LOCKED: "migration_locked",
+};
+
+export const DEFAULT_OFFER_WINDOW_MS = 24 * 60 * 60 * 1000; // 24 hours
+export const MAX_QUEUE_SCAN_BUDGET = 10;
+export const MAX_PROMOTION_BATCH_SIZE = 5;

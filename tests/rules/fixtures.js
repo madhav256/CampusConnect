@@ -282,7 +282,7 @@ export function eventFixture(
 ) {
   const isApex = overrides.campusId
     ? overrides.campusId === APEX_CAMPUS_ID
-    : communityId.startsWith("apex") || communityId === "apex-ai-club";
+    : Boolean(communityId && (communityId.startsWith("apex") || communityId === "apex-ai-club"));
   const campusId = overrides.campusId || (isApex ? APEX_CAMPUS_ID : ST_JUDE_CAMPUS_ID);
   const laterTimestamp = firebase.firestore.Timestamp.fromMillis(1_700_003_600_000);
   return {
@@ -446,5 +446,89 @@ export async function seedBaseData(testEnvironment) {
 
     await batch.commit();
   });
+}
+
+export function eventCapacityFixture(eventId, campusId = APEX_CAMPUS_ID, overrides = {}) {
+  return {
+    id: eventId,
+    eventId,
+    campusId,
+    confirmedCount: 0,
+    offeredCount: 0,
+    waitlistCount: 0,
+    headSequence: 1,
+    nextSequence: 1,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    ...overrides,
+  };
+}
+
+export function eventWaitlistSlotFixture(eventId, sequenceNumber, userId, campusId = APEX_CAMPUS_ID, overrides = {}) {
+  return {
+    id: `${eventId}_${sequenceNumber}`,
+    eventId,
+    campusId,
+    userId,
+    sequenceNumber,
+    status: "waiting",
+    joinedAt: timestamp,
+    ...overrides,
+  };
+}
+
+export function eventWaitlistMemberFixture(eventId, userId, campusId = APEX_CAMPUS_ID, sequenceNumber = 1, overrides = {}) {
+  return {
+    id: `${eventId}_${userId}`,
+    eventId,
+    campusId,
+    userId,
+    sequenceNumber,
+    status: "waiting",
+    joinedAt: timestamp,
+    updatedAt: timestamp,
+    ...overrides,
+  };
+}
+
+export function eventWaitlistContinuationFixture(eventId, overrides = {}) {
+  return {
+    id: `continuation_${eventId}`,
+    eventId,
+    continuationType: "promotion",
+    reason: "promotion_partial_batch",
+    intermediateHeadSequence: 1,
+    vacanciesRemaining: 1,
+    targetBatch: 5,
+    normalizationRequired: false,
+    status: "pending",
+    leaseWorkerId: null,
+    leaseExpiresAt: null,
+    generation: 1,
+    retryCount: 0,
+    errorMessage: null,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    ...overrides,
+  };
+}
+
+export function eventWaitlistOutboxFixture(eventId, candidateSequence, recipientId, overrides = {}) {
+  return {
+    id: `outbox_${eventId}_${candidateSequence}`,
+    eventId,
+    candidateSequence,
+    recipientId,
+    type: "event_waitlist_offer",
+    status: "pending",
+    offerExpiresAt: timestamp,
+    lockedUntil: null,
+    deliveredAt: null,
+    retryCount: 0,
+    errorMessage: null,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    ...overrides,
+  };
 }
 

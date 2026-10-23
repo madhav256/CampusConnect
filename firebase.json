@@ -25,14 +25,71 @@
     ]
   },
   "firestore": {
-    "rules": "firestore.rules"
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
   },
+  "functions": [
+    {
+      "source": ".",
+      "codebase": "default",
+      "runtime": "nodejs22",
+      "ignore": [
+        "node_modules",
+        ".git",
+        "firebase-debug.log",
+        "firebase-debug.*.log",
+        "firestore-debug.log",
+        ".runtimeconfig.json",
+        ".env",
+        ".env.*",
+        ".claude",
+        ".github",
+        ".firebase",
+        "dist",
+        "public",
+        "tests",
+        "test-results",
+        "playwright-report",
+        "playwright.config.js",
+        "vitest.config.js",
+        "vite.config.js",
+        "eslint.config.js",
+        "index.html",
+        "*.md",
+        "scratch",
+        "scripts/credentials",
+        "scripts/snapshots",
+        "scripts/migrate*",
+        "scripts/seed*",
+        "scripts/cleanup*",
+        "scripts/diff*",
+        "scripts/reconcile*",
+        "scripts/restore*",
+        "scripts/snapshot*",
+        "scripts/verify*",
+        "src/assets",
+        "src/components",
+        "src/contexts",
+        "src/hooks",
+        "src/pages",
+        "src/services",
+        "src/utils",
+        "src/App.css",
+        "src/App.jsx",
+        "src/index.css",
+        "src/main.jsx"
+      ]
+    }
+  ],
   "emulators": {
     "auth": {
       "port": 9099
     },
     "firestore": {
       "port": 8080
+    },
+    "functions": {
+      "port": 5001
     },
     "ui": {
       "enabled": false

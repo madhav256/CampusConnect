@@ -49,9 +49,11 @@ test.describe("Messaging Regression (Unit 17.3)", () => {
     await expect(page.getByRole("heading", { name: E2E_USERS.studentB.displayName })).toBeVisible();
     await expect(page.getByText("Connected")).toBeVisible();
 
-    // Verify seeded message history
+    // Verify seeded message history in active thread
     await expect(
-      page.getByText("Hey Alex, excited to connect on CampusConnect!")
+      page
+        .locator("p.whitespace-pre-wrap")
+        .filter({ hasText: "Hey Alex, excited to connect on CampusConnect!" })
     ).toBeVisible();
 
     // Verify unread badge in Navbar auto-clears

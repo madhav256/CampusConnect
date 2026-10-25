@@ -27,14 +27,16 @@ import {
  *   cancelRsvp: () => Promise<void>,
  * }}
  */
-export function useEventRsvp(eventId, event = null) {
+export function useEventRsvp(eventId, event = null, coordinator = null) {
   const { user: authUser } = useAuth();
   const campusCtx = useOptionalCampus();
 
   const eventRef = useRef(event);
+  const coordinatorRef = useRef(coordinator);
   useEffect(() => {
     eventRef.current = event;
-  }, [event]);
+    coordinatorRef.current = coordinator;
+  }, [event, coordinator]);
 
   const userId = authUser?.uid || null;
   const campusId = campusCtx?.campusId || null;
@@ -121,8 +123,13 @@ export function useEventRsvp(eventId, event = null) {
 
     try {
       const payload = { eventId, userId, campusId };
-      if (eventRef.current) {
-        payload.event = eventRef.current;
+      const latestEvent = event ?? eventRef.current;
+      const latestCoordinator = coordinator ?? coordinatorRef.current;
+      if (latestEvent) {
+        payload.event = latestEvent;
+      }
+      if (latestCoordinator) {
+        payload.coordinator = latestCoordinator;
       }
       return await createEventRsvp(payload);
     } catch (err) {
@@ -134,7 +141,7 @@ export function useEventRsvp(eventId, event = null) {
       isMutatingRef.current = false;
       setIsMutating(false);
     }
-  }, [eventId, userId, campusId]);
+  }, [eventId, userId, campusId, event, coordinator]);
 
   const cancelRsvp = useCallback(async () => {
     if (isMutatingRef.current) {
@@ -157,7 +164,16 @@ export function useEventRsvp(eventId, event = null) {
     setError(null);
 
     try {
-      await deleteEventRsvp(eventId, userId);
+      const latestEvent = event ?? eventRef.current;
+      const latestCoordinator = coordinator ?? coordinatorRef.current;
+      if (latestEvent || latestCoordinator) {
+        await deleteEventRsvp(eventId, userId, {
+          event: latestEvent,
+          coordinator: latestCoordinator,
+        });
+      } else {
+        await deleteEventRsvp(eventId, userId);
+      }
     } catch (err) {
       if (activeKeyRef.current === mutationKey) {
         setError(err?.message || "Failed to cancel RSVP.");
@@ -167,7 +183,7 @@ export function useEventRsvp(eventId, event = null) {
       isMutatingRef.current = false;
       setIsMutating(false);
     }
-  }, [eventId, userId]);
+  }, [eventId, userId, event, coordinator]);
 
   return {
     rsvp,
@@ -176,6 +192,7 @@ export function useEventRsvp(eventId, event = null) {
     isMutating,
     error,
     rsvpToEvent,
+    confirmRsvp: rsvpToEvent,
     cancelRsvp,
   };
 }

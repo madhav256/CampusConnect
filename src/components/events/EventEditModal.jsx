@@ -12,6 +12,7 @@ import { useState, useEffect, useMemo } from "react";
 import { X, Pencil, Lock, AlertCircle } from "lucide-react";
 import { EVENT_CATEGORY_LIST } from "../../constants.js";
 import { UPCOMING_MUTABLE_FIELDS, ONGOING_MUTABLE_FIELDS } from "../../data/events.js";
+import { isCappedEvent } from "../../data/eventCapacities.js";
 import Button from "../ui/Button.jsx";
 import Input from "../ui/Input.jsx";
 import Textarea from "../ui/Textarea.jsx";
@@ -51,12 +52,14 @@ export default function EventEditModal({
   isOpen,
   onClose,
   event,
+  coordinator = null,
   isOngoing = false,
   isMutating = false,
   onSave,
   ...props
 }) {
   const modalId = "event-edit";
+  const isCapped = isCappedEvent(event);
 
   // Form Fields
   const [title, setTitle] = useState(event?.title || "");
@@ -66,6 +69,9 @@ export default function EventEditModal({
   const [organizerName, setOrganizerName] = useState(event?.organizerName || "");
   const [startAt, setStartAt] = useState(() => toDatetimeLocal(event?.startAt));
   const [endAt, setEndAt] = useState(() => toDatetimeLocal(event?.endAt));
+  const [capacity, setCapacity] = useState(() =>
+    isCappedEvent(event) ? String(event.capacity) : ""
+  );
   const [imageURL, setImageURL] = useState(event?.imageURL || "");
   const [description, setDescription] = useState(event?.description || "");
 
@@ -84,6 +90,7 @@ export default function EventEditModal({
     setOrganizerName(event?.organizerName || "");
     setStartAt(toDatetimeLocal(event?.startAt));
     setEndAt(toDatetimeLocal(event?.endAt));
+    setCapacity(isCappedEvent(event) ? String(event.capacity) : "");
     setImageURL(event?.imageURL || "");
     setDescription(event?.description || "");
     setFormErrors({});
@@ -125,6 +132,13 @@ export default function EventEditModal({
       if (startAt && startAt !== initialStartStr) {
         diff.startAt = new Date(startAt);
       }
+
+      if (isCapped && capacity.trim() !== "") {
+        const parsedCap = Number(capacity);
+        if (!Number.isNaN(parsedCap) && parsedCap !== event.capacity) {
+          diff.capacity = parsedCap;
+        }
+      }
     }
 
     if (location.trim() !== (event.location || "").trim()) {
@@ -155,7 +169,7 @@ export default function EventEditModal({
     }
 
     return sanitizedDiff;
-  }, [event, isOngoing, title, slug, category, organizerName, startAt, endAt, location, description, imageURL]);
+  }, [event, isOngoing, isCapped, title, slug, category, organizerName, startAt, endAt, capacity, location, description, imageURL]);
 
   const hasModifications = Object.keys(sparseDiff).length > 0;
 
@@ -198,6 +212,20 @@ export default function EventEditModal({
         const endMs = new Date(endAt).getTime();
         if (!isNaN(startMs) && !isNaN(endMs) && endMs < startMs) {
           errors.endAt = "End date/time must be at or after start date/time.";
+        }
+      }
+
+      if (isCapped) {
+        const parsedCap = Number(capacity);
+        if (!capacity.trim() || !Number.isInteger(parsedCap) || parsedCap < 1 || parsedCap > 10000) {
+          errors.capacity = "Capacity must be a whole number between 1 and 10,000.";
+        } else if (coordinator) {
+          const allocated =
+            (Number(coordinator.confirmedCount) || 0) +
+            (Number(coordinator.offeredCount) || 0);
+          if (parsedCap < allocated) {
+            errors.capacity = `Capacity cannot be less than currently allocated seats (${allocated}).`;
+          }
         }
       }
     } else {
@@ -495,6 +523,30 @@ export default function EventEditModal({
               ) : null}
             </div>
           </div>
+
+          {/* Capacity (for Capped Events) & Banner Image URL */}
+          {isCapped && (
+            <Input
+              id={`${modalId}-capacity`}
+              type="number"
+              min="1"
+              max="10000"
+              label="Seat Capacity"
+              data-testid="edit-capacity-input"
+              value={capacity}
+              onChange={(e) => {
+                setCapacity(e.target.value);
+                if (formErrors.capacity) setFormErrors((prev) => ({ ...prev, capacity: undefined }));
+              }}
+              error={formErrors.capacity}
+              disabled={isOngoing || isSubmitting || isMutating}
+              helperText={
+                isOngoing
+                  ? "Locked while event is ongoing"
+                  : "Increasing capacity automatically promotes waitlisted students"
+              }
+            />
+          )}
 
           {/* Banner Image URL */}
           <Input

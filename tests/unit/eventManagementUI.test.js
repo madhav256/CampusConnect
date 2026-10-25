@@ -612,6 +612,56 @@ describe("Milestone 22 — Unit 22.4: Event Management UI", () => {
       });
       expect(onClose).toHaveBeenCalledTimes(1);
     });
+
+    it("renders edit-capacity-input for capped upcoming events, validates against allocated seats, and submits updated capacity in sparse diff", async () => {
+      const onSave = vi.fn().mockResolvedValue();
+      const cappedEvent = {
+        ...EVENT_AI_HACKATHON,
+        capacity: 50,
+      };
+      const coordinator = {
+        confirmedCount: 30,
+        offeredCount: 5,
+        waitlistCount: 4,
+      };
+
+      const { result } = renderComponent(EventEditModal, {
+        ...defaultEditProps,
+        event: cappedEvent,
+        coordinator,
+        onSave,
+      });
+
+      const capInput = findByTestId(result.current, "edit-capacity-input");
+      expect(capInput).not.toBeNull();
+      expect(capInput.props.value).toBe("50");
+
+      // Attempt to reduce capacity below allocated seats (30 + 5 = 35)
+      act(() => {
+        capInput.props.onChange({ target: { value: "30" } });
+      });
+
+      let form = findByTestId(result.current, "event-edit-form");
+      await act(async () => {
+        await form.props.onSubmit({ preventDefault: vi.fn() });
+      });
+
+      expect(onSave).not.toHaveBeenCalled();
+
+      // Increase capacity to 80
+      act(() => {
+        findByTestId(result.current, "edit-capacity-input").props.onChange({
+          target: { value: "80" },
+        });
+      });
+
+      form = findByTestId(result.current, "event-edit-form");
+      await act(async () => {
+        await form.props.onSubmit({ preventDefault: vi.fn() });
+      });
+
+      expect(onSave).toHaveBeenCalledWith({ capacity: 80 });
+    });
   });
 
   // =========================================================================

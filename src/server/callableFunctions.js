@@ -48,6 +48,70 @@ async function resolveEffectiveCampusId(transaction, firestore, uid, userCampusI
 }
 
 /**
+ * Enforces campus-tenancy and event organizer / community leader (admin or moderator)
+ * authority for administrative waitlist callables (PW-7B promoteWaitlistCandidates,
+ * PW-12 fastForwardWaitlistHead).
+ */
+async function assertEventOrganizerOrLeader(transaction, firestore, event, uid, userCampusId) {
+  const effectiveCampusId = await resolveEffectiveCampusId(
+    transaction,
+    firestore,
+    uid,
+    userCampusId
+  );
+
+  if (!effectiveCampusId || !event.campusId || event.campusId !== effectiveCampusId) {
+    throw new HttpsError("PERMISSION_DENIED", "Campus tenancy violation");
+  }
+
+  if (
+    event.communityId === null ||
+    typeof event.communityId !== "string" ||
+    event.communityId.trim() === ""
+  ) {
+    throw new HttpsError(
+      "PERMISSION_DENIED",
+      "Campus-wide system events cannot be managed via client callables"
+    );
+  }
+
+  const memberRef = firestore
+    .collection("communityMembers")
+    .doc(`${event.communityId}_${uid}`);
+  const memberSnap = await transaction.get(memberRef);
+
+  if (!memberSnap.exists) {
+    throw new HttpsError(
+      "PERMISSION_DENIED",
+      "Active community membership is required to manage event waitlist"
+    );
+  }
+
+  const memberData = memberSnap.data();
+  if (memberData.campusId && memberData.campusId !== event.campusId) {
+    throw new HttpsError("PERMISSION_DENIED", "Campus tenancy violation");
+  }
+
+  if (memberData.status !== "active") {
+    throw new HttpsError(
+      "PERMISSION_DENIED",
+      "Active community membership is required to manage event waitlist"
+    );
+  }
+
+  const isLeaderRole =
+    memberData.role === "admin" || memberData.role === "moderator";
+  if (!isLeaderRole) {
+    throw new HttpsError(
+      "PERMISSION_DENIED",
+      "Caller is not an active admin or moderator for this event's community"
+    );
+  }
+
+  return effectiveCampusId;
+}
+
+/**
  * 1. cancelRsvpWithPromotion (PW-4)
  * Authenticated confirmed attendee withdraws. If waitlist is active, promotes normalized head candidate.
  */
@@ -775,17 +839,24 @@ export async function leaveWaitlist(data, context, db) {
  */
 export async function promoteWaitlistCandidates(data, context, db) {
   const firestore = resolveFirestore(db, context);
-  const { eventId, maxBatch, maxSeats } = data || {};
+  const { eventId, maxBatch, maxSeats, targetVacancies } = data || {};
   const auth = extractAuth(context);
   if (!auth) {
     throw new HttpsError("UNAUTHENTICATED", "Authentication required");
   }
+  const uid = auth.uid;
+  const userCampusId = auth.campusId;
 
   if (!eventId || typeof eventId !== "string" || !/^[a-zA-Z0-9_-]+$/.test(eventId)) {
     throw new HttpsError("INVALID_ARGUMENT", "Invalid eventId parameter");
   }
 
-  const requestedQuota = maxSeats !== undefined ? maxSeats : maxBatch;
+  const requestedQuota =
+    maxSeats !== undefined
+      ? maxSeats
+      : targetVacancies !== undefined
+        ? targetVacancies
+        : maxBatch;
   const serverBatch = Math.min(Math.max(1, requestedQuota || 5), 5);
 
   const result = await firestore.runTransaction(async (transaction) => {
@@ -801,6 +872,8 @@ export async function promoteWaitlistCandidates(data, context, db) {
       throw new HttpsError("NOT_FOUND", "Event not found");
     }
     const event = eventSnap.data();
+
+    await assertEventOrganizerOrLeader(transaction, firestore, event, uid, userCampusId);
 
     if (!capSnap.exists) {
       throw new HttpsError("NOT_FOUND", "Event coordinator not found");
@@ -986,13 +1059,19 @@ export async function promoteWaitlistCandidates(data, context, db) {
 
 /**
  * 6. fastForwardWaitlistHead (PW-12)
- * Administrative / Maintenance helper to advance head pointer past terminal holes.
+ * Administrative / Organizer maintenance helper to advance head pointer past terminal holes.
  */
 export async function fastForwardWaitlistHead(data, context, db) {
   const firestore = resolveFirestore(db, context);
   const { eventId, maxScan = 10 } = data || {};
+  const auth = extractAuth(context);
+  if (!auth) {
+    throw new HttpsError("UNAUTHENTICATED", "Authentication required");
+  }
+  const uid = auth.uid;
+  const userCampusId = auth.campusId;
 
-  if (!eventId || typeof eventId !== "string") {
+  if (!eventId || typeof eventId !== "string" || !/^[a-zA-Z0-9_-]+$/.test(eventId)) {
     throw new HttpsError("INVALID_ARGUMENT", "Invalid eventId parameter");
   }
 
@@ -1011,6 +1090,8 @@ export async function fastForwardWaitlistHead(data, context, db) {
       throw new HttpsError("NOT_FOUND", "Event not found");
     }
     const event = eventSnap.data();
+
+    await assertEventOrganizerOrLeader(transaction, firestore, event, uid, userCampusId);
 
     if (!capSnap.exists) {
       throw new HttpsError("NOT_FOUND", "Event coordinator not found");

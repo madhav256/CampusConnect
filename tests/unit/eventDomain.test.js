@@ -316,8 +316,9 @@ describe("Milestone 20 — Unit 20.1: Event Domain Model & Seeding Invariants", 
         "endAt",
         "imageURL",
         "organizerName",
+        "capacity",
       ]);
-      expect(UPCOMING_MUTABLE_FIELDS).toHaveLength(9);
+      expect(UPCOMING_MUTABLE_FIELDS).toHaveLength(10);
       expect(Object.isFrozen(UPCOMING_MUTABLE_FIELDS)).toBe(true);
     });
 

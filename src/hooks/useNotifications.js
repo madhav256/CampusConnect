@@ -68,6 +68,9 @@ export function useNotifications() {
       if (n.type === "event_cancelled" && prefs?.eventCancellations === false) {
         return false;
       }
+      if (n.type === "event_waitlist_offer" && prefs?.eventWaitlistOffers === false) {
+        return false;
+      }
       return true;
     });
   }, [rawNotifications, profile?.notificationPreferences]);

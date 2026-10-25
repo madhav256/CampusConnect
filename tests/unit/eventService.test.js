@@ -301,6 +301,25 @@ describe("Milestone 20 — Unit 20.3: Event Service", () => {
       expect(normalized.title).toBe("Object Event");
       expect(normalized.category).toBe(EVENT_CATEGORIES.ACADEMIC);
     });
+
+    it("normalizeEvent preserves capacity for capped events and null capacity", () => {
+      const cappedDoc = {
+        id: "evt-capped-50",
+        campusId: APEX_CAMPUS_ID,
+        title: "Capped Seminar",
+        category: EVENT_CATEGORIES.ACADEMIC,
+        capacity: 50,
+      };
+      const normalizedCapped = normalizeEvent(cappedDoc);
+      expect(normalizedCapped.capacity).toBe(50);
+
+      const explicitNullCap = normalizeEvent("evt-null-cap", {
+        campusId: APEX_CAMPUS_ID,
+        title: "Explicit Uncapped",
+        capacity: null,
+      });
+      expect(explicitNullCap.capacity).toBeNull();
+    });
   });
 
   describe("Sorting & Temporal Filtering", () => {
@@ -1080,6 +1099,58 @@ describe("Milestone 20 — Unit 20.3: Event Service", () => {
       );
     });
 
+    it("createEvent atomically creates event and eventCapacities coordinator in a single writeBatch when capacity is provided", async () => {
+      mocks.mockBatch.set.mockClear();
+      mocks.mockBatch.commit.mockClear();
+      mocks.mockBatch.commit.mockResolvedValueOnce();
+
+      const eventId = await createEvent({
+        ...validCreateInput,
+        capacity: 75,
+      });
+
+      expect(typeof eventId).toBe("string");
+      expect(mocks.setDoc).not.toHaveBeenCalled();
+      expect(mocks.mockBatch.set).toHaveBeenCalledTimes(2);
+      expect(mocks.mockBatch.set).toHaveBeenCalledWith(
+        expect.objectContaining({ path: `events/${eventId}` }),
+        expect.objectContaining({
+          id: eventId,
+          capacity: 75,
+          campusId: APEX_CAMPUS_ID,
+        })
+      );
+      expect(mocks.mockBatch.set).toHaveBeenCalledWith(
+        expect.objectContaining({ path: `eventCapacities/${eventId}` }),
+        expect.objectContaining({
+          id: eventId,
+          eventId,
+          campusId: APEX_CAMPUS_ID,
+          confirmedCount: 0,
+          offeredCount: 0,
+          waitlistCount: 0,
+          headSequence: 1,
+          nextSequence: 1,
+        })
+      );
+      expect(mocks.mockBatch.commit).toHaveBeenCalledTimes(1);
+    });
+
+    it("createEvent rejects invalid capacity values outside [1, 10000]", async () => {
+      await expect(
+        createEvent({ ...validCreateInput, capacity: 0 })
+      ).rejects.toThrow("Event capacity must be an integer between 1 and 10000.");
+      await expect(
+        createEvent({ ...validCreateInput, capacity: -5 })
+      ).rejects.toThrow("Event capacity must be an integer between 1 and 10000.");
+      await expect(
+        createEvent({ ...validCreateInput, capacity: 10001 })
+      ).rejects.toThrow("Event capacity must be an integer between 1 and 10000.");
+      await expect(
+        createEvent({ ...validCreateInput, capacity: 12.5 })
+      ).rejects.toThrow("Event capacity must be an integer between 1 and 10000.");
+    });
+
     describe("toFirestoreTimestamp Helper", () => {
       it("canonicalizes Date objects to Firestore Timestamp instances", () => {
         const d = new Date("2026-10-20T10:00:00.000Z");
@@ -1594,6 +1665,42 @@ describe("Milestone 20 — Unit 20.3: Event Service", () => {
             updatedAt: expect.objectContaining({ _methodName: "serverTimestamp" }),
           }
         );
+      });
+
+      it("updates capacity on an upcoming capped event and rejects capacity below allocated seats or on uncapped events", async () => {
+        const cappedUpcoming = {
+          ...baseUpcoming,
+          capacity: 50,
+        };
+        mocks.getDoc.mockResolvedValueOnce({
+          exists: () => true,
+          data: () => ({ confirmedCount: 30, offeredCount: 5, waitlistCount: 0 }),
+        });
+        mocks.updateDoc.mockResolvedValueOnce();
+
+        await updateEvent("e-up-payload", { capacity: 60 }, cappedUpcoming, fixedNow);
+
+        expect(mocks.updateDoc).toHaveBeenCalledWith(
+          expect.objectContaining({ path: "events/e-up-payload" }),
+          {
+            capacity: 60,
+            updatedAt: expect.objectContaining({ _methodName: "serverTimestamp" }),
+          }
+        );
+
+        // Rejects reducing capacity below confirmedCount + offeredCount (35)
+        mocks.getDoc.mockResolvedValueOnce({
+          exists: () => true,
+          data: () => ({ confirmedCount: 30, offeredCount: 5, waitlistCount: 0 }),
+        });
+        await expect(
+          updateEvent("e-up-payload", { capacity: 34 }, cappedUpcoming, fixedNow)
+        ).rejects.toThrow("cannot be reduced below currently allocated seats (35)");
+
+        // Rejects modifying capacity on an uncapped event
+        await expect(
+          updateEvent("e-up-payload", { capacity: 50 }, baseUpcoming, fixedNow)
+        ).rejects.toThrow("Cannot modify capacity on an uncapped event.");
       });
     });
 

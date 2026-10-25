@@ -8,8 +8,10 @@
  * 4. Phase 3 Atomic commit & Phase 4 parity read-back when N <= cap
  */
 
+import process from "node:process";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { migrateEventToCapped } from "../../scripts/migrateUncappedToCapped.js";
+import * as adminClient from "../../scripts/adminClient.mjs";
 
 describe("Milestone 24 — Unit 24.3 / Section 10: Migration Tooling", () => {
   let mockEvent;
@@ -222,6 +224,84 @@ describe("Milestone 24 — Unit 24.3 / Section 10: Migration Tooling", () => {
       // Verify event was updated with capacity and lock cleared
       expect(mockEvent.capacity).toBe(10);
       expect(mockEvent.registrationStatus).toBeUndefined();
+    });
+  });
+
+  describe("Default Admin Client Resolution & Fail-Closed Guard", () => {
+    it("exports getAdminDb from adminClient.mjs and fails closed when invoked without FIRESTORE_EMULATOR_HOST", async () => {
+      expect(typeof adminClient.getAdminDb).toBe("function");
+      expect(typeof adminClient.getAdminApp).toBe("function");
+
+      const prevEmulatorHost = process.env.FIRESTORE_EMULATOR_HOST;
+      const prevAllowProd = process.env.ALLOW_PRODUCTION_ADMIN_ACCESS;
+      try {
+        delete process.env.FIRESTORE_EMULATOR_HOST;
+        delete process.env.ALLOW_PRODUCTION_ADMIN_ACCESS;
+
+        await expect(
+          migrateEventToCapped({
+            eventId: "evt-test-1",
+            targetCapacity: 10,
+            dryRun: true,
+          })
+        ).rejects.toThrow(/FAIL-CLOSED GUARD/);
+      } finally {
+        if (prevEmulatorHost !== undefined) {
+          process.env.FIRESTORE_EMULATOR_HOST = prevEmulatorHost;
+        }
+        if (prevAllowProd !== undefined) {
+          process.env.ALLOW_PRODUCTION_ADMIN_ACCESS = prevAllowProd;
+        }
+      }
+    });
+
+    it("refuses emulator initialization if project ID points to production campusconnect-cf191", () => {
+      const prevEmulatorHost = process.env.FIRESTORE_EMULATOR_HOST;
+      const prevGcloudProject = process.env.GCLOUD_PROJECT;
+      try {
+        process.env.FIRESTORE_EMULATOR_HOST = "127.0.0.1:8080";
+        process.env.GCLOUD_PROJECT = adminClient.PRODUCTION_PROJECT_ID;
+
+        expect(() => adminClient.getAdminApp()).toThrow(/FAIL-CLOSED GUARD/);
+      } finally {
+        if (prevEmulatorHost === undefined) {
+          delete process.env.FIRESTORE_EMULATOR_HOST;
+        } else {
+          process.env.FIRESTORE_EMULATOR_HOST = prevEmulatorHost;
+        }
+        if (prevGcloudProject === undefined) {
+          delete process.env.GCLOUD_PROJECT;
+        } else {
+          process.env.GCLOUD_PROJECT = prevGcloudProject;
+        }
+      }
+    });
+
+    it("correctly distinguishes deployed Cloud Functions runtime from local/test environments", () => {
+      expect(
+        adminClient.isDeployedFunctionsRuntime({ K_SERVICE: "claimWaitlistOffer" })
+      ).toBe(true);
+      expect(
+        adminClient.isDeployedFunctionsRuntime({ FUNCTION_TARGET: "claimWaitlistOffer" })
+      ).toBe(true);
+      expect(
+        adminClient.isDeployedFunctionsRuntime({
+          K_SERVICE: "claimWaitlistOffer",
+          FUNCTIONS_EMULATOR: "true",
+        })
+      ).toBe(false);
+      expect(
+        adminClient.isDeployedFunctionsRuntime({
+          K_SERVICE: "claimWaitlistOffer",
+          FIRESTORE_EMULATOR_HOST: "127.0.0.1:8080",
+        })
+      ).toBe(false);
+      expect(
+        adminClient.isDeployedFunctionsRuntime({
+          K_SERVICE: "claimWaitlistOffer",
+          VITEST: "true",
+        })
+      ).toBe(false);
     });
   });
 });

@@ -16,6 +16,12 @@ const mocks = vi.hoisted(() => {
     delete: vi.fn(),
     commit: vi.fn(() => Promise.resolve()),
   };
+  const mockTransaction = {
+    get: vi.fn(),
+    set: vi.fn(),
+    update: vi.fn(),
+    delete: vi.fn(),
+  };
   const mockCallables = {
     claimWaitlistOffer: vi.fn(),
     declineWaitlistOffer: vi.fn(),
@@ -36,6 +42,8 @@ const mocks = vi.hoisted(() => {
     setDoc: vi.fn(),
     writeBatch: vi.fn(() => mockBatch),
     mockBatch,
+    runTransaction: vi.fn(async (_db, updateFn) => updateFn(mockTransaction)),
+    mockTransaction,
     onSnapshot: vi.fn(),
     serverTimestamp: vi.fn(() => ({ _methodName: "serverTimestamp" })),
     increment: vi.fn((n) => ({ _methodName: "increment", delta: n })),
@@ -57,6 +65,7 @@ vi.mock("firebase/firestore", () => ({
   getDoc: mocks.getDoc,
   setDoc: mocks.setDoc,
   writeBatch: mocks.writeBatch,
+  runTransaction: mocks.runTransaction,
   onSnapshot: mocks.onSnapshot,
   serverTimestamp: mocks.serverTimestamp,
   increment: mocks.increment,
@@ -187,27 +196,44 @@ describe("Milestone 24 — Unit 24.2: Event Waitlist Service", () => {
     });
   });
 
-  describe("Atomic Batches (PW-2 Join & PW-5 Non-Head Withdrawal)", () => {
-    it("executes PW-2 Waitlist Join as a 3-document atomic batch write", async () => {
-      // Coordinator getDoc returns nextSequence = 4
-      mocks.getDoc.mockResolvedValueOnce({
-        exists: () => true,
-        id: "evt-100",
-        data: () => ({
-          eventId: "evt-100",
-          capacity: 50,
-          headSequence: 1,
-          nextSequence: 4,
-          waitlistCount: 3,
-        }),
+  describe("Transactional Waitlist Join (PW-2) & Atomic Non-Head Withdrawal (PW-5)", () => {
+    it("executes PW-2 Waitlist Join inside a transaction reading state before 3-document atomic writes", async () => {
+      mocks.mockTransaction.get.mockImplementation(async (ref) => {
+        if (ref.path === "eventCapacities/evt-100") {
+          return {
+            exists: () => true,
+            id: "evt-100",
+            data: () => ({
+              eventId: "evt-100",
+              capacity: 50,
+              confirmedCount: 50,
+              offeredCount: 0,
+              headSequence: 1,
+              nextSequence: 4,
+              waitlistCount: 3,
+            }),
+          };
+        }
+        if (ref.path === "events/evt-100") {
+          return {
+            exists: () => true,
+            id: "evt-100",
+            data: () => ({
+              id: "evt-100",
+              status: "published",
+              capacity: 50,
+            }),
+          };
+        }
+        return { exists: () => false, data: () => null };
       });
 
       const result = await joinWaitlistBatch("evt-100", "usr-new", "apex-university");
 
-      expect(mocks.writeBatch).toHaveBeenCalled();
+      expect(mocks.runTransaction).toHaveBeenCalledTimes(1);
 
       // 1. Member document created at sequence 4
-      expect(mocks.mockBatch.set).toHaveBeenCalledWith(
+      expect(mocks.mockTransaction.set).toHaveBeenCalledWith(
         expect.objectContaining({ path: "eventWaitlistMembers/evt-100_usr-new" }),
         expect.objectContaining({
           id: "evt-100_usr-new",
@@ -220,7 +246,7 @@ describe("Milestone 24 — Unit 24.2: Event Waitlist Service", () => {
       );
 
       // 2. Slot document created at sequence 4
-      expect(mocks.mockBatch.set).toHaveBeenCalledWith(
+      expect(mocks.mockTransaction.set).toHaveBeenCalledWith(
         expect.objectContaining({ path: "eventWaitlistSlots/evt-100_4" }),
         expect.objectContaining({
           id: "evt-100_4",
@@ -232,7 +258,7 @@ describe("Milestone 24 — Unit 24.2: Event Waitlist Service", () => {
       );
 
       // 3. Coordinator nextSequence + 1 and waitlistCount + 1
-      expect(mocks.mockBatch.update).toHaveBeenCalledWith(
+      expect(mocks.mockTransaction.update).toHaveBeenCalledWith(
         expect.objectContaining({ path: "eventCapacities/evt-100" }),
         expect.objectContaining({
           nextSequence: expect.objectContaining({ _methodName: "increment", delta: 1 }),
@@ -240,8 +266,203 @@ describe("Milestone 24 — Unit 24.2: Event Waitlist Service", () => {
         })
       );
 
-      expect(mocks.mockBatch.commit).toHaveBeenCalled();
-      expect(result.sequenceNumber).toBe(4);
+      expect(result).toEqual({ success: true, sequenceNumber: 4 });
+    });
+
+    it("allocates unique, monotonic FIFO sequence numbers across concurrent waitlist joins via transaction retries", async () => {
+      // Simulate an in-memory transactional store with optimistic concurrency versioning on eventCapacities
+      const store = new Map([
+        [
+          "events/evt-concurrent",
+          {
+            version: 1,
+            data: { id: "evt-concurrent", status: "published", capacity: 2 },
+          },
+        ],
+        [
+          "eventCapacities/evt-concurrent",
+          {
+            version: 1,
+            data: {
+              eventId: "evt-concurrent",
+              capacity: 2,
+              confirmedCount: 2,
+              offeredCount: 0,
+              waitlistCount: 0,
+              headSequence: 1,
+              nextSequence: 1,
+            },
+          },
+        ],
+      ]);
+
+      let retryAttempts = 0;
+
+      mocks.runTransaction.mockImplementation(async (_db, updateFn) => {
+        for (let attempt = 0; attempt < 5; attempt++) {
+          const readVersions = new Map();
+          const stagedWrites = [];
+
+          const tx = {
+            get: async (ref) => {
+              // Yield a microtask so concurrent callers read the same initial snapshot on attempt 0
+              await Promise.resolve();
+              const entry = store.get(ref.path);
+              readVersions.set(ref.path, entry ? entry.version : 0);
+              return {
+                exists: () => Boolean(entry),
+                id: ref.id,
+                data: () => (entry ? { ...entry.data } : null),
+              };
+            },
+            set: (ref, payload) => {
+              stagedWrites.push({ type: "set", path: ref.path, payload });
+            },
+            update: (ref, payload) => {
+              stagedWrites.push({ type: "update", path: ref.path, payload });
+            },
+          };
+
+          const out = await updateFn(tx);
+
+          // Optimistic concurrency check: verify all read documents still match readVersion
+          let conflict = false;
+          for (const [path, readVer] of readVersions.entries()) {
+            const currentVer = store.get(path)?.version || 0;
+            if (currentVer !== readVer) {
+              conflict = true;
+              break;
+            }
+          }
+
+          if (conflict) {
+            retryAttempts++;
+            continue;
+          }
+
+          // Commit staged writes atomically
+          for (const write of stagedWrites) {
+            const existing = store.get(write.path);
+            if (write.type === "set") {
+              store.set(write.path, {
+                version: (existing?.version || 0) + 1,
+                data: { ...write.payload },
+              });
+            } else if (write.type === "update") {
+              const nextData = { ...(existing?.data || {}) };
+              for (const [k, v] of Object.entries(write.payload)) {
+                if (v && v._methodName === "increment") {
+                  nextData[k] = (Number(nextData[k]) || 0) + v.delta;
+                } else {
+                  nextData[k] = v;
+                }
+              }
+              store.set(write.path, {
+                version: (existing?.version || 0) + 1,
+                data: nextData,
+              });
+            }
+          }
+
+          return out;
+        }
+        throw new Error("Transaction retry limit exceeded");
+      });
+
+      const [res1, res2, res3] = await Promise.all([
+        joinWaitlistBatch("evt-concurrent", "usr-1", "apex-university"),
+        joinWaitlistBatch("evt-concurrent", "usr-2", "apex-university"),
+        joinWaitlistBatch("evt-concurrent", "usr-3", "apex-university"),
+      ]);
+
+      // All 3 concurrent joins succeed with unique, monotonic sequence numbers 1, 2, 3
+      const assignedSeqs = [res1.sequenceNumber, res2.sequenceNumber, res3.sequenceNumber].sort(
+        (a, b) => a - b
+      );
+      expect(assignedSeqs).toEqual([1, 2, 3]);
+      expect(retryAttempts).toBeGreaterThanOrEqual(2);
+
+      // Coordinator reflects waitlistCount = 3 and nextSequence = 4
+      const finalCoord = store.get("eventCapacities/evt-concurrent").data;
+      expect(finalCoord.waitlistCount).toBe(3);
+      expect(finalCoord.nextSequence).toBe(4);
+
+      // Every slot and member document exists and matches its assigned sequence number
+      for (const [uid, res] of [
+        ["usr-1", res1],
+        ["usr-2", res2],
+        ["usr-3", res3],
+      ]) {
+        const memberDoc = store.get(`eventWaitlistMembers/evt-concurrent_${uid}`)?.data;
+        const slotDoc = store.get(`eventWaitlistSlots/evt-concurrent_${res.sequenceNumber}`)?.data;
+        expect(memberDoc?.sequenceNumber).toBe(res.sequenceNumber);
+        expect(slotDoc?.userId).toBe(uid);
+        expect(slotDoc?.sequenceNumber).toBe(res.sequenceNumber);
+      }
+    });
+
+    it("rejects duplicate waitlist join when user is already on the waitlist or has a confirmed RSVP, or when seats are open", async () => {
+      // Restore default mockTransaction implementation
+      mocks.runTransaction.mockImplementation(async (_db, updateFn) =>
+        updateFn(mocks.mockTransaction)
+      );
+
+      // Case 1: Already on waitlist
+      mocks.mockTransaction.get.mockImplementation(async (ref) => {
+        if (ref.path === "eventCapacities/evt-100") {
+          return {
+            exists: () => true,
+            data: () => ({ capacity: 10, confirmedCount: 10, offeredCount: 0, waitlistCount: 1, nextSequence: 2 }),
+          };
+        }
+        if (ref.path === "eventWaitlistMembers/evt-100_usr-dup") {
+          return {
+            exists: () => true,
+            data: () => ({ id: "evt-100_usr-dup", sequenceNumber: 1, status: "waiting" }),
+          };
+        }
+        return { exists: () => false, data: () => null };
+      });
+
+      await expect(
+        joinWaitlistBatch("evt-100", "usr-dup", "apex-university")
+      ).rejects.toThrow("already on the waitlist");
+
+      // Case 2: Already has confirmed RSVP
+      mocks.mockTransaction.get.mockImplementation(async (ref) => {
+        if (ref.path === "eventCapacities/evt-100") {
+          return {
+            exists: () => true,
+            data: () => ({ capacity: 10, confirmedCount: 10, offeredCount: 0, waitlistCount: 1, nextSequence: 2 }),
+          };
+        }
+        if (ref.path === "eventRsvps/evt-100_usr-going") {
+          return {
+            exists: () => true,
+            data: () => ({ id: "evt-100_usr-going", userId: "usr-going" }),
+          };
+        }
+        return { exists: () => false, data: () => null };
+      });
+
+      await expect(
+        joinWaitlistBatch("evt-100", "usr-going", "apex-university")
+      ).rejects.toThrow("already have a confirmed RSVP");
+
+      // Case 3: Event has open seats and empty waitlist
+      mocks.mockTransaction.get.mockImplementation(async (ref) => {
+        if (ref.path === "eventCapacities/evt-100") {
+          return {
+            exists: () => true,
+            data: () => ({ capacity: 10, confirmedCount: 5, offeredCount: 0, waitlistCount: 0, nextSequence: 1 }),
+          };
+        }
+        return { exists: () => false, data: () => null };
+      });
+
+      await expect(
+        joinWaitlistBatch("evt-100", "usr-early", "apex-university")
+      ).rejects.toThrow("Event has available seats");
     });
 
     it("executes PW-5 Non-Head Withdrawal as a 3-document atomic batch write", async () => {

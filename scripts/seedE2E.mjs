@@ -26,11 +26,8 @@ if (!process.env.FIREBASE_AUTH_EMULATOR_HOST) {
   process.env.FIREBASE_AUTH_EMULATOR_HOST = "127.0.0.1:9099";
 }
 
-if (
-  EMULATOR_PROJECT_ID.includes("campusconnect-cf191") &&
-  !process.env.FIRESTORE_EMULATOR_HOST
-) {
-  console.error("FATAL: Refusing to seed production database.");
+if (EMULATOR_PROJECT_ID.includes("campusconnect-cf191")) {
+  console.error("FATAL: Refusing to seed production project ID (campusconnect-cf191).");
   process.exit(1);
 }
 

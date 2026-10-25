@@ -67,14 +67,37 @@ function loadLocalEnv() {
   }
 }
 
-loadLocalEnv();
-
-// Initialize Firebase Admin safely
+// Initialize Firebase Admin safely (fail-closed outside emulator unless ALLOW_PRODUCTION_ADMIN_ACCESS=true)
 function initializeAdminApp() {
   const existingApps = getApps();
   if (existingApps.length > 0) {
     return existingApps[0];
   }
+
+  // Option 1: Local Firebase Emulator (if running)
+  if (process.env.FIRESTORE_EMULATOR_HOST) {
+    const emulatorProjectId =
+      process.env.GCLOUD_PROJECT || "demo-campusconnect-rules-test";
+    if (emulatorProjectId === "campusconnect-cf191") {
+      throw new Error(
+        `[seed] FAIL-CLOSED GUARD: Refusing to seed emulator using production project ID "campusconnect-cf191".`
+      );
+    }
+    console.log(`[seed] Using Firestore Emulator at ${process.env.FIRESTORE_EMULATOR_HOST}`);
+    return initializeApp({
+      projectId: emulatorProjectId,
+    });
+  }
+
+  // Fail-closed guard for non-emulator execution
+  if (process.env.ALLOW_PRODUCTION_ADMIN_ACCESS !== "true") {
+    throw new Error(
+      "[seed] FAIL-CLOSED GUARD: Refusing to run seedDemoData without FIRESTORE_EMULATOR_HOST. " +
+        "To intentionally seed a live cloud project, set ALLOW_PRODUCTION_ADMIN_ACCESS=true."
+    );
+  }
+
+  loadLocalEnv();
 
   const serviceAccountKeyPath = path.join(__dirname, "credentials", "serviceAccountKey.json");
   const projectId =
@@ -83,13 +106,10 @@ function initializeAdminApp() {
     process.env.FIREBASE_PROJECT_ID ||
     "campusconnect-cf191";
 
-  // Option 1: Local Firebase Emulator (if running)
-  if (process.env.FIRESTORE_EMULATOR_HOST) {
-    console.log(`[seed] Using Firestore Emulator at ${process.env.FIRESTORE_EMULATOR_HOST}`);
-    return initializeApp({
-      projectId: projectId || "demo-campusconnect",
-    });
-  }
+  console.warn(
+    `⚠️ [WARNING][seed] Explicit real-cloud opt-in (ALLOW_PRODUCTION_ADMIN_ACCESS=true) detected. ` +
+      `Seeding live cloud project "${projectId}".`
+  );
 
   // Option 2: Local git-ignored service account key
   if (fs.existsSync(serviceAccountKeyPath)) {
@@ -120,9 +140,9 @@ function initializeAdminApp() {
   } catch (err) {
     console.error(`\n[seed] ERROR: Could not resolve Firebase Admin credentials.`);
     console.error(`Please provide admin credentials using one of the following methods:`);
-    console.error(`1. Place a service account key at: scripts/credentials/serviceAccountKey.json (git-ignored)`);
-    console.error(`2. Set GOOGLE_APPLICATION_CREDENTIALS environment variable.`);
-    console.error(`3. Run with local emulator (set FIRESTORE_EMULATOR_HOST).`);
+    console.error(`1. Run with local emulator (set FIRESTORE_EMULATOR_HOST).`);
+    console.error(`2. With ALLOW_PRODUCTION_ADMIN_ACCESS=true, place a service account key at: scripts/credentials/serviceAccountKey.json`);
+    console.error(`3. With ALLOW_PRODUCTION_ADMIN_ACCESS=true, set GOOGLE_APPLICATION_CREDENTIALS.`);
     console.error(`\nOriginal error: ${err.message}\n`);
     process.exit(1);
   }

@@ -71,6 +71,7 @@ export default function EventComposerModal({
   const [location, setLocation] = useState("");
   const [startAt, setStartAt] = useState("");
   const [endAt, setEndAt] = useState("");
+  const [capacity, setCapacity] = useState("");
   const [visibility, setVisibility] = useState(EVENT_VISIBILITIES.CAMPUS_PUBLIC);
   const [imageURL, setImageURL] = useState("");
   const [description, setDescription] = useState("");
@@ -154,6 +155,13 @@ export default function EventComposerModal({
       }
     }
 
+    if (capacity !== "" && capacity !== null && capacity !== undefined) {
+      const parsedCap = Number(capacity);
+      if (!Number.isInteger(parsedCap) || parsedCap < 1 || parsedCap > 10000) {
+        errors.capacity = "Capacity must be a whole number between 1 and 10,000.";
+      }
+    }
+
     return errors;
   };
 
@@ -186,6 +194,10 @@ export default function EventComposerModal({
       visibility,
     };
 
+    if (capacity !== "" && capacity !== null && capacity !== undefined) {
+      payload.capacity = Number(capacity);
+    }
+
     setIsSubmitting(true);
     try {
       const newEventId = await createEvent(payload, {
@@ -200,6 +212,7 @@ export default function EventComposerModal({
       setLocation("");
       setStartAt("");
       setEndAt("");
+      setCapacity("");
       setImageURL("");
       setDescription("");
       setFormErrors({});
@@ -526,17 +539,39 @@ export default function EventComposerModal({
             </div>
           </div>
 
-          {/* Image URL (Optional) */}
-          <Input
-            id={`${modalId}-image`}
-            label="Banner Image URL"
-            data-testid="composer-image-input"
-            value={imageURL}
-            onChange={(e) => setImageURL(e.target.value)}
-            placeholder="https://example.com/images/hackathon-banner.jpg"
-            helperText="Optional link to a high-resolution banner photo"
-            disabled={isSubmitting}
-          />
+          {/* Capacity & Banner Image Row */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <Input
+              id={`${modalId}-capacity`}
+              type="number"
+              min="1"
+              max="10000"
+              label="Seat Capacity (Optional)"
+              data-testid="composer-capacity-input"
+              value={capacity}
+              onChange={(e) => {
+                setCapacity(e.target.value);
+                if (formErrors.capacity) {
+                  setFormErrors((prev) => ({ ...prev, capacity: undefined }));
+                }
+              }}
+              placeholder="Leave blank for uncapped event"
+              helperText="Max attendees (1–10,000); enables FIFO waitlist when full"
+              error={formErrors.capacity}
+              disabled={isSubmitting}
+            />
+
+            <Input
+              id={`${modalId}-image`}
+              label="Banner Image URL"
+              data-testid="composer-image-input"
+              value={imageURL}
+              onChange={(e) => setImageURL(e.target.value)}
+              placeholder="https://example.com/images/hackathon-banner.jpg"
+              helperText="Optional link to a high-resolution banner photo"
+              disabled={isSubmitting}
+            />
+          </div>
 
           {/* Description */}
           <Textarea

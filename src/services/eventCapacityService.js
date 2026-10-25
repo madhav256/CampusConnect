@@ -104,17 +104,22 @@ export function subscribeToEventCapacity(eventId, onData, onError) {
     return () => {};
   }
 
-  const ref = eventCapacityDocRef(eventId);
-  return onSnapshot(
-    ref,
-    (snap) => {
-      onData(normalizeCoordinatorSnapshot(snap));
-    },
-    (err) => {
-      console.error(`[subscribeToEventCapacity] Error listening to event ${eventId}:`, err);
-      if (onError) onError(err);
-    }
-  );
+  try {
+    const ref = eventCapacityDocRef(eventId);
+    return onSnapshot(
+      ref,
+      (snap) => {
+        onData(normalizeCoordinatorSnapshot(snap));
+      },
+      (err) => {
+        console.error(`[subscribeToEventCapacity] Error listening to event ${eventId}:`, err);
+        if (onError) onError(err);
+      }
+    );
+  } catch (err) {
+    if (onError) onError(err);
+    return () => {};
+  }
 }
 
 /**

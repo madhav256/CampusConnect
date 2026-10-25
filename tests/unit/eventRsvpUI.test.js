@@ -36,6 +36,40 @@ const mocks = vi.hoisted(() => ({
   useEvent: vi.fn(),
   useEventRsvp: vi.fn(),
   useEventAttendees: vi.fn(),
+  useEventCapacity: vi.fn(() => ({
+    coordinator: null,
+    metrics: {
+      isCapped: false,
+      capacity: null,
+      confirmedCount: 0,
+      offeredCount: 0,
+      waitlistCount: 0,
+      allocatedSeats: 0,
+      availableSeats: Infinity,
+      isFull: false,
+      canDirectRsvp: true,
+      canJoinWaitlist: false,
+    },
+    loading: false,
+    error: null,
+    refresh: vi.fn(),
+  })),
+  useEventWaitlist: vi.fn(() => ({
+    member: null,
+    slot: null,
+    coordinator: null,
+    isOnWaitlist: false,
+    isWaiting: false,
+    isOffered: false,
+    queuePosition: null,
+    timeRemainingMs: 0,
+    loading: false,
+    error: null,
+    join: vi.fn(),
+    leave: vi.fn(),
+    claim: vi.fn(),
+    decline: vi.fn(),
+  })),
   fetchUserById: vi.fn(),
 }));
 
@@ -79,6 +113,14 @@ vi.mock("../../src/hooks/useEventRsvp", () => ({
 
 vi.mock("../../src/hooks/useEventAttendees", () => ({
   useEventAttendees: (id, opts) => mocks.useEventAttendees(id, opts),
+}));
+
+vi.mock("../../src/hooks/useEventCapacity", () => ({
+  useEventCapacity: (eventOrId) => mocks.useEventCapacity(eventOrId),
+}));
+
+vi.mock("../../src/hooks/useEventWaitlist", () => ({
+  useEventWaitlist: (eventId, userId) => mocks.useEventWaitlist(eventId, userId),
 }));
 
 vi.mock("../../src/services/userService", () => ({
@@ -1004,6 +1046,129 @@ describe("Milestone 21 — Unit 21.4: RSVP Detail Interaction UI", () => {
       } finally {
         spy.mockRestore();
       }
+    });
+
+    it("mounts CapacityIndicator, SeatClaimBanner, WaitlistModal, and waitlist button states on a capped event in EventDetail", async () => {
+      const cappedEvent = {
+        ...sampleEvent,
+        capacity: 10,
+      };
+      const coordinator = {
+        id: "evt-ai-summit",
+        eventId: "evt-ai-summit",
+        capacity: 10,
+        confirmedCount: 10,
+        offeredCount: 0,
+        waitlistCount: 2,
+        headSequence: 1,
+        nextSequence: 3,
+      };
+      const joinMock = vi.fn().mockResolvedValue({ success: true, sequenceNumber: 3 });
+      const claimMock = vi.fn().mockResolvedValue({ success: true });
+
+      mocks.useEvent.mockReturnValue({
+        event: cappedEvent,
+        availability: "available",
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+      });
+      mocks.useEventCapacity.mockReturnValue({
+        coordinator,
+        metrics: {
+          isCapped: true,
+          capacity: 10,
+          confirmedCount: 10,
+          offeredCount: 0,
+          waitlistCount: 2,
+          allocatedSeats: 10,
+          availableSeats: 0,
+          isFull: true,
+          canDirectRsvp: false,
+          canJoinWaitlist: true,
+        },
+        loading: false,
+        error: null,
+        refresh: vi.fn(),
+      });
+      mocks.useEventWaitlist.mockReturnValue({
+        member: null,
+        slot: null,
+        coordinator,
+        isOnWaitlist: false,
+        isWaiting: false,
+        isOffered: false,
+        queuePosition: null,
+        timeRemainingMs: 0,
+        loading: false,
+        error: null,
+        join: joinMock,
+        leave: vi.fn(),
+        claim: claimMock,
+        decline: vi.fn(),
+      });
+
+      const { result } = renderComponent(EventDetail);
+
+      // 1. CapacityIndicator is mounted inside Registration card
+      const indicator = findByTestId(result.current, "capacity-indicator");
+      expect(indicator).toBeTruthy();
+      expect(getTextContent(indicator)).toContain("10 / 10 seats filled");
+      expect(getTextContent(indicator)).toContain("2 on waitlist");
+
+      // 2. EventRsvpButton displays "Join Waitlist" when event is full
+      const rsvpCard = findByTestId(result.current, "event-rsvp-card");
+      const rsvpBtn = findByTestId(rsvpCard, "event-rsvp-button");
+      expect(getTextContent(rsvpBtn)).toContain("Join Waitlist");
+
+      // 3. Clicking "Join Waitlist" opens WaitlistModal and joining calls waitlist.join()
+      act(() => {
+        rsvpBtn.props.onClick();
+      });
+
+      const waitlistModal = findByTestId(result.current, "waitlist-modal");
+      expect(waitlistModal).toBeTruthy();
+      const joinBtn = findByTestId(waitlistModal, "join-waitlist-button");
+      expect(joinBtn).toBeTruthy();
+
+      await act(async () => {
+        await joinBtn.props.onClick();
+      });
+      expect(joinMock).toHaveBeenCalledWith(APEX_CAMPUS_ID);
+
+      // 4. When candidate has an active seat offer, SeatClaimBanner is mounted and Claim Seat works
+      mocks.useEventWaitlist.mockReturnValue({
+        member: { id: "evt-ai-summit_test-user-123", sequenceNumber: 1, status: "waiting" },
+        slot: {
+          id: "evt-ai-summit_1",
+          sequenceNumber: 1,
+          status: "offered",
+          offerExpiresAt: Date.now() + 3600000,
+        },
+        coordinator,
+        isOnWaitlist: true,
+        isWaiting: false,
+        isOffered: true,
+        queuePosition: 1,
+        timeRemainingMs: 3600000,
+        loading: false,
+        error: null,
+        join: joinMock,
+        leave: vi.fn(),
+        claim: claimMock,
+        decline: vi.fn(),
+      });
+
+      const { result: offeredRender } = renderComponent(EventDetail);
+      const claimBanner = findByTestId(offeredRender.current, "seat-claim-banner");
+      expect(claimBanner).toBeTruthy();
+      const claimSeatBtn = findByTestId(claimBanner, "claim-seat-button");
+      expect(claimSeatBtn).toBeTruthy();
+
+      await act(async () => {
+        await claimSeatBtn.props.onClick();
+      });
+      expect(claimMock).toHaveBeenCalledTimes(1);
     });
   });
 });

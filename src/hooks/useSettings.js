@@ -54,6 +54,12 @@ export function useSettings() {
         profile?.notificationPreferences?.eventRsvps !== false,
       eventCancellations:
         profile?.notificationPreferences?.eventCancellations !== false,
+      ...(profile?.notificationPreferences?.eventWaitlistOffers !== undefined
+        ? {
+            eventWaitlistOffers:
+              profile.notificationPreferences.eventWaitlistOffers !== false,
+          }
+        : {}),
     },
   };
 

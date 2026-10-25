@@ -16,10 +16,14 @@ import {
   where,
   limit as firestoreLimit,
   serverTimestamp,
+  increment,
 } from "firebase/firestore";
 import { db, isFirebaseConfigured } from "../firebase/config";
 import { getEventRsvpId } from "../data/eventRsvps.js";
+import { isCappedEvent } from "../data/eventCapacities.js";
 import { getEventById } from "./eventService.js";
+import { getEventCapacity } from "./eventCapacityService.js";
+import { cancelRsvpWithPromotion } from "./eventWaitlistService.js";
 import { fetchUserById } from "./userService.js";
 
 function requireDb() {
@@ -301,6 +305,7 @@ export async function createEventRsvp({
   userId,
   campusId,
   event = null,
+  coordinator = null,
   userProfile = null,
 }) {
   if (
@@ -334,6 +339,37 @@ export async function createEventRsvp({
     }
   }
 
+  let targetCoordinator = coordinator;
+  const eventIsCapped =
+    isCappedEvent(targetEvent) || Boolean(targetCoordinator?.capacity > 0);
+
+  if (eventIsCapped && !targetCoordinator && typeof getEventCapacity === "function") {
+    try {
+      targetCoordinator = await getEventCapacity(eventId);
+    } catch {
+      targetCoordinator = null;
+    }
+  }
+
+  if (eventIsCapped && targetCoordinator) {
+    const capLimit =
+      typeof targetEvent?.capacity === "number"
+        ? targetEvent.capacity
+        : targetCoordinator.capacity;
+    const allocatedSeats =
+      (Number(targetCoordinator.confirmedCount) || 0) +
+      (Number(targetCoordinator.offeredCount) || 0);
+    const waitlistCount = Number(targetCoordinator.waitlistCount) || 0;
+    if (
+      (typeof capLimit === "number" && allocatedSeats >= capLimit) ||
+      waitlistCount > 0
+    ) {
+      throw new Error(
+        "Event is at capacity or has an active waitlist. Please join the waitlist."
+      );
+    }
+  }
+
   let actorProfile = userProfile;
   if (!actorProfile && typeof fetchUserById === "function") {
     try {
@@ -353,6 +389,15 @@ export async function createEventRsvp({
   const batch = writeBatch(firestore);
 
   batch.set(rRef, rsvpDoc);
+
+  // Pathway PW-1: Atomic coordinator confirmedCount increment for capped events
+  if (eventIsCapped) {
+    const capRef = doc(firestore, "eventCapacities", eventId);
+    batch.update(capRef, {
+      confirmedCount: increment(1),
+      updatedAt: serverTimestamp(),
+    });
+  }
 
   if (shouldNotifyOrganizer) {
     const notifId = `rsvp_${eventId}_${userId}`;
@@ -386,13 +431,21 @@ export async function createEventRsvp({
 
 /**
  * Deletes the deterministic RSVP document for the given event and user.
- * Propagates Firestore errors to caller.
+ * For capped events:
+ * - Pathway PW-3 (waitlistCount === 0): atomically deletes the RSVP and decrements
+ *   eventCapacities/{eventId}.confirmedCount in a single writeBatch.
+ * - Pathway PW-4 (waitlistCount > 0): invokes the cancelRsvpWithPromotion callable
+ *   to atomically cancel the RSVP and promote the head waitlist candidate.
+ * For uncapped events: deletes eventRsvps/{eventId}_{userId} directly.
  *
  * @param {string} eventId
  * @param {string} userId
- * @returns {Promise<void>}
+ * @param {object} [options]
+ * @param {object|null} [options.event]
+ * @param {object|null} [options.coordinator]
+ * @returns {Promise<any>}
  */
-export async function deleteEventRsvp(eventId, userId) {
+export async function deleteEventRsvp(eventId, userId, options = {}) {
   if (
     !eventId ||
     !userId ||
@@ -403,5 +456,48 @@ export async function deleteEventRsvp(eventId, userId) {
   }
 
   const rRef = eventRsvpDocRef(eventId, userId);
+
+  let targetEvent = options?.event || null;
+  let targetCoordinator = options?.coordinator || null;
+
+  if (!targetEvent && !targetCoordinator && typeof getEventById === "function") {
+    try {
+      targetEvent = await getEventById(eventId);
+    } catch {
+      targetEvent = null;
+    }
+  }
+
+  const eventIsCapped =
+    isCappedEvent(targetEvent) || Boolean(targetCoordinator);
+
+  if (eventIsCapped) {
+    if (!targetCoordinator && typeof getEventCapacity === "function") {
+      try {
+        targetCoordinator = await getEventCapacity(eventId);
+      } catch {
+        targetCoordinator = null;
+      }
+    }
+
+    const waitlistCount = Number(targetCoordinator?.waitlistCount) || 0;
+    if (waitlistCount > 0) {
+      // Pathway PW-4: Active waitlist exists -> delegate to backend callable
+      return await cancelRsvpWithPromotion({ eventId });
+    }
+
+    // Pathway PW-3: Empty waitlist -> atomic client batch decrementing confirmedCount
+    const firestore = requireDb();
+    const batch = writeBatch(firestore);
+    const capRef = doc(firestore, "eventCapacities", eventId);
+    batch.delete(rRef);
+    batch.update(capRef, {
+      confirmedCount: increment(-1),
+      updatedAt: serverTimestamp(),
+    });
+    await batch.commit();
+    return;
+  }
+
   await deleteDoc(rRef);
 }

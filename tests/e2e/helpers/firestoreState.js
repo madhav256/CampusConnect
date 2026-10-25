@@ -12,12 +12,9 @@ process.env.GOOGLE_AUTH_SUPPRESS_CREDENTIALS_WARNINGS = "true";
 
 const EMULATOR_PROJECT_ID = process.env.GCLOUD_PROJECT || "demo-campusconnect-rules-test";
 
-// Guard: Refuse to target production Firebase database
-if (
-  EMULATOR_PROJECT_ID.includes("campusconnect-cf191") &&
-  !process.env.FIRESTORE_EMULATOR_HOST
-) {
-  throw new Error("FATAL: Refusing to run E2E state helpers against production database.");
+// Guard: Refuse to target production Firebase project ID
+if (EMULATOR_PROJECT_ID.includes("campusconnect-cf191")) {
+  throw new Error("FATAL: Refusing to run E2E state helpers against production project ID (campusconnect-cf191).");
 }
 
 if (!process.env.FIRESTORE_EMULATOR_HOST) {
@@ -368,12 +365,93 @@ export async function createIsolatedTestEvent(overrides = {}) {
     organizerName: overrides.organizerName || "Apex AI & Robotics Society",
     status: overrides.status || "published",
     visibility: overrides.visibility || "campus_public",
+    capacity: overrides.capacity !== undefined ? overrides.capacity : null,
     createdAt: overrides.createdAt || now,
     updatedAt: overrides.updatedAt || now,
   };
 
   await db.collection("events").doc(id).set(eventDoc);
+
+  if (typeof overrides.capacity === "number" && overrides.capacity > 0) {
+    await db.collection("eventCapacities").doc(id).set({
+      id,
+      eventId: id,
+      campusId: eventDoc.campusId,
+      confirmedCount: overrides.confirmedCount || 0,
+      offeredCount: overrides.offeredCount || 0,
+      waitlistCount: overrides.waitlistCount || 0,
+      headSequence: overrides.headSequence || 1,
+      nextSequence: overrides.nextSequence || 1,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+
   return eventDoc;
+}
+
+/**
+ * Reads persisted coordinator, RSVP, waitlist membership, and slot documents for an isolated capped event.
+ *
+ * @param {string} eventId
+ * @param {string[]} [userIds=[]]
+ */
+export async function getIsolatedCappedEventState(eventId, userIds = []) {
+  if (!process.env.FIRESTORE_EMULATOR_HOST) {
+    throw new Error("[getIsolatedCappedEventState] Refusing to run outside emulator environment.");
+  }
+
+  const capSnap = await db.collection("eventCapacities").doc(eventId).get();
+  const coordinator = capSnap.exists ? capSnap.data() : null;
+
+  const rsvps = {};
+  const members = {};
+  for (const uid of userIds) {
+    const [rSnap, mSnap] = await Promise.all([
+      db.collection("eventRsvps").doc(`${eventId}_${uid}`).get(),
+      db.collection("eventWaitlistMembers").doc(`${eventId}_${uid}`).get(),
+    ]);
+    rsvps[uid] = rSnap.exists ? rSnap.data() : null;
+    members[uid] = mSnap.exists ? mSnap.data() : null;
+  }
+
+  const slotsSnap = await db
+    .collection("eventWaitlistSlots")
+    .where("eventId", "==", eventId)
+    .get();
+  const slots = {};
+  for (const docSnap of slotsSnap.docs) {
+    const data = docSnap.data();
+    slots[data.sequenceNumber] = data;
+  }
+
+  return { coordinator, rsvps, members, slots };
+}
+
+/**
+ * Cleans up an isolated capped event and all associated capacity, RSVP, waitlist, outbox, and continuation docs.
+ *
+ * @param {string} eventId
+ */
+export async function cleanupIsolatedCappedEvent(eventId) {
+  if (!process.env.FIRESTORE_EMULATOR_HOST) {
+    throw new Error("[cleanupIsolatedCappedEvent] Refusing to run outside emulator environment.");
+  }
+  if (!eventId || !eventId.startsWith("e2e-isolated-")) {
+    throw new Error(`[cleanupIsolatedCappedEvent] Refusing to delete non-isolated event ID: ${eventId}`);
+  }
+
+  const batch = db.batch();
+  batch.delete(db.collection("events").doc(eventId));
+  batch.delete(db.collection("eventCapacities").doc(eventId));
+  batch.delete(db.collection("eventWaitlistContinuations").doc(`continuation_${eventId}`));
+
+  for (const colName of ["eventRsvps", "eventWaitlistMembers", "eventWaitlistSlots", "eventWaitlistOutbox"]) {
+    const snap = await db.collection(colName).where("eventId", "==", eventId).get();
+    snap.docs.forEach((d) => batch.delete(d.ref));
+  }
+
+  await batch.commit();
 }
 
 /**

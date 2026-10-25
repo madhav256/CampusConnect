@@ -15,6 +15,9 @@ import { loginAs, logout } from "./helpers/auth.js";
 import {
   resetEventRsvps,
   createTestEventRsvp,
+  createIsolatedTestEvent,
+  getIsolatedCappedEventState,
+  cleanupIsolatedCappedEvent,
 } from "./helpers/firestoreState.js";
 
 test.describe("Milestone 21 — Unit 21.6: Event RSVP E2E Suite", () => {
@@ -336,5 +339,173 @@ test.describe("Milestone 21 — Unit 21.6: Event RSVP E2E Suite", () => {
     await expect(
       page.locator("[data-testid='event-card-e2e-event-cancelled-lecture']")
     ).not.toBeVisible();
+  });
+
+  test("Scenario 5: Capped-event waitlist journey — final seat RSVP, UI waitlist join, cancellation offer rollover, and seat claim", async ({
+    page,
+  }) => {
+    test.setTimeout(60000);
+    const cappedEventId = "e2e-isolated-capped-waitlist";
+    await cleanupIsolatedCappedEvent(cappedEventId);
+
+    try {
+      // 1. Seed a capped event with capacity 1 and initial empty coordinator
+      await createIsolatedTestEvent({
+        id: cappedEventId,
+        title: "Apex Systems Engineering Micro-Lab",
+        capacity: 1,
+        campusId: "apex-university",
+        communityId: "apex-ai-club",
+        visibility: "campus_public",
+      });
+
+      // 2. Student A occupies the final confirmed seat through the EventDetail UI
+      await loginAs(page, E2E_USERS.studentA);
+      await page.goto(`/events/${cappedEventId}`);
+      await expect(page.locator("[data-testid='event-detail-title']")).toHaveText(
+        "Apex Systems Engineering Micro-Lab"
+      );
+
+      const capacityIndicator = page.locator("[data-testid='capacity-indicator']");
+      await expect(capacityIndicator).toBeVisible();
+      await expect(page.locator("[data-testid='capacity-count-text']")).toHaveText(
+        "0 / 1 seats filled"
+      );
+      await expect(page.locator("[data-testid='capacity-available-badge']")).toHaveText(
+        "1 left"
+      );
+
+      const rsvpButton = page.locator(
+        "[data-testid='event-rsvp-card'] [data-testid='event-rsvp-button']"
+      );
+      await expect(rsvpButton).toContainText("RSVP");
+      await rsvpButton.click();
+
+      await expect(rsvpButton).toContainText("Cancel RSVP");
+      await expect(page.locator("[data-testid='capacity-count-text']")).toHaveText(
+        "1 / 1 seats filled"
+      );
+      await expect(page.locator("[data-testid='capacity-full-badge']")).toHaveText("Full");
+
+      // Verify persisted state after Student A takes the final seat
+      let state = await getIsolatedCappedEventState(cappedEventId, [
+        E2E_USERS.studentA.uid,
+        E2E_USERS.studentB.uid,
+      ]);
+      expect(state.coordinator.confirmedCount).toBe(1);
+      expect(state.coordinator.waitlistCount).toBe(0);
+      expect(state.rsvps[E2E_USERS.studentA.uid]).toBeTruthy();
+
+      // 3. Student B opens the full capped event and joins the waitlist through the UI
+      await logout(page);
+      await loginAs(page, E2E_USERS.studentB);
+      await page.goto(`/events/${cappedEventId}`);
+
+      await expect(page.locator("[data-testid='capacity-count-text']")).toHaveText(
+        "1 / 1 seats filled"
+      );
+      await expect(page.locator("[data-testid='capacity-full-badge']")).toHaveText("Full");
+      await expect(rsvpButton).toContainText("Join Waitlist");
+
+      await rsvpButton.click();
+
+      const waitlistModal = page.locator("[data-testid='waitlist-modal']");
+      await expect(waitlistModal).toBeVisible();
+      await expect(page.locator("[data-testid='estimated-queue-position']")).toHaveText("#1");
+
+      await page.locator("[data-testid='join-waitlist-button']").click();
+      await expect(waitlistModal).not.toBeVisible();
+
+      // 4. Verify capacity indicator and waitlist position in UI and persisted Firestore state
+      await expect(page.locator("[data-testid='capacity-waitlist-badge']")).toContainText(
+        "1 on waitlist"
+      );
+      await expect(rsvpButton).toContainText("On Waitlist (#1)");
+
+      // Open modal to verify live queue position #1 and Waiting status
+      await rsvpButton.click();
+      await expect(waitlistModal).toBeVisible();
+      await expect(page.locator("[data-testid='waitlist-queue-position']")).toHaveText("#1");
+      await expect(page.locator("[data-testid='waitlist-member-status']")).toContainText(
+        "waiting"
+      );
+      await page.locator("[data-testid='waitlist-modal-close']").click();
+
+      state = await getIsolatedCappedEventState(cappedEventId, [
+        E2E_USERS.studentA.uid,
+        E2E_USERS.studentB.uid,
+      ]);
+      expect(state.coordinator.confirmedCount).toBe(1);
+      expect(state.coordinator.waitlistCount).toBe(1);
+      expect(state.coordinator.headSequence).toBe(1);
+      expect(state.coordinator.nextSequence).toBe(2);
+      expect(state.members[E2E_USERS.studentB.uid]?.sequenceNumber).toBe(1);
+      expect(state.members[E2E_USERS.studentB.uid]?.status).toBe("waiting");
+      expect(state.slots[1]?.userId).toBe(E2E_USERS.studentB.uid);
+      expect(state.slots[1]?.status).toBe("waiting");
+
+      // 5. Student A cancels their confirmed RSVP through the UI, triggering automatic promotion of Student B
+      await logout(page);
+      await loginAs(page, E2E_USERS.studentA);
+      await page.goto(`/events/${cappedEventId}`);
+      await expect(rsvpButton).toContainText("Cancel RSVP");
+
+      await rsvpButton.click();
+
+      // Since the single seat is now reserved for offered candidate Student B, the event remains at 1/1 allocated
+      await expect(rsvpButton).toContainText("Join Waitlist", { timeout: 15000 });
+      await expect(page.locator("[data-testid='capacity-offered-count']")).toContainText(
+        "(1 reserved)",
+        { timeout: 15000 }
+      );
+
+      state = await getIsolatedCappedEventState(cappedEventId, [
+        E2E_USERS.studentA.uid,
+        E2E_USERS.studentB.uid,
+      ]);
+      expect(state.rsvps[E2E_USERS.studentA.uid]).toBeNull();
+      expect(state.coordinator.confirmedCount).toBe(0);
+      expect(state.coordinator.offeredCount).toBe(1);
+      expect(state.coordinator.waitlistCount).toBe(0);
+      expect(state.coordinator.headSequence).toBe(2);
+      expect(state.members[E2E_USERS.studentB.uid]?.status).toBe("offered");
+      expect(state.slots[1]?.status).toBe("offered");
+
+      // 6. Student B returns to the event detail UI, sees the SeatClaimBanner offer state, and claims the seat
+      await logout(page);
+      await loginAs(page, E2E_USERS.studentB);
+      await page.goto(`/events/${cappedEventId}`);
+
+      const claimBanner = page.locator("[data-testid='seat-claim-banner']");
+      await expect(claimBanner).toBeVisible();
+      await expect(claimBanner).toContainText("A seat opened up for you!");
+      await expect(page.locator("[data-testid='seat-claim-countdown']")).toBeVisible();
+      await expect(rsvpButton).toContainText("Claim Seat");
+
+      await page.locator("[data-testid='claim-seat-button']").click();
+
+      // 7. Verify UI transitions to Going / Cancel RSVP, banner disappears without listener error, and persisted state is terminal
+      await expect(claimBanner).not.toBeVisible({ timeout: 15000 });
+      await expect(rsvpButton).toContainText("Cancel RSVP", { timeout: 15000 });
+      await expect(
+        page.locator("[data-testid='event-rsvp-card'] [data-testid='rsvp-status-badge']")
+      ).toContainText("Going");
+      await expect(page.locator("[data-testid='capacity-count-text']")).toHaveText(
+        "1 / 1 seats filled"
+      );
+
+      state = await getIsolatedCappedEventState(cappedEventId, [
+        E2E_USERS.studentA.uid,
+        E2E_USERS.studentB.uid,
+      ]);
+      expect(state.rsvps[E2E_USERS.studentB.uid]).toBeTruthy();
+      expect(state.members[E2E_USERS.studentB.uid]).toBeNull();
+      expect(state.slots[1]?.status).toBe("claimed");
+      expect(state.coordinator.confirmedCount).toBe(1);
+      expect(state.coordinator.offeredCount).toBe(0);
+      expect(state.coordinator.waitlistCount).toBe(0);
+    } finally {
+      await cleanupIsolatedCappedEvent(cappedEventId);
+    }
   });
 });

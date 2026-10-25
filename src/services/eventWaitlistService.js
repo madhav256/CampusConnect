@@ -9,6 +9,7 @@ import {
   doc,
   getDoc,
   writeBatch,
+  runTransaction,
   onSnapshot,
   serverTimestamp,
   increment,
@@ -26,7 +27,7 @@ import {
   getEventWaitlistMemberId,
   calculateQueuePosition,
 } from "../data/eventWaitlistMembers.js";
-import { eventCapacityDocRef, getEventCapacity } from "./eventCapacityService.js";
+import { eventCapacityDocRef } from "./eventCapacityService.js";
 import { WAITLIST_SLOT_STATUSES, WAITLIST_MEMBER_STATUSES } from "../constants.js";
 
 
@@ -140,17 +141,22 @@ export function subscribeToWaitlistMember(eventId, userId, onData, onError) {
     onData(null);
     return () => {};
   }
-  const ref = waitlistMemberDocRef(eventId, userId);
-  return onSnapshot(
-    ref,
-    (snap) => {
-      onData(normalizeMemberSnapshot(snap));
-    },
-    (err) => {
-      console.error(`[subscribeToWaitlistMember] Error for user ${userId} on event ${eventId}:`, err);
-      if (onError) onError(err);
-    }
-  );
+  try {
+    const ref = waitlistMemberDocRef(eventId, userId);
+    return onSnapshot(
+      ref,
+      (snap) => {
+        onData(normalizeMemberSnapshot(snap));
+      },
+      (err) => {
+        console.error(`[subscribeToWaitlistMember] Error for user ${userId} on event ${eventId}:`, err);
+        if (onError) onError(err);
+      }
+    );
+  } catch (err) {
+    if (onError) onError(err);
+    return () => {};
+  }
 }
 
 /**
@@ -180,22 +186,27 @@ export function subscribeToWaitlistSlot(eventId, sequenceNumber, onData, onError
     onData(null);
     return () => {};
   }
-  const ref = waitlistSlotDocRef(eventId, sequenceNumber);
-  return onSnapshot(
-    ref,
-    (snap) => {
-      onData(normalizeSlotSnapshot(snap));
-    },
-    (err) => {
-      console.error(`[subscribeToWaitlistSlot] Error for slot ${sequenceNumber} on event ${eventId}:`, err);
-      if (onError) onError(err);
-    }
-  );
+  try {
+    const ref = waitlistSlotDocRef(eventId, sequenceNumber);
+    return onSnapshot(
+      ref,
+      (snap) => {
+        onData(normalizeSlotSnapshot(snap));
+      },
+      (err) => {
+        console.error(`[subscribeToWaitlistSlot] Error for slot ${sequenceNumber} on event ${eventId}:`, err);
+        if (onError) onError(err);
+      }
+    );
+  } catch (err) {
+    if (onError) onError(err);
+    return () => {};
+  }
 }
 
 /**
- * Joins the waitlist (Pathway PW-2) via atomic 3-document batch commit.
- * Requires:
+ * Joins the waitlist (Pathway PW-2) via atomic 3-document transaction.
+ * Reads coordinator and membership/RSVP/event state before writing:
  * 1. eventWaitlistSlots/{eventId}_{nextSequence} (create)
  * 2. eventWaitlistMembers/{eventId}_{userId} (create)
  * 3. eventCapacities/{eventId} (update waitlistCount + 1, nextSequence + 1)
@@ -206,51 +217,107 @@ export function subscribeToWaitlistSlot(eventId, sequenceNumber, onData, onError
  * @returns {Promise<{ success: boolean, sequenceNumber: number }>}
  */
 export async function joinWaitlist(eventId, userId, campusId) {
-  const coordinator = await getEventCapacity(eventId);
-  if (!coordinator) {
-    throw new Error(`[joinWaitlist] Coordinator not found for event: ${eventId}`);
+  if (!eventId || !userId || !campusId) {
+    throw new Error("[joinWaitlist] eventId, userId, and campusId are required.");
   }
 
-  const assignedSeq = coordinator.nextSequence;
   const database = requireDb();
-  const batch = writeBatch(database);
 
-  const slotRef = waitlistSlotDocRef(eventId, assignedSeq);
-  const memberRef = waitlistMemberDocRef(eventId, userId);
-  const capRef = eventCapacityDocRef(eventId);
+  return await runTransaction(database, async (transaction) => {
+    const capRef = eventCapacityDocRef(eventId);
+    const memberRef = waitlistMemberDocRef(eventId, userId);
+    const rsvpRef = doc(database, "eventRsvps", `${eventId}_${userId}`);
+    const eventRef = doc(database, "events", eventId);
 
-  const slotId = getEventWaitlistSlotId(eventId, assignedSeq);
-  const memberId = getEventWaitlistMemberId(eventId, userId);
+    const [capSnap, memberSnap, rsvpSnap, eventSnap] = await Promise.all([
+      transaction.get(capRef),
+      transaction.get(memberRef),
+      transaction.get(rsvpRef),
+      transaction.get(eventRef),
+    ]);
 
-  batch.set(slotRef, {
-    id: slotId,
-    eventId,
-    campusId,
-    userId,
-    sequenceNumber: assignedSeq,
-    status: WAITLIST_SLOT_STATUSES.WAITING,
-    joinedAt: serverTimestamp(),
+    if (!capSnap || !capSnap.exists()) {
+      throw new Error(`[joinWaitlist] Coordinator not found for event: ${eventId}`);
+    }
+
+    if (memberSnap && memberSnap.exists()) {
+      throw new Error("You are already on the waitlist for this event.");
+    }
+
+    if (rsvpSnap && rsvpSnap.exists()) {
+      throw new Error("You already have a confirmed RSVP for this event.");
+    }
+
+    const coordinator = capSnap.data() || {};
+    const eventData = eventSnap && eventSnap.exists() ? eventSnap.data() : null;
+
+    if (eventData) {
+      if (eventData.status && eventData.status !== "published") {
+        throw new Error("Cannot join waitlist for an unpublished or cancelled event.");
+      }
+      if (eventData.registrationStatus === "migration_locked") {
+        throw new Error("Event registration is temporarily locked.");
+      }
+    }
+
+    const capacity =
+      typeof eventData?.capacity === "number"
+        ? eventData.capacity
+        : Number(coordinator.capacity) || 0;
+    const hasOccupancyCounts = typeof coordinator.confirmedCount === "number";
+    const confirmedCount = Number(coordinator.confirmedCount) || 0;
+    const offeredCount = Number(coordinator.offeredCount) || 0;
+    const waitlistCount = Number(coordinator.waitlistCount) || 0;
+
+    if (
+      capacity > 0 &&
+      hasOccupancyCounts &&
+      confirmedCount + offeredCount < capacity &&
+      waitlistCount === 0
+    ) {
+      throw new Error(
+        "Event has available seats; please RSVP directly instead of joining the waitlist."
+      );
+    }
+
+    const assignedSeq = Number(coordinator.nextSequence);
+    if (!Number.isInteger(assignedSeq) || assignedSeq < 1) {
+      throw new Error(`[joinWaitlist] Invalid coordinator nextSequence for event: ${eventId}`);
+    }
+
+    const slotRef = waitlistSlotDocRef(eventId, assignedSeq);
+    const slotId = getEventWaitlistSlotId(eventId, assignedSeq);
+    const memberId = getEventWaitlistMemberId(eventId, userId);
+
+    transaction.set(slotRef, {
+      id: slotId,
+      eventId,
+      campusId,
+      userId,
+      sequenceNumber: assignedSeq,
+      status: WAITLIST_SLOT_STATUSES.WAITING,
+      joinedAt: serverTimestamp(),
+    });
+
+    transaction.set(memberRef, {
+      id: memberId,
+      eventId,
+      campusId,
+      userId,
+      sequenceNumber: assignedSeq,
+      status: WAITLIST_MEMBER_STATUSES.WAITING,
+      joinedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+
+    transaction.update(capRef, {
+      waitlistCount: increment(1),
+      nextSequence: increment(1),
+      updatedAt: serverTimestamp(),
+    });
+
+    return { success: true, sequenceNumber: assignedSeq };
   });
-
-  batch.set(memberRef, {
-    id: memberId,
-    eventId,
-    campusId,
-    userId,
-    sequenceNumber: assignedSeq,
-    status: WAITLIST_MEMBER_STATUSES.WAITING,
-    joinedAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-  });
-
-  batch.update(capRef, {
-    waitlistCount: increment(1),
-    nextSequence: increment(1),
-    updatedAt: serverTimestamp(),
-  });
-
-  await batch.commit();
-  return { success: true, sequenceNumber: assignedSeq };
 }
 
 export const joinWaitlistBatch = joinWaitlist;

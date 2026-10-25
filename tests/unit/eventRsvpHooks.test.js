@@ -456,6 +456,79 @@ describe("Milestone 21 — Unit 21.3: Event RSVP Hooks", () => {
       unmount();
       expect(unsubSecond).toHaveBeenCalledTimes(1);
     });
+
+    it("propagates event and coordinator to createEventRsvp (via rsvpToEvent and confirmRsvp) and deleteEventRsvp", async () => {
+      const cappedEvent = { id: "event-capped-99", title: "Capped Event", capacity: 10 };
+      const initialCoordinator = {
+        id: "event-capped-99",
+        capacity: 10,
+        confirmedCount: 4,
+        offeredCount: 0,
+        waitlistCount: 0,
+      };
+      const updatedCoordinator = {
+        ...initialCoordinator,
+        confirmedCount: 5,
+      };
+
+      mocks.createEventRsvp.mockResolvedValue({ id: "event-capped-99_test-user-alice" });
+      mocks.deleteEventRsvp.mockResolvedValue();
+
+      const { result, rerender } = renderHook(
+        ({ eventId, event, coordinator }) => useEventRsvp(eventId, event, coordinator),
+        {
+          initialProps: {
+            eventId: "event-capped-99",
+            event: cappedEvent,
+            coordinator: initialCoordinator,
+          },
+        }
+      );
+
+      await act(async () => {
+        await result.current.confirmRsvp();
+      });
+
+      expect(mocks.createEventRsvp).toHaveBeenCalledWith({
+        eventId: "event-capped-99",
+        userId: "test-user-alice",
+        campusId: APEX_CAMPUS_ID,
+        event: cappedEvent,
+        coordinator: initialCoordinator,
+      });
+
+      // Rerender with updated coordinator and verify synchronous ref update
+      rerender({
+        eventId: "event-capped-99",
+        event: cappedEvent,
+        coordinator: updatedCoordinator,
+      });
+
+      await act(async () => {
+        await result.current.rsvpToEvent();
+      });
+
+      expect(mocks.createEventRsvp).toHaveBeenLastCalledWith({
+        eventId: "event-capped-99",
+        userId: "test-user-alice",
+        campusId: APEX_CAMPUS_ID,
+        event: cappedEvent,
+        coordinator: updatedCoordinator,
+      });
+
+      await act(async () => {
+        await result.current.cancelRsvp();
+      });
+
+      expect(mocks.deleteEventRsvp).toHaveBeenCalledWith(
+        "event-capped-99",
+        "test-user-alice",
+        {
+          event: cappedEvent,
+          coordinator: updatedCoordinator,
+        }
+      );
+    });
   });
 
   describe("useEventAttendees Hook", () => {

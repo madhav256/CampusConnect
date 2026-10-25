@@ -70,6 +70,12 @@ export function normalizeUserSettings(uid, data) {
         data?.notificationPreferences?.eventRsvps !== false,
       eventCancellations:
         data?.notificationPreferences?.eventCancellations !== false,
+      ...(data?.notificationPreferences?.eventWaitlistOffers !== undefined
+        ? {
+            eventWaitlistOffers:
+              data.notificationPreferences.eventWaitlistOffers !== false,
+          }
+        : {}),
     },
     ...(data?.campusId ? { campusId: data.campusId } : {}),
     createdAt: data?.createdAt || null,

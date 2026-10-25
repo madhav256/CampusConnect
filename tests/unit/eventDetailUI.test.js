@@ -745,6 +745,43 @@ describe("Milestone 20 — Unit 20.5: Event Detail Experience & Community Integr
         expect.anything()
       );
     });
+
+    it("submits optional seat capacity in EventComposerModal and validates bounds", async () => {
+      mocks.createEvent.mockResolvedValue("event-capped-789");
+
+      const { result } = renderComponent(EventComposerModal, defaultProps);
+
+      act(() => {
+        findByTestId(result.current, "composer-title-input").props.onChange({
+          target: { value: "Capped Robotics Seminar" },
+        });
+        findByTestId(result.current, "composer-location-input").props.onChange({
+          target: { value: "Lab 1" },
+        });
+        findByTestId(result.current, "composer-start-at-input").props.onChange({
+          target: { value: "2026-10-25T10:00" },
+        });
+        findByTestId(result.current, "composer-end-at-input").props.onChange({
+          target: { value: "2026-10-25T12:00" },
+        });
+        findByTestId(result.current, "composer-capacity-input").props.onChange({
+          target: { value: "40" },
+        });
+      });
+
+      const form = findByTestId(result.current, "event-composer-form");
+      await act(async () => {
+        await form.props.onSubmit({ preventDefault: vi.fn() });
+      });
+
+      expect(mocks.createEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: "Capped Robotics Seminar",
+          capacity: 40,
+        }),
+        expect.anything()
+      );
+    });
   });
 
   // =========================================================================

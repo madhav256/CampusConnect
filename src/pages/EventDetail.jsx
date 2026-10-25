@@ -23,9 +23,14 @@ import {
   Loader2,
   CheckCircle,
 } from "lucide-react";
+import { useAuth } from "../hooks/useAuth.js";
+import { useOptionalCampus } from "../hooks/useCampus.js";
 import { useEvent } from "../hooks/useEvent.js";
 import { useEventRsvp } from "../hooks/useEventRsvp.js";
+import { useEventCapacity } from "../hooks/useEventCapacity.js";
+import { useEventWaitlist } from "../hooks/useEventWaitlist.js";
 import { useEventManagement } from "../hooks/useEventManagement.js";
+import { isCappedEvent } from "../data/eventCapacities.js";
 import Navbar from "../components/layout/Navbar.jsx";
 import PageContainer from "../components/layout/PageContainer.jsx";
 import Card from "../components/ui/Card.jsx";
@@ -36,6 +41,9 @@ import EventStatusBadge from "../components/events/EventStatusBadge.jsx";
 import EventRsvpButton from "../components/events/EventRsvpButton.jsx";
 import EventAttendeePreview from "../components/events/EventAttendeePreview.jsx";
 import RsvpStatusBadge from "../components/events/RsvpStatusBadge.jsx";
+import CapacityIndicator from "../components/events/CapacityIndicator.jsx";
+import SeatClaimBanner from "../components/events/SeatClaimBanner.jsx";
+import WaitlistModal from "../components/events/WaitlistModal.jsx";
 import EventManagementToolbar from "../components/events/EventManagementToolbar.jsx";
 import EventEditModal from "../components/events/EventEditModal.jsx";
 import EventCancelModal from "../components/events/EventCancelModal.jsx";
@@ -95,14 +103,25 @@ function formatTimeRange(startVal, endVal) {
 export default function EventDetail() {
   const { eventId } = useParams();
   const navigate = useNavigate();
+  const { user: currentUser } = useAuth() || {};
+  const campusCtx = useOptionalCampus();
   const { event, availability, isLoading, error, refetch } = useEvent(eventId);
-  const { rsvp } = useEventRsvp(eventId);
+  const isCapped = isCappedEvent(event);
+  const { coordinator, metrics: capacityMetrics } = useEventCapacity(
+    isCapped ? event : null
+  );
+  const waitlist = useEventWaitlist(
+    isCapped ? eventId : null,
+    isCapped ? currentUser?.uid || null : null
+  );
+  const { rsvp } = useEventRsvp(eventId, event, coordinator);
 
   // Modal Open States
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isCancelOpen, setIsCancelOpen] = useState(false);
   const [isRepublishOpen, setIsRepublishOpen] = useState(false);
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
+  const [isWaitlistOpen, setIsWaitlistOpen] = useState(false);
 
   // Authority & Reactive Temporal Lifecycle Management
   const {
@@ -370,6 +389,19 @@ export default function EventDetail() {
             </div>
           )}
 
+          {/* Seat Claim Banner for Promoted Waitlist Candidates */}
+          {isCapped && waitlist.isOffered && (
+            <SeatClaimBanner
+              eventId={eventId}
+              userId={currentUser?.uid || null}
+              slot={waitlist.slot}
+              isOffered={waitlist.isOffered}
+              timeRemainingMs={waitlist.timeRemainingMs}
+              onClaim={() => waitlist.claim()}
+              onDecline={() => waitlist.decline()}
+            />
+          )}
+
           {/* Management Toolbar for Authorized Leaders */}
           {event && (canEdit || canCancel || canRepublish || canDelete) && (
             <EventManagementToolbar
@@ -510,10 +542,23 @@ export default function EventDetail() {
                   <RsvpStatusBadge resolution={eventResolution} rsvp={rsvp} />
                 </div>
 
+                <CapacityIndicator
+                  event={event}
+                  coordinator={coordinator}
+                  metrics={capacityMetrics}
+                />
+
                 <EventRsvpButton
                   eventId={eventId}
                   event={event}
                   availability={availability}
+                  coordinator={coordinator}
+                  metrics={capacityMetrics}
+                  isOnWaitlist={waitlist.isOnWaitlist}
+                  isOffered={waitlist.isOffered}
+                  queuePosition={waitlist.queuePosition}
+                  onOpenWaitlist={() => setIsWaitlistOpen(true)}
+                  onClaimOffer={() => waitlist.claim()}
                 />
 
                 <div className="border-t border-border-warm/60 pt-3">
@@ -653,11 +698,36 @@ export default function EventDetail() {
               eventId={eventId}
               event={event}
               availability={availability}
+              coordinator={coordinator}
+              metrics={capacityMetrics}
+              isOnWaitlist={waitlist.isOnWaitlist}
+              isOffered={waitlist.isOffered}
+              queuePosition={waitlist.queuePosition}
+              onOpenWaitlist={() => setIsWaitlistOpen(true)}
+              onClaimOffer={() => waitlist.claim()}
               size="sm"
             />
           </div>
         </div>
       </div>
+
+      {/* Waitlist Modal */}
+      {isWaitlistOpen && (
+        <WaitlistModal
+          isOpen={isWaitlistOpen}
+          onClose={() => setIsWaitlistOpen(false)}
+          event={event}
+          user={currentUser}
+          coordinator={coordinator}
+          isOnWaitlist={waitlist.isOnWaitlist}
+          queuePosition={waitlist.queuePosition}
+          slot={waitlist.slot}
+          onJoin={() =>
+            waitlist.join(campusCtx?.campusId || currentUser?.campusId || event.campusId)
+          }
+          onLeave={() => waitlist.leave()}
+        />
+      )}
 
       {/* Management Action Modals */}
       {isEditOpen && (
@@ -666,6 +736,7 @@ export default function EventDetail() {
           isOpen={isEditOpen}
           onClose={() => setIsEditOpen(false)}
           event={event}
+          coordinator={coordinator}
           isOngoing={isOngoing}
           isMutating={isMutating}
           onSave={handleSaveEdit}

@@ -15,7 +15,7 @@
  * Phase 4: Read back and verify counter parity (confirmedCount === N)
  */
 
-import { getAdminFirestore, FieldValue } from "./adminClient.mjs";
+import { getAdminDb, FieldValue } from "./adminClient.mjs";
 
 /**
  * Executes migration of a single uncapped event to a capped event with coordinator.
@@ -52,7 +52,7 @@ export async function migrateEventToCapped({
     );
   }
 
-  const db = firestoreInstance || getAdminFirestore();
+  const db = firestoreInstance || getAdminDb();
   const eventRef = db.collection("events").doc(eventId);
   const capRef = db.collection("eventCapacities").doc(eventId);
   const rsvpsColl = db.collection("eventRsvps");

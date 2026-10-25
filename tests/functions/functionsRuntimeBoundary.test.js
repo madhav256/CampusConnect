@@ -126,6 +126,24 @@ describe("Milestone 24.3: Firebase Functions Runtime Boundary & Endpoint Discove
       ).rejects.toMatchObject({
         code: "unauthenticated",
       });
+
+      await expect(
+        promoteWaitlistCandidates.run({
+          data: { eventId: "dummy_evt" },
+          auth: null,
+        })
+      ).rejects.toMatchObject({
+        code: "unauthenticated",
+      });
+
+      await expect(
+        fastForwardWaitlistHead.run({
+          data: { eventId: "dummy_evt" },
+          auth: null,
+        })
+      ).rejects.toMatchObject({
+        code: "unauthenticated",
+      });
     });
 
     it("rejects invalid argument parameters with INVALID_ARGUMENT", async () => {
@@ -139,12 +157,14 @@ describe("Milestone 24.3: Firebase Functions Runtime Boundary & Endpoint Discove
       });
     });
 
-    it("enforces cross-campus tenancy check through registered callable boundary", async () => {
+    it("enforces cross-campus tenancy and organizer authorization through registered callable boundary", async () => {
       const eventId = "evt_tenancy_boundary_test";
       await db.collection("events").doc(eventId).set({
         id: eventId,
         title: "Campus A Event",
         campusId: APEX_CAMPUS_ID,
+        communityId: "apex-ai-club",
+        createdBy: "organizer_campus_a",
         capacity: 10,
         registrationType: "capped",
         startAt: Timestamp.fromMillis(Date.now() + 1_000_000),
@@ -169,6 +189,218 @@ describe("Milestone 24.3: Firebase Functions Runtime Boundary & Endpoint Discove
       ).rejects.toMatchObject({
         code: "permission-denied",
       });
+
+      await expect(
+        promoteWaitlistCandidates.run({
+          data: { eventId },
+          auth: { uid: "user_campus_b", token: { campusId: ST_JUDE_CAMPUS_ID } },
+        })
+      ).rejects.toMatchObject({
+        code: "permission-denied",
+      });
+
+      await expect(
+        fastForwardWaitlistHead.run({
+          data: { eventId },
+          auth: { uid: "user_campus_b", token: { campusId: ST_JUDE_CAMPUS_ID } },
+        })
+      ).rejects.toMatchObject({
+        code: "permission-denied",
+      });
+
+      // Same-campus student who is NOT organizer or community leader is rejected
+      await expect(
+        promoteWaitlistCandidates.run({
+          data: { eventId },
+          auth: { uid: "unrelated_student_campus_a", token: { campusId: APEX_CAMPUS_ID } },
+        })
+      ).rejects.toMatchObject({
+        code: "permission-denied",
+      });
+
+      await expect(
+        fastForwardWaitlistHead.run({
+          data: { eventId },
+          auth: { uid: "unrelated_student_campus_a", token: { campusId: APEX_CAMPUS_ID } },
+        })
+      ).rejects.toMatchObject({
+        code: "permission-denied",
+      });
+
+      // Active ordinary community member (role: "member", status: "active") is rejected
+      const ordinaryMemberUid = "ordinary_member_campus_a";
+      await db.collection("communityMembers").doc(`apex-ai-club_${ordinaryMemberUid}`).set({
+        id: `apex-ai-club_${ordinaryMemberUid}`,
+        communityId: "apex-ai-club",
+        userId: ordinaryMemberUid,
+        campusId: APEX_CAMPUS_ID,
+        role: "member",
+        status: "active",
+      });
+
+      await expect(
+        promoteWaitlistCandidates.run({
+          data: { eventId },
+          auth: { uid: ordinaryMemberUid, token: { campusId: APEX_CAMPUS_ID } },
+        })
+      ).rejects.toMatchObject({
+        code: "permission-denied",
+      });
+
+      await expect(
+        fastForwardWaitlistHead.run({
+          data: { eventId },
+          auth: { uid: ordinaryMemberUid, token: { campusId: APEX_CAMPUS_ID } },
+        })
+      ).rejects.toMatchObject({
+        code: "permission-denied",
+      });
+
+      // Original event creator (createdBy === uid) whose communityMembers document was deleted is rejected
+      await db.collection("communityMembers").doc("apex-ai-club_organizer_campus_a").delete();
+
+      await expect(
+        promoteWaitlistCandidates.run({
+          data: { eventId },
+          auth: { uid: "organizer_campus_a", token: { campusId: APEX_CAMPUS_ID } },
+        })
+      ).rejects.toMatchObject({
+        code: "permission-denied",
+      });
+
+      await expect(
+        fastForwardWaitlistHead.run({
+          data: { eventId },
+          auth: { uid: "organizer_campus_a", token: { campusId: APEX_CAMPUS_ID } },
+        })
+      ).rejects.toMatchObject({
+        code: "permission-denied",
+      });
+
+      // Pending or removed membership (even with role: "admin" and createdBy === uid) is rejected
+      for (const inactiveStatus of ["pending", "removed"]) {
+        await db.collection("communityMembers").doc("apex-ai-club_organizer_campus_a").set({
+          id: "apex-ai-club_organizer_campus_a",
+          communityId: "apex-ai-club",
+          userId: "organizer_campus_a",
+          campusId: APEX_CAMPUS_ID,
+          role: "admin",
+          status: inactiveStatus,
+        });
+
+        await expect(
+          promoteWaitlistCandidates.run({
+            data: { eventId },
+            auth: { uid: "organizer_campus_a", token: { campusId: APEX_CAMPUS_ID } },
+          })
+        ).rejects.toMatchObject({
+          code: "permission-denied",
+        });
+
+        await expect(
+          fastForwardWaitlistHead.run({
+            data: { eventId },
+            auth: { uid: "organizer_campus_a", token: { campusId: APEX_CAMPUS_ID } },
+          })
+        ).rejects.toMatchObject({
+          code: "permission-denied",
+        });
+      }
+
+      // Campus-wide event (communityId === null) whose createdBy equals caller is rejected
+      const campusWideEventId = "evt_campus_wide_auth_test";
+      await db.collection("events").doc(campusWideEventId).set({
+        id: campusWideEventId,
+        title: "Campus-Wide Event",
+        campusId: APEX_CAMPUS_ID,
+        communityId: null,
+        createdBy: "organizer_campus_a",
+        capacity: 10,
+        registrationType: "capped",
+        startAt: Timestamp.fromMillis(Date.now() + 1_000_000),
+      });
+      await db.collection("eventCapacities").doc(campusWideEventId).set({
+        id: campusWideEventId,
+        eventId: campusWideEventId,
+        campusId: APEX_CAMPUS_ID,
+        confirmedCount: 10,
+        offeredCount: 0,
+        waitlistCount: 0,
+        headSequence: 1,
+        nextSequence: 1,
+      });
+
+      await expect(
+        promoteWaitlistCandidates.run({
+          data: { eventId: campusWideEventId },
+          auth: { uid: "organizer_campus_a", token: { campusId: APEX_CAMPUS_ID } },
+        })
+      ).rejects.toMatchObject({
+        code: "permission-denied",
+      });
+
+      await expect(
+        fastForwardWaitlistHead.run({
+          data: { eventId: campusWideEventId },
+          auth: { uid: "organizer_campus_a", token: { campusId: APEX_CAMPUS_ID } },
+        })
+      ).rejects.toMatchObject({
+        code: "permission-denied",
+      });
+
+      // Authorized active moderator and active admin succeed on community event
+      for (const authorizedRole of ["moderator", "admin"]) {
+        const leaderUid = `leader_${authorizedRole}_campus_a`;
+        await db.collection("communityMembers").doc(`apex-ai-club_${leaderUid}`).set({
+          id: `apex-ai-club_${leaderUid}`,
+          communityId: "apex-ai-club",
+          userId: leaderUid,
+          campusId: APEX_CAMPUS_ID,
+          role: authorizedRole,
+          status: "active",
+        });
+
+        const promoRes = await promoteWaitlistCandidates.run({
+          data: { eventId },
+          auth: { uid: leaderUid, token: { campusId: APEX_CAMPUS_ID } },
+        });
+        expect(promoRes.promotedCount).toBe(0);
+
+        const ffRes = await fastForwardWaitlistHead.run({
+          data: { eventId },
+          auth: { uid: leaderUid, token: { campusId: APEX_CAMPUS_ID } },
+        });
+        expect(ffRes.success).toBe(true);
+      }
+
+      // Caller without token.campusId and without users/{uid} profile is rejected even if communityMembers has campusId
+      const profilelessLeaderUid = "leader_no_profile_campus_a";
+      await db.collection("communityMembers").doc(`apex-ai-club_${profilelessLeaderUid}`).set({
+        id: `apex-ai-club_${profilelessLeaderUid}`,
+        communityId: "apex-ai-club",
+        userId: profilelessLeaderUid,
+        campusId: APEX_CAMPUS_ID,
+        role: "admin",
+        status: "active",
+      });
+
+      await expect(
+        promoteWaitlistCandidates.run({
+          data: { eventId },
+          auth: { uid: profilelessLeaderUid, token: {} },
+        })
+      ).rejects.toMatchObject({
+        code: "permission-denied",
+      });
+
+      await expect(
+        fastForwardWaitlistHead.run({
+          data: { eventId },
+          auth: { uid: profilelessLeaderUid, token: {} },
+        })
+      ).rejects.toMatchObject({
+        code: "permission-denied",
+      });
     });
   });
 
@@ -181,10 +413,21 @@ describe("Milestone 24.3: Firebase Functions Runtime Boundary & Endpoint Discove
       const eventId = "evt_callable_promotion_test";
       const uid1 = "student_promote_boundary_1";
 
+      await db.collection("communityMembers").doc("apex-ai-club_organizer_uid").set({
+        id: "apex-ai-club_organizer_uid",
+        communityId: "apex-ai-club",
+        userId: "organizer_uid",
+        campusId: APEX_CAMPUS_ID,
+        role: "admin",
+        status: "active",
+      });
+
       await db.collection("events").doc(eventId).set({
         id: eventId,
         title: "Promote Test Event",
         campusId: APEX_CAMPUS_ID,
+        communityId: "apex-ai-club",
+        createdBy: "organizer_uid",
         capacity: 10,
         registrationType: "capped",
         startAt: Timestamp.fromMillis(Date.now() + 1_000_000),
@@ -362,11 +605,21 @@ describe("Milestone 24.3: Firebase Functions Runtime Boundary & Endpoint Discove
         const eventId = `evt_task_disp_${Date.now()}`;
         const organizerId = `org_${Date.now()}`;
 
+        await db.collection("communityMembers").doc(`apex-ai-club_${organizerId}`).set({
+          id: `apex-ai-club_${organizerId}`,
+          communityId: "apex-ai-club",
+          userId: organizerId,
+          campusId: APEX_CAMPUS_ID,
+          role: "admin",
+          status: "active",
+        });
+
         // Create event with capacity 10, confirmedCount 5, offeredCount 0, waitlistCount 5
         await db.collection("events").doc(eventId).set({
           id: eventId,
           title: "Dispatch Producer Event",
           campusId: APEX_CAMPUS_ID,
+          communityId: "apex-ai-club",
           createdBy: organizerId,
           capacity: 10,
           status: "published",
@@ -471,10 +724,20 @@ describe("Milestone 24.3: Firebase Functions Runtime Boundary & Endpoint Discove
         const eventId = `evt_fallback_recov_${Date.now()}`;
         const organizerId = `org_recov_${Date.now()}`;
 
+        await db.collection("communityMembers").doc(`apex-ai-club_${organizerId}`).set({
+          id: `apex-ai-club_${organizerId}`,
+          communityId: "apex-ai-club",
+          userId: organizerId,
+          campusId: APEX_CAMPUS_ID,
+          role: "admin",
+          status: "active",
+        });
+
         await db.collection("events").doc(eventId).set({
           id: eventId,
           title: "Fallback Recovery Event",
           campusId: APEX_CAMPUS_ID,
+          communityId: "apex-ai-club",
           createdBy: organizerId,
           capacity: 10,
           status: "published",

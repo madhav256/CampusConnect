@@ -35,6 +35,11 @@ import {
   ONGOING_MUTABLE_FIELDS,
   getEventTemporalState,
 } from "../data/events.js";
+import {
+  createInitialEventCapacity,
+  isCappedEvent,
+} from "../data/eventCapacities.js";
+import { promoteWaitlistCandidates } from "./eventWaitlistService.js";
 
 function requireDb() {
   if (!isFirebaseConfigured || !db) {
@@ -201,7 +206,7 @@ export function normalizeEvent(eventIdOrDoc, maybeData) {
 
   if (!data) return null;
 
-  return {
+  const normalized = {
     id: eventId || data.id || "",
     campusId: data.campusId || "",
     communityId: data.communityId ?? null,
@@ -220,6 +225,19 @@ export function normalizeEvent(eventIdOrDoc, maybeData) {
     createdAt: normalizeTimestamp(data.createdAt),
     updatedAt: normalizeTimestamp(data.updatedAt),
   };
+
+  if (data.capacity !== undefined) {
+    if (data.capacity === null) {
+      normalized.capacity = null;
+    } else {
+      const numericCap =
+        typeof data.capacity === "number" ? data.capacity : Number(data.capacity);
+      normalized.capacity =
+        Number.isInteger(numericCap) && numericCap > 0 ? numericCap : null;
+    }
+  }
+
+  return normalized;
 }
 
 
@@ -829,6 +847,22 @@ export async function createEvent(eventData, currentUser = null) {
     throw new Error("Event end time must be after or equal to start time.");
   }
 
+  let parsedCapacity = null;
+  if (
+    eventData.capacity !== undefined &&
+    eventData.capacity !== null &&
+    eventData.capacity !== ""
+  ) {
+    const capNum =
+      typeof eventData.capacity === "number"
+        ? eventData.capacity
+        : Number(eventData.capacity);
+    if (!Number.isInteger(capNum) || capNum < 1 || capNum > 10000) {
+      throw new Error("Event capacity must be an integer between 1 and 10000.");
+    }
+    parsedCapacity = capNum;
+  }
+
   const colRef = eventsCollectionRef();
   const targetDocRef = eventData.id ? doc(colRef, eventData.id) : doc(colRef);
   const eventId = targetDocRef.id;
@@ -856,6 +890,23 @@ export async function createEvent(eventData, currentUser = null) {
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   };
+
+  if (parsedCapacity !== null) {
+    payload.capacity = parsedCapacity;
+    const firestore = requireDb();
+    const batch = writeBatch(firestore);
+    const capRef = doc(firestore, "eventCapacities", eventId);
+    const coordinatorPayload = createInitialEventCapacity({
+      eventId,
+      campusId,
+      confirmedCount: 0,
+      timestamp: serverTimestamp(),
+    });
+    batch.set(targetDocRef, payload);
+    batch.set(capRef, coordinatorPayload);
+    await batch.commit();
+    return eventId;
+  }
 
   await setDoc(targetDocRef, payload);
   return eventId;
@@ -981,6 +1032,22 @@ export async function updateEvent(eventId, updates, currentEvent, referenceNow =
     if (updates.organizerName !== undefined) safePayload.organizerName = String(updates.organizerName).trim();
     if (updates.imageURL !== undefined) safePayload.imageURL = updates.imageURL || null;
 
+    if (updates.capacity !== undefined) {
+      if (!isCappedEvent(currentEvent)) {
+        throw new Error("Cannot modify capacity on an uncapped event.");
+      }
+      const newCap =
+        typeof updates.capacity === "number"
+          ? updates.capacity
+          : Number(updates.capacity);
+      if (!Number.isInteger(newCap) || newCap < 1 || newCap > 10000) {
+        throw new Error("Event capacity must be an integer between 1 and 10000.");
+      }
+      if (newCap !== currentEvent.capacity) {
+        safePayload.capacity = newCap;
+      }
+    }
+
     // Selective timestamp canonicalization: include in payload ONLY if genuinely modified
     if (updates.startAt !== undefined && resultingStartAt.getTime() !== existingStartAt.getTime()) {
       safePayload.startAt = toFirestoreTimestamp(resultingStartAt);
@@ -1037,10 +1104,50 @@ export async function updateEvent(eventId, updates, currentEvent, referenceNow =
     }
   }
 
+  let coordinatorData = null;
+  if (safePayload.capacity !== undefined) {
+    try {
+      const capSnap = await getDoc(doc(requireDb(), "eventCapacities", eventId.trim()));
+      if (capSnap && typeof capSnap.exists === "function" && capSnap.exists()) {
+        coordinatorData = capSnap.data();
+      }
+    } catch {
+      coordinatorData = null;
+    }
+
+    if (coordinatorData) {
+      const allocatedSeats =
+        (Number(coordinatorData.confirmedCount) || 0) +
+        (Number(coordinatorData.offeredCount) || 0);
+      if (safePayload.capacity < allocatedSeats) {
+        throw new Error(
+          `Event capacity (${safePayload.capacity}) cannot be reduced below currently allocated seats (${allocatedSeats}).`
+        );
+      }
+    }
+  }
+
   safePayload.updatedAt = serverTimestamp();
 
   const eRef = eventDocRef(eventId);
   await updateDoc(eRef, safePayload);
+
+  // Pathway PW-7B: Opportunistically promote waitlisted candidates when capacity increases
+  if (
+    safePayload.capacity !== undefined &&
+    isCappedEvent(currentEvent) &&
+    safePayload.capacity > currentEvent.capacity &&
+    (!coordinatorData || Number(coordinatorData.waitlistCount) > 0)
+  ) {
+    try {
+      await promoteWaitlistCandidates({
+        eventId: eventId.trim(),
+        targetVacancies: safePayload.capacity - currentEvent.capacity,
+      });
+    } catch {
+      // Non-fatal: server-side or organizer retry can also promote candidates
+    }
+  }
 }
 
 /**

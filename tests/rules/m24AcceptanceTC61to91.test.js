@@ -33,6 +33,7 @@ import {
   claimWaitlistOffer,
   declineWaitlistOffer,
   leaveWaitlist,
+  promoteWaitlistCandidates,
   fastForwardWaitlistHead,
 } from "../../src/server/callableFunctions.js";
 import { deliverWaitlistOfferNotification } from "../../src/server/outboxWorker.js";
@@ -223,6 +224,14 @@ describe("M24 Acceptance Test Matrix: TC-61 to TC-91", () => {
     await expect(
       declineWaitlistOffer({ eventId: "e1", slotSequence: 1 }, null, adminDb)
     ).rejects.toMatchObject({ code: "unauthenticated" });
+
+    await expect(
+      promoteWaitlistCandidates({ eventId: "e1" }, null, adminDb)
+    ).rejects.toMatchObject({ code: "unauthenticated" });
+
+    await expect(
+      fastForwardWaitlistHead({ eventId: "e1" }, null, adminDb)
+    ).rejects.toMatchObject({ code: "unauthenticated" });
   });
 
   // TC-68: Callable Caller Ownership Enforced
@@ -287,6 +296,124 @@ describe("M24 Acceptance Test Matrix: TC-61 to TC-91", () => {
       leaveWaitlist(
         { eventId },
         { uid: "st_jude_user", email: "st_jude_user@stjude.edu" },
+        adminDb
+      )
+    ).rejects.toMatchObject({ code: "permission-denied" });
+
+    await expect(
+      promoteWaitlistCandidates(
+        { eventId },
+        { uid: "st_jude_user", email: "st_jude_user@stjude.edu" },
+        adminDb
+      )
+    ).rejects.toMatchObject({ code: "permission-denied" });
+
+    await expect(
+      fastForwardWaitlistHead(
+        { eventId },
+        { uid: "st_jude_user", email: "st_jude_user@stjude.edu" },
+        adminDb
+      )
+    ).rejects.toMatchObject({ code: "permission-denied" });
+
+    // Same-campus non-organizer / non-leader student (Bob) is also rejected
+    await expect(
+      promoteWaitlistCandidates(
+        { eventId },
+        { uid: TEST_UIDS.bob, email: `${TEST_UIDS.bob}@example.test` },
+        adminDb
+      )
+    ).rejects.toMatchObject({ code: "permission-denied" });
+
+    await expect(
+      fastForwardWaitlistHead(
+        { eventId },
+        { uid: TEST_UIDS.bob, email: `${TEST_UIDS.bob}@example.test` },
+        adminDb
+      )
+    ).rejects.toMatchObject({ code: "permission-denied" });
+
+    // Original creator (Alice) whose communityMembers document is deleted is rejected
+    await testEnvironment.withSecurityRulesDisabled(async (context) => {
+      await context.firestore().collection("communityMembers").doc(`apex-ai-club_${TEST_UIDS.alice}`).delete();
+    });
+
+    await expect(
+      promoteWaitlistCandidates(
+        { eventId },
+        { uid: TEST_UIDS.alice, email: `${TEST_UIDS.alice}@example.test` },
+        adminDb
+      )
+    ).rejects.toMatchObject({ code: "permission-denied" });
+
+    await expect(
+      fastForwardWaitlistHead(
+        { eventId },
+        { uid: TEST_UIDS.alice, email: `${TEST_UIDS.alice}@example.test` },
+        adminDb
+      )
+    ).rejects.toMatchObject({ code: "permission-denied" });
+
+    // Pending or removed membership (even with ADMIN role) is rejected
+    for (const inactiveStatus of ["pending", "removed"]) {
+      await testEnvironment.withSecurityRulesDisabled(async (context) => {
+        await context.firestore().collection("communityMembers").doc(`apex-ai-club_${TEST_UIDS.alice}`).set(
+          communityMemberFixture("apex-ai-club", TEST_UIDS.alice, {
+            role: COMMUNITY_MEMBER_ROLES.ADMIN,
+            status: inactiveStatus,
+            campusId: APEX_CAMPUS_ID,
+          })
+        );
+      });
+
+      await expect(
+        promoteWaitlistCandidates(
+          { eventId },
+          { uid: TEST_UIDS.alice, email: `${TEST_UIDS.alice}@example.test` },
+          adminDb
+        )
+      ).rejects.toMatchObject({ code: "permission-denied" });
+
+      await expect(
+        fastForwardWaitlistHead(
+          { eventId },
+          { uid: TEST_UIDS.alice, email: `${TEST_UIDS.alice}@example.test` },
+          adminDb
+        )
+      ).rejects.toMatchObject({ code: "permission-denied" });
+    }
+
+    // Campus-wide event (communityId === null) whose createdBy equals caller (Alice) is rejected
+    const campusWideEventId = "tc69_campus_wide_event";
+    await testEnvironment.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+      await db.collection("events").doc(campusWideEventId).set(
+        eventFixture(campusWideEventId, TEST_UIDS.alice, null, {
+          campusId: APEX_CAMPUS_ID,
+          communityId: null,
+          capacity: 10,
+          registrationType: "capped",
+          startAt: futureTimestamp,
+          endAt: farFutureTimestamp,
+        })
+      );
+      await db.collection("eventCapacities").doc(campusWideEventId).set(
+        eventCapacityFixture(campusWideEventId, APEX_CAMPUS_ID, { confirmedCount: 10 })
+      );
+    });
+
+    await expect(
+      promoteWaitlistCandidates(
+        { eventId: campusWideEventId },
+        { uid: TEST_UIDS.alice, email: `${TEST_UIDS.alice}@example.test` },
+        adminDb
+      )
+    ).rejects.toMatchObject({ code: "permission-denied" });
+
+    await expect(
+      fastForwardWaitlistHead(
+        { eventId: campusWideEventId },
+        { uid: TEST_UIDS.alice, email: `${TEST_UIDS.alice}@example.test` },
         adminDb
       )
     ).rejects.toMatchObject({ code: "permission-denied" });
@@ -457,7 +584,11 @@ describe("M24 Acceptance Test Matrix: TC-61 to TC-91", () => {
       );
     });
 
-    await fastForwardWaitlistHead({ eventId, maxScan: 10 }, null, adminDb);
+    await fastForwardWaitlistHead(
+      { eventId, maxScan: 10 },
+      { uid: TEST_UIDS.alice, email: `${TEST_UIDS.alice}@example.test` },
+      adminDb
+    );
     const res = await processWaitlistContinuations({ eventId }, adminDb);
     expect(res.success).toBe(true);
 
@@ -813,9 +944,40 @@ describe("M24 Acceptance Test Matrix: TC-61 to TC-91", () => {
     const eventId = "tc80_event";
     await testEnvironment.withSecurityRulesDisabled(async (context) => {
       const db = context.firestore();
-      await db.collection("users").doc(TEST_UIDS.carol).update({
-        "notificationPreferences.eventWaitlistOffers": false,
-      });
+      await db.collection("users").doc(TEST_UIDS.carol).set(
+        userFixture(TEST_UIDS.carol, { isDiscoverable: false })
+      );
+    });
+
+    // Verify client can update their own eventWaitlistOffers preference through Security Rules
+    const carolCtx = contextFor(TEST_UIDS.carol);
+    await assertSucceeds(
+      carolCtx.firestore().collection("users").doc(TEST_UIDS.carol).update({
+        notificationPreferences: {
+          connectionRequests: true,
+          connectionAccepted: true,
+          eventRsvps: true,
+          eventCancellations: true,
+          eventWaitlistOffers: false,
+        },
+        updatedAt: serverTimestamp(),
+      })
+    );
+
+    // Non-boolean eventWaitlistOffers is rejected by Security Rules
+    await expectPermissionDenied(() =>
+      carolCtx.firestore().collection("users").doc(TEST_UIDS.carol).update({
+        notificationPreferences: {
+          connectionRequests: true,
+          connectionAccepted: true,
+          eventWaitlistOffers: "not-a-bool",
+        },
+        updatedAt: serverTimestamp(),
+      })
+    );
+
+    await testEnvironment.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
       await db.collection("eventWaitlistOutbox").doc(`outbox_${eventId}_1`).set(
         eventWaitlistOutboxFixture(eventId, 1, TEST_UIDS.carol, {
           status: "pending",
@@ -1336,5 +1498,322 @@ describe("M24 Acceptance Test Matrix: TC-61 to TC-91", () => {
 
     const slot = (await adminDb.collection("eventWaitlistSlots").doc(`${earlyEventId}_1`).get()).data();
     expect(slot.status).toBe("expired");
+  });
+
+  // TC-92: Missing Waitlist-Member Document Reads & Reactive Subscription Transitions (Defect B)
+  it("TC-92: Signed-in user can read their own missing eventWaitlistMembers doc, cannot read another user's missing doc, and onSnapshot cleanly transitions across join, leave, claim, and decline", async () => {
+    const eventId = "tc92_event";
+    await testEnvironment.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+      await db.collection("events").doc(eventId).set(
+        eventFixture(eventId, TEST_UIDS.alice, "apex-ai-club", {
+          capacity: 2,
+          registrationType: "capped",
+          startAt: futureTimestamp,
+          endAt: farFutureTimestamp,
+        })
+      );
+      await db.collection("eventCapacities").doc(eventId).set(
+        eventCapacityFixture(eventId, APEX_CAMPUS_ID, {
+          confirmedCount: 2,
+          offeredCount: 0,
+          waitlistCount: 0,
+          headSequence: 1,
+          nextSequence: 1,
+        })
+      );
+    });
+
+    const bobCtx = contextFor(TEST_UIDS.bob);
+    const carolCtx = contextFor(TEST_UIDS.carol);
+    const aliceCtx = contextFor(TEST_UIDS.alice);
+    const stJudeCtx = contextFor("st_jude_user", "st_jude_user@stjude.edu", ST_JUDE_CAMPUS_ID);
+    const unauthCtx = testEnvironment.unauthenticatedContext();
+
+    // 1. Bob can read his own missing waitlist-member document
+    const missingOwnSnap = await assertSucceeds(
+      bobCtx.firestore().collection("eventWaitlistMembers").doc(`${eventId}_${TEST_UIDS.bob}`).get()
+    );
+    expect(missingOwnSnap.exists).toBe(false);
+
+    // 2. Bob CANNOT read Carol's missing waitlist-member document
+    await expectPermissionDenied(() =>
+      bobCtx.firestore().collection("eventWaitlistMembers").doc(`${eventId}_${TEST_UIDS.carol}`).get()
+    );
+
+    // 3. Unauthenticated caller CANNOT read any missing waitlist-member document
+    await expectPermissionDenied(() =>
+      unauthCtx.firestore().collection("eventWaitlistMembers").doc(`${eventId}_${TEST_UIDS.bob}`).get()
+    );
+
+    // 4. Subscribe to Bob's missing waitlist-member document via onSnapshot and verify transitions
+    const snapshotStates = [];
+    const snapshotErrors = [];
+    let resolveNextSnapshot = null;
+    const waitForNextSnapshot = () =>
+      new Promise((resolve) => {
+        resolveNextSnapshot = resolve;
+      });
+
+    const initialPromise = waitForNextSnapshot();
+    const unsubscribe = bobCtx
+      .firestore()
+      .collection("eventWaitlistMembers")
+      .doc(`${eventId}_${TEST_UIDS.bob}`)
+      .onSnapshot(
+        (snap) => {
+          const state = {
+            exists: snap.exists,
+            status: snap.exists ? snap.data()?.status : null,
+            sequenceNumber: snap.exists ? snap.data()?.sequenceNumber : null,
+          };
+          snapshotStates.push(state);
+          if (resolveNextSnapshot) {
+            const r = resolveNextSnapshot;
+            resolveNextSnapshot = null;
+            r(state);
+          }
+        },
+        (err) => {
+          snapshotErrors.push(err);
+          if (resolveNextSnapshot) {
+            const r = resolveNextSnapshot;
+            resolveNextSnapshot = null;
+            r({ error: err });
+          }
+        }
+      );
+
+    try {
+      // Initial missing state emitted without error
+      const s0 = await initialPromise;
+      expect(s0).toEqual({ exists: false, status: null, sequenceNumber: null });
+      expect(snapshotErrors).toHaveLength(0);
+
+      // Transition 1: Absent -> Present (Bob joins waitlist)
+      const joinSnapPromise = waitForNextSnapshot();
+      const joinBatch = bobCtx.firestore().batch();
+      joinBatch.set(bobCtx.firestore().collection("eventWaitlistSlots").doc(`${eventId}_1`), {
+        id: `${eventId}_1`,
+        eventId,
+        campusId: APEX_CAMPUS_ID,
+        userId: TEST_UIDS.bob,
+        sequenceNumber: 1,
+        status: "waiting",
+        joinedAt: serverTimestamp(),
+      });
+      joinBatch.set(
+        bobCtx.firestore().collection("eventWaitlistMembers").doc(`${eventId}_${TEST_UIDS.bob}`),
+        {
+          id: `${eventId}_${TEST_UIDS.bob}`,
+          eventId,
+          campusId: APEX_CAMPUS_ID,
+          userId: TEST_UIDS.bob,
+          sequenceNumber: 1,
+          status: "waiting",
+          joinedAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        }
+      );
+      joinBatch.update(bobCtx.firestore().collection("eventCapacities").doc(eventId), {
+        waitlistCount: firebase.firestore.FieldValue.increment(1),
+        nextSequence: firebase.firestore.FieldValue.increment(1),
+        updatedAt: serverTimestamp(),
+      });
+      await assertSucceeds(joinBatch.commit());
+
+      const s1 = await joinSnapPromise;
+      expect(s1).toEqual({ exists: true, status: "waiting", sequenceNumber: 1 });
+      expect(snapshotErrors).toHaveLength(0);
+
+      // Existing membership read checks: owner (Bob) and event leader (Alice) succeed; Carol and St. Jude denied
+      await assertSucceeds(
+        bobCtx.firestore().collection("eventWaitlistMembers").doc(`${eventId}_${TEST_UIDS.bob}`).get()
+      );
+      await assertSucceeds(
+        aliceCtx.firestore().collection("eventWaitlistMembers").doc(`${eventId}_${TEST_UIDS.bob}`).get()
+      );
+      await expectPermissionDenied(() =>
+        carolCtx.firestore().collection("eventWaitlistMembers").doc(`${eventId}_${TEST_UIDS.bob}`).get()
+      );
+      await expectPermissionDenied(() =>
+        stJudeCtx.firestore().collection("eventWaitlistMembers").doc(`${eventId}_${TEST_UIDS.bob}`).get()
+      );
+
+      // Transition 2: Present -> Absent on Leave (leaveWaitlist deletes member doc)
+      const leaveSnapPromise = waitForNextSnapshot();
+      await leaveWaitlist(
+        { eventId },
+        { uid: TEST_UIDS.bob, email: `${TEST_UIDS.bob}@example.test` },
+        adminDb
+      );
+      const s2 = await leaveSnapPromise;
+      expect(s2).toEqual({ exists: false, status: null, sequenceNumber: null });
+      expect(snapshotErrors).toHaveLength(0);
+
+      // Transition 3: Absent -> Offered -> Absent on Claim (claimWaitlistOffer deletes member doc)
+      const offerSnapPromise = waitForNextSnapshot();
+      await testEnvironment.withSecurityRulesDisabled(async (context) => {
+        const db = context.firestore();
+        await db.collection("eventCapacities").doc(eventId).update({
+          confirmedCount: 1,
+          offeredCount: 1,
+          waitlistCount: 0,
+          headSequence: 3,
+          nextSequence: 3,
+        });
+        await db.collection("eventWaitlistSlots").doc(`${eventId}_2`).set(
+          eventWaitlistSlotFixture(eventId, 2, TEST_UIDS.bob, APEX_CAMPUS_ID, {
+            status: "offered",
+            offerExpiresAt: futureTimestamp,
+          })
+        );
+        await db.collection("eventWaitlistMembers").doc(`${eventId}_${TEST_UIDS.bob}`).set(
+          eventWaitlistMemberFixture(eventId, TEST_UIDS.bob, APEX_CAMPUS_ID, 2, {
+            status: "offered",
+          })
+        );
+      });
+      const s3 = await offerSnapPromise;
+      expect(s3).toEqual({ exists: true, status: "offered", sequenceNumber: 2 });
+
+      const claimSnapPromise = waitForNextSnapshot();
+      await claimWaitlistOffer(
+        { eventId, slotSequence: 2 },
+        { uid: TEST_UIDS.bob, email: `${TEST_UIDS.bob}@example.test` },
+        adminDb
+      );
+      const s4 = await claimSnapPromise;
+      expect(s4).toEqual({ exists: false, status: null, sequenceNumber: null });
+      expect(snapshotErrors).toHaveLength(0);
+
+      // Transition 4: Absent -> Offered -> Absent on Decline (declineWaitlistOffer deletes member doc)
+      const secondOfferPromise = waitForNextSnapshot();
+      await testEnvironment.withSecurityRulesDisabled(async (context) => {
+        const db = context.firestore();
+        await db.collection("eventRsvps").doc(`${eventId}_${TEST_UIDS.bob}`).delete();
+        await db.collection("eventCapacities").doc(eventId).update({
+          confirmedCount: 1,
+          offeredCount: 1,
+          waitlistCount: 0,
+          headSequence: 4,
+          nextSequence: 4,
+        });
+        await db.collection("eventWaitlistSlots").doc(`${eventId}_3`).set(
+          eventWaitlistSlotFixture(eventId, 3, TEST_UIDS.bob, APEX_CAMPUS_ID, {
+            status: "offered",
+            offerExpiresAt: futureTimestamp,
+          })
+        );
+        await db.collection("eventWaitlistMembers").doc(`${eventId}_${TEST_UIDS.bob}`).set(
+          eventWaitlistMemberFixture(eventId, TEST_UIDS.bob, APEX_CAMPUS_ID, 3, {
+            status: "offered",
+          })
+        );
+      });
+      const s5 = await secondOfferPromise;
+      expect(s5).toEqual({ exists: true, status: "offered", sequenceNumber: 3 });
+
+      const declineSnapPromise = waitForNextSnapshot();
+      await declineWaitlistOffer(
+        { eventId, slotSequence: 3 },
+        { uid: TEST_UIDS.bob, email: `${TEST_UIDS.bob}@example.test` },
+        adminDb
+      );
+      const s6 = await declineSnapPromise;
+      expect(s6).toEqual({ exists: false, status: null, sequenceNumber: null });
+      expect(snapshotErrors).toHaveLength(0);
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  // TC-93: Transactional FIFO Waitlist Join Under Rules (Defect C)
+  it("TC-93: Client runTransaction waitlist join reads coordinator and member state before writing and allocates monotonic FIFO sequences", async () => {
+    const eventId = "tc93_event";
+    await testEnvironment.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+      await db.collection("events").doc(eventId).set(
+        eventFixture(eventId, TEST_UIDS.alice, "apex-ai-club", {
+          capacity: 2,
+          registrationType: "capped",
+          startAt: futureTimestamp,
+          endAt: farFutureTimestamp,
+        })
+      );
+      await db.collection("eventCapacities").doc(eventId).set(
+        eventCapacityFixture(eventId, APEX_CAMPUS_ID, {
+          confirmedCount: 2,
+          offeredCount: 0,
+          waitlistCount: 0,
+          headSequence: 1,
+          nextSequence: 1,
+        })
+      );
+    });
+
+    const runClientWaitlistJoinTx = async (uid) => {
+      const userFs = contextFor(uid).firestore();
+      return await userFs.runTransaction(async (tx) => {
+        const capRef = userFs.collection("eventCapacities").doc(eventId);
+        const memberRef = userFs.collection("eventWaitlistMembers").doc(`${eventId}_${uid}`);
+        const rsvpRef = userFs.collection("eventRsvps").doc(`${eventId}_${uid}`);
+
+        const [capSnap, memberSnap, rsvpSnap] = await Promise.all([
+          tx.get(capRef),
+          tx.get(memberRef),
+          tx.get(rsvpRef),
+        ]);
+
+        if (memberSnap.exists) {
+          throw new Error("Already on waitlist");
+        }
+        if (rsvpSnap.exists) {
+          throw new Error("Already has RSVP");
+        }
+
+        const assignedSeq = capSnap.data().nextSequence;
+        const slotRef = userFs.collection("eventWaitlistSlots").doc(`${eventId}_${assignedSeq}`);
+
+        tx.set(slotRef, {
+          id: `${eventId}_${assignedSeq}`,
+          eventId,
+          campusId: APEX_CAMPUS_ID,
+          userId: uid,
+          sequenceNumber: assignedSeq,
+          status: "waiting",
+          joinedAt: serverTimestamp(),
+        });
+        tx.set(memberRef, {
+          id: `${eventId}_${uid}`,
+          eventId,
+          campusId: APEX_CAMPUS_ID,
+          userId: uid,
+          sequenceNumber: assignedSeq,
+          status: "waiting",
+          joinedAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+        tx.update(capRef, {
+          waitlistCount: firebase.firestore.FieldValue.increment(1),
+          nextSequence: firebase.firestore.FieldValue.increment(1),
+          updatedAt: serverTimestamp(),
+        });
+
+        return assignedSeq;
+      });
+    };
+
+    const seqBob = await assertSucceeds(runClientWaitlistJoinTx(TEST_UIDS.bob));
+    const seqCarol = await assertSucceeds(runClientWaitlistJoinTx(TEST_UIDS.carol));
+    expect(seqBob).toBe(1);
+    expect(seqCarol).toBe(2);
+
+    // Duplicate join by Bob is rejected by the transaction read check
+    await expect(runClientWaitlistJoinTx(TEST_UIDS.bob)).rejects.toThrow("Already on waitlist");
+
+    const coord = (await adminDb.collection("eventCapacities").doc(eventId).get()).data();
+    expect(coord.waitlistCount).toBe(2);
+    expect(coord.nextSequence).toBe(3);
   });
 });

@@ -5,7 +5,13 @@ import reactRefresh from 'eslint-plugin-react-refresh'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['dist']),
+  globalIgnores([
+    'dist',
+    '**/.wrangler/**',
+    '**/node_modules/**',
+    'experiments/**/dist/**',
+    'experiments/**/experiments/**',
+  ]),
   {
     files: ['**/*.{js,jsx}'],
     extends: [
@@ -16,6 +22,25 @@ export default defineConfig([
     languageOptions: {
       globals: globals.browser,
       parserOptions: { ecmaFeatures: { jsx: true } },
+    },
+  },
+  {
+    files: ['experiments/**/*.{js,jsx}'],
+    languageOptions: {
+      globals: {
+        ...globals.serviceworker,
+        ...globals.node,
+      },
+    },
+    rules: {
+      'no-unused-vars': [
+        'error',
+        {
+          args: 'after-used',
+          argsIgnorePattern: '^_|options|ctx|workerEnv',
+          caughtErrors: 'none',
+        },
+      ],
     },
   },
 ])

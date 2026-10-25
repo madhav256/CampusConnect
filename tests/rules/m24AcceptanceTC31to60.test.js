@@ -216,8 +216,12 @@ describe("M24 Acceptance Test Matrix: TC-31 to TC-60", () => {
       );
     });
 
-    // Fast forward with maxScan = 10
-    const ffRes = await fastForwardWaitlistHead({ eventId, maxScan: 10 }, adminDb);
+    // Fast forward with maxScan = 10 by authorized organizer Alice
+    const ffRes = await fastForwardWaitlistHead(
+      { eventId, maxScan: 10 },
+      { uid: TEST_UIDS.alice, email: `${TEST_UIDS.alice}@example.test` },
+      adminDb
+    );
     expect(ffRes.success).toBe(true);
     expect(ffRes.continuationStaged).toBe(true);
 

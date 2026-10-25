@@ -50,6 +50,7 @@ export const UPCOMING_MUTABLE_FIELDS = Object.freeze([
   "endAt",
   "imageURL",
   "organizerName",
+  "capacity",
 ]);
 
 /**

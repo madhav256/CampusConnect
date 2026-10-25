@@ -7,12 +7,13 @@
  */
 
 import { useState } from "react";
-import { Check, CalendarPlus } from "lucide-react";
+import { Check, CalendarPlus, Clock, Sparkles } from "lucide-react";
 import Button from "../ui/Button.jsx";
 import { useAuth } from "../../hooks/useAuth.js";
 import { useEventRsvp } from "../../hooks/useEventRsvp.js";
 import { EVENT_STATUSES } from "../../constants.js";
 import { getEventTemporalState } from "../../data/events.js";
+import { computeCapacityMetrics, isCappedEvent } from "../../data/eventCapacities.js";
 
 /**
  * Event RSVP interaction button.
@@ -38,6 +39,13 @@ export default function EventRsvpButton({
   event,
   availability = "available",
   referenceDate,
+  coordinator = null,
+  metrics: propMetrics = null,
+  isOnWaitlist = false,
+  isOffered = false,
+  queuePosition = null,
+  onOpenWaitlist = null,
+  onClaimOffer = null,
   rsvp: propRsvp,
   isGoing: propIsGoing,
   isLoading: propIsLoading,
@@ -58,7 +66,8 @@ export default function EventRsvpButton({
 
   const hookResult = useEventRsvp(
     shouldHook ? eventId : null,
-    shouldHook ? event : null
+    shouldHook ? event : null,
+    shouldHook ? coordinator : null
   );
 
   const isGoing =
@@ -77,6 +86,23 @@ export default function EventRsvpButton({
   const [localError, setLocalError] = useState(null);
   const displayError = propError || localError || hookError;
 
+  const isCapped = isCappedEvent(event);
+  const activeMetrics =
+    propMetrics ||
+    (isCapped && coordinator
+      ? computeCapacityMetrics({ event, coordinator })
+      : null);
+
+  const needsWaitlistJoin = Boolean(
+    !isGoing &&
+      !isOnWaitlist &&
+      !isOffered &&
+      isCapped &&
+      activeMetrics &&
+      !activeMetrics.canDirectRsvp &&
+      activeMetrics.canJoinWaitlist
+  );
+
   const handleAction = async () => {
     setLocalError(null);
     try {
@@ -85,6 +111,16 @@ export default function EventRsvpButton({
           await onCancel();
         } else if (hookResult?.cancelRsvp) {
           await hookResult.cancelRsvp();
+        }
+      } else if (isOffered) {
+        if (onClaimOffer) {
+          await onClaimOffer();
+        } else if (onOpenWaitlist) {
+          onOpenWaitlist();
+        }
+      } else if (isOnWaitlist || needsWaitlistJoin) {
+        if (onOpenWaitlist) {
+          onOpenWaitlist();
         }
       } else {
         if (onRsvp) {
@@ -171,6 +207,23 @@ export default function EventRsvpButton({
           <>
             <Check className="h-4 w-4 text-emerald-600 shrink-0" aria-hidden="true" />
             <span>Cancel RSVP</span>
+          </>
+        ) : isOffered ? (
+          <>
+            <Sparkles className="h-4 w-4 shrink-0" aria-hidden="true" />
+            <span>Claim Seat</span>
+          </>
+        ) : isOnWaitlist ? (
+          <>
+            <Clock className="h-4 w-4 shrink-0" aria-hidden="true" />
+            <span>
+              {queuePosition ? `On Waitlist (#${queuePosition})` : "On Waitlist"}
+            </span>
+          </>
+        ) : needsWaitlistJoin ? (
+          <>
+            <Clock className="h-4 w-4 shrink-0" aria-hidden="true" />
+            <span>Join Waitlist</span>
           </>
         ) : (
           <>

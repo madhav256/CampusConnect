@@ -33,20 +33,22 @@ service cloud.firestore {
     function isValidNotificationPreferencesForCreate(preferences) {
       return preferences is map &&
              preferences.keys().hasAll(['connectionRequests', 'connectionAccepted']) &&
-             preferences.keys().hasOnly(['connectionRequests', 'connectionAccepted', 'eventRsvps', 'eventCancellations']) &&
+             preferences.keys().hasOnly(['connectionRequests', 'connectionAccepted', 'eventRsvps', 'eventCancellations', 'eventWaitlistOffers']) &&
              preferences.connectionRequests is bool &&
              preferences.connectionAccepted is bool &&
              (!('eventRsvps' in preferences) || preferences.eventRsvps is bool) &&
-             (!('eventCancellations' in preferences) || preferences.eventCancellations is bool);
+             (!('eventCancellations' in preferences) || preferences.eventCancellations is bool) &&
+             (!('eventWaitlistOffers' in preferences) || preferences.eventWaitlistOffers is bool);
     }
 
     function isValidNotificationPreferencesForUpdate(preferences) {
       return preferences is map &&
-             preferences.keys().hasOnly(['connectionRequests', 'connectionAccepted', 'eventRsvps', 'eventCancellations']) &&
+             preferences.keys().hasOnly(['connectionRequests', 'connectionAccepted', 'eventRsvps', 'eventCancellations', 'eventWaitlistOffers']) &&
              (!('connectionRequests' in preferences) || preferences.connectionRequests is bool) &&
              (!('connectionAccepted' in preferences) || preferences.connectionAccepted is bool) &&
              (!('eventRsvps' in preferences) || preferences.eventRsvps is bool) &&
-             (!('eventCancellations' in preferences) || preferences.eventCancellations is bool);
+             (!('eventCancellations' in preferences) || preferences.eventCancellations is bool) &&
+             (!('eventWaitlistOffers' in preferences) || preferences.eventWaitlistOffers is bool);
     }
 
 
@@ -1718,9 +1720,12 @@ service cloud.firestore {
                isCommunityModeratorOrAdmin(eventDoc.data.communityId);
       }
 
-      allow get: if isAuthenticated() && resource.data.campusId == getUserCampusId() && (
-        resource.data.userId == request.auth.uid ||
-        isMemberParentEventLeader(resource.data.eventId)
+      allow get: if isAuthenticated() && (
+        (resource == null && memberId.matches('^.+_' + request.auth.uid + '$')) ||
+        (resource != null && resource.data.campusId == getUserCampusId() && (
+          resource.data.userId == request.auth.uid ||
+          isMemberParentEventLeader(resource.data.eventId)
+        ))
       );
 
       allow list: if false;

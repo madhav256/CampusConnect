@@ -19,6 +19,8 @@ const mocks = vi.hoisted(() => ({
   setDoc: vi.fn(),
   mockBatch: {
     set: vi.fn(),
+    update: vi.fn(),
+    delete: vi.fn(),
     commit: vi.fn(() => Promise.resolve()),
   },
   writeBatch: vi.fn(),
@@ -27,6 +29,9 @@ const mocks = vi.hoisted(() => ({
   where: vi.fn((field, op, val) => ({ type: "where", field, op, val })),
   limit: vi.fn((count) => ({ type: "limit", count })),
   serverTimestamp: vi.fn(() => ({ _methodName: "serverTimestamp" })),
+  increment: vi.fn((n) => ({ _methodName: "increment", _operand: n })),
+  cancelRsvpWithPromotion: vi.fn(),
+  getEventCapacity: vi.fn(),
   mockDb: { id: "mock-db" },
 }));
 
@@ -35,6 +40,14 @@ mocks.writeBatch.mockImplementation(() => mocks.mockBatch);
 vi.mock("../../src/firebase/config", () => ({
   db: mocks.mockDb,
   isFirebaseConfigured: true,
+}));
+
+vi.mock("../../src/services/eventWaitlistService.js", () => ({
+  cancelRsvpWithPromotion: (...args) => mocks.cancelRsvpWithPromotion(...args),
+}));
+
+vi.mock("../../src/services/eventCapacityService.js", () => ({
+  getEventCapacity: (...args) => mocks.getEventCapacity(...args),
 }));
 
 vi.mock("firebase/firestore", () => ({
@@ -48,6 +61,7 @@ vi.mock("firebase/firestore", () => ({
   where: mocks.where,
   limit: mocks.limit,
   serverTimestamp: mocks.serverTimestamp,
+  increment: mocks.increment,
 }));
 
 import {
@@ -779,6 +793,122 @@ describe("Milestone 21 — Unit 21.3: Event RSVP Service", () => {
       await expect(deleteEventRsvp("event-1", "user-1")).rejects.toThrow(
         "permission-denied"
       );
+    });
+
+    it("createEventRsvp atomically increments eventCapacities.confirmedCount for a capped event (PW-1)", async () => {
+      mocks.mockBatch.update.mockClear();
+
+      await createEventRsvp({
+        eventId: "event-capped-1",
+        userId: "student-1",
+        campusId: APEX_CAMPUS_ID,
+        event: {
+          id: "event-capped-1",
+          title: "Capped Workshop",
+          capacity: 25,
+          createdBy: "student-1",
+          campusId: APEX_CAMPUS_ID,
+        },
+        coordinator: {
+          confirmedCount: 10,
+          offeredCount: 0,
+          waitlistCount: 0,
+        },
+      });
+
+      expect(mocks.mockBatch.set).toHaveBeenCalledWith(
+        expect.objectContaining({ path: "eventRsvps/event-capped-1_student-1" }),
+        expect.objectContaining({ id: "event-capped-1_student-1" })
+      );
+      expect(mocks.mockBatch.update).toHaveBeenCalledWith(
+        expect.objectContaining({ path: "eventCapacities/event-capped-1" }),
+        {
+          confirmedCount: { _methodName: "increment", _operand: 1 },
+          updatedAt: { _methodName: "serverTimestamp" },
+        }
+      );
+      expect(mocks.mockBatch.commit).toHaveBeenCalledTimes(1);
+    });
+
+    it("createEventRsvp rejects direct RSVP when capped event is full or has an active waitlist", async () => {
+      await expect(
+        createEventRsvp({
+          eventId: "event-capped-full",
+          userId: "student-2",
+          campusId: APEX_CAMPUS_ID,
+          event: { id: "event-capped-full", capacity: 10 },
+          coordinator: { confirmedCount: 10, offeredCount: 0, waitlistCount: 0 },
+        })
+      ).rejects.toThrow("Event is at capacity or has an active waitlist");
+
+      await expect(
+        createEventRsvp({
+          eventId: "event-capped-waitlist",
+          userId: "student-2",
+          campusId: APEX_CAMPUS_ID,
+          event: { id: "event-capped-waitlist", capacity: 10 },
+          coordinator: { confirmedCount: 8, offeredCount: 1, waitlistCount: 2 },
+        })
+      ).rejects.toThrow("Event is at capacity or has an active waitlist");
+
+      // Also resolves coordinator via getEventCapacity when coordinator prop is omitted on a capped event
+      mocks.getEventCapacity.mockResolvedValueOnce({
+        id: "event-capped-fetched-full",
+        capacity: 5,
+        confirmedCount: 5,
+        offeredCount: 0,
+        waitlistCount: 0,
+      });
+
+      await expect(
+        createEventRsvp({
+          eventId: "event-capped-fetched-full",
+          userId: "student-3",
+          campusId: APEX_CAMPUS_ID,
+          event: { id: "event-capped-fetched-full", capacity: 5 },
+        })
+      ).rejects.toThrow("Event is at capacity or has an active waitlist");
+      expect(mocks.getEventCapacity).toHaveBeenCalledWith("event-capped-fetched-full");
+    });
+
+    it("deleteEventRsvp executes atomic batch decrementing confirmedCount when capped event has empty waitlist (PW-3)", async () => {
+      mocks.mockBatch.delete.mockClear();
+      mocks.mockBatch.update.mockClear();
+
+      await deleteEventRsvp("event-capped-1", "student-1", {
+        event: { id: "event-capped-1", capacity: 25 },
+        coordinator: { confirmedCount: 5, offeredCount: 0, waitlistCount: 0 },
+      });
+
+      expect(mocks.deleteDoc).not.toHaveBeenCalled();
+      expect(mocks.mockBatch.delete).toHaveBeenCalledWith(
+        expect.objectContaining({ path: "eventRsvps/event-capped-1_student-1" })
+      );
+      expect(mocks.mockBatch.update).toHaveBeenCalledWith(
+        expect.objectContaining({ path: "eventCapacities/event-capped-1" }),
+        {
+          confirmedCount: { _methodName: "increment", _operand: -1 },
+          updatedAt: { _methodName: "serverTimestamp" },
+        }
+      );
+      expect(mocks.mockBatch.commit).toHaveBeenCalledTimes(1);
+    });
+
+    it("deleteEventRsvp delegates to cancelRsvpWithPromotion callable when capped event has active waitlist (PW-4)", async () => {
+      mocks.cancelRsvpWithPromotion.mockResolvedValueOnce({
+        success: true,
+        candidatePromoted: true,
+      });
+
+      await deleteEventRsvp("event-capped-wl", "student-1", {
+        event: { id: "event-capped-wl", capacity: 10 },
+        coordinator: { confirmedCount: 10, offeredCount: 0, waitlistCount: 3 },
+      });
+
+      expect(mocks.deleteDoc).not.toHaveBeenCalled();
+      expect(mocks.cancelRsvpWithPromotion).toHaveBeenCalledWith({
+        eventId: "event-capped-wl",
+      });
     });
   });
 });

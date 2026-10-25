@@ -53,9 +53,9 @@ describe("M24 Acceptance Test Matrix: TC-01 to TC-30", () => {
     await testEnvironment.withSecurityRulesDisabled(async (context) => {
       const db = context.firestore();
       // Seed common users and community
-      await db.collection("users").doc(TEST_UIDS.alice).set(userFixture(TEST_UIDS.alice));
-      await db.collection("users").doc(TEST_UIDS.bob).set(userFixture(TEST_UIDS.bob));
-      await db.collection("users").doc(TEST_UIDS.carol).set(userFixture(TEST_UIDS.carol));
+      await db.collection("users").doc(TEST_UIDS.alice).set(userFixture(TEST_UIDS.alice, { campusId: APEX_CAMPUS_ID }));
+      await db.collection("users").doc(TEST_UIDS.bob).set(userFixture(TEST_UIDS.bob, { campusId: APEX_CAMPUS_ID }));
+      await db.collection("users").doc(TEST_UIDS.carol).set(userFixture(TEST_UIDS.carol, { campusId: APEX_CAMPUS_ID }));
       await db.collection("communities").doc("apex-ai-club").set(communityFixture("apex-ai-club"));
       // Alice is admin of apex-ai-club
       await db.collection("communityMembers").doc(`apex-ai-club_${TEST_UIDS.alice}`).set(

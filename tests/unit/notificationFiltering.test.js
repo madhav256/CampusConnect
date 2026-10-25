@@ -21,6 +21,9 @@ export function filterNotificationsByPreferences(rawNotifications, preferences) 
     if (n.type === "event_cancelled" && preferences?.eventCancellations === false) {
       return false;
     }
+    if (n.type === "event_waitlist_offer" && preferences?.eventWaitlistOffers === false) {
+      return false;
+    }
     return true;
   });
 }
@@ -172,6 +175,32 @@ describe("Milestone 14B — Recipient Client Notification Filtering", () => {
         eventCancellations: false,
       });
       expect(filtered).toHaveLength(0);
+    });
+
+    it("surfaces event_waitlist_offer notifications by default and filters them out when eventWaitlistOffers is false", () => {
+      const mixedNotifications = [
+        ...eventNotifications,
+        {
+          id: "offer_event1_1",
+          recipientId: "waitlisted1",
+          actorId: "system",
+          type: "event_waitlist_offer",
+          isRead: false,
+        },
+      ];
+
+      expect(filterNotificationsByPreferences(mixedNotifications, {})).toHaveLength(4);
+      expect(
+        filterNotificationsByPreferences(mixedNotifications, {
+          eventWaitlistOffers: true,
+        })
+      ).toHaveLength(4);
+
+      const filteredOut = filterNotificationsByPreferences(mixedNotifications, {
+        eventWaitlistOffers: false,
+      });
+      expect(filteredOut).toHaveLength(3);
+      expect(filteredOut.some((n) => n.type === "event_waitlist_offer")).toBe(false);
     });
   });
 });

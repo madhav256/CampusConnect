@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
+import { Sparkles } from "lucide-react";
 import Avatar from "../ui/Avatar";
 import {
   acceptConnectionRequest,
@@ -37,11 +38,23 @@ export default function NotificationItem({
   const isAccepted = notification.type === "connection_accepted";
   const isEventRsvp = notification.type === "event_rsvp";
   const isEventCancelled = notification.type === "event_cancelled";
+  const isEventWaitlistOffer = notification.type === "event_waitlist_offer";
 
   const trimmedActorName =
     typeof notification.actorName === "string" ? notification.actorName.trim() : "";
   const actorDisplayName =
     trimmedActorName || (isEventCancelled ? "an organizer" : "CampusConnect Student");
+
+  const trimmedReferenceTitle =
+    typeof notification.referenceTitle === "string"
+      ? notification.referenceTitle.trim()
+      : "";
+  const validEventReferenceId =
+    typeof notification.referenceId === "string" &&
+    notification.referenceId.trim().length > 0 &&
+    !notification.referenceId.trim().includes("/")
+      ? notification.referenceId.trim()
+      : null;
 
   async function handleAccept() {
     if (!currentUid || isBusy) return;
@@ -87,22 +100,44 @@ export default function NotificationItem({
         />
       )}
 
-      {/* Actor Avatar */}
-      <Link
-        to={notification.actorId ? `/users/${notification.actorId}` : "#"}
-        className="shrink-0"
-      >
-        <Avatar
-          name={actorDisplayName}
-          photoURL={notification.actorAvatar}
-          size="md"
-        />
-      </Link>
+      {/* Actor Avatar or Seat Offer Icon */}
+      {isEventWaitlistOffer ? (
+        <div
+          data-testid={`notif-offer-icon-${notification.id}`}
+          aria-label="Waitlist seat offer"
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-amber-200 bg-amber-100 text-amber-700 shadow-sm"
+        >
+          <Sparkles className="h-5 w-5" aria-hidden="true" />
+        </div>
+      ) : (
+        <Link
+          to={notification.actorId ? `/users/${notification.actorId}` : "#"}
+          className="shrink-0"
+        >
+          <Avatar
+            name={actorDisplayName}
+            photoURL={notification.actorAvatar}
+            size="md"
+          />
+        </Link>
+      )}
 
       {/* Body Content */}
       <div className="min-w-0 flex-1">
         <div className="text-sm text-ink">
-          {isEventCancelled ? (
+          {isEventWaitlistOffer ? (
+            <span>
+              A seat is available for{" "}
+              {trimmedReferenceTitle ? (
+                <span className="font-semibold text-ink">
+                  &ldquo;{trimmedReferenceTitle}&rdquo;
+                </span>
+              ) : (
+                "an event you joined on the waitlist"
+              )}
+              . Claim your spot before the offer expires.
+            </span>
+          ) : isEventCancelled ? (
             <span>
               The event{" "}
               {notification.referenceTitle ? (
@@ -202,15 +237,16 @@ export default function NotificationItem({
             </Link>
           )}
 
-          {(isEventRsvp || isEventCancelled) && (
-            <Link
-              to={`/events/${notification.referenceId}`}
-              data-testid={`notif-view-event-${notification.id}`}
-              className="inline-flex items-center justify-center rounded-xl border border-border-warm bg-surface px-3 py-1.5 text-xs font-medium text-ink transition hover:border-stone-300 hover:text-terracotta-700"
-            >
-              View Event
-            </Link>
-          )}
+          {(isEventRsvp || isEventCancelled || isEventWaitlistOffer) &&
+            validEventReferenceId && (
+              <Link
+                to={`/events/${validEventReferenceId}`}
+                data-testid={`notif-view-event-${notification.id}`}
+                className="inline-flex items-center justify-center rounded-xl border border-border-warm bg-surface px-3 py-1.5 text-xs font-medium text-ink transition hover:border-stone-300 hover:text-terracotta-700"
+              >
+                View Event
+              </Link>
+            )}
 
           {/* Mark as Read button */}
           {!notification.isRead && onMarkAsRead && (

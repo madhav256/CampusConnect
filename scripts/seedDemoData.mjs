@@ -28,6 +28,7 @@ import {
 import { seedCampuses } from "./seedCampuses.mjs";
 import { seedCommunities } from "./seedCommunities.mjs";
 import { seedCommunityMembers } from "./seedCommunityMembers.mjs";
+import { seedEvents } from "./seedEvents.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -149,23 +150,32 @@ function initializeAdminApp() {
 }
 
 // 14B Projection Helpers
-function toPrivateUserDoc(student, uid, timestamp) {
+export function toPrivateUserDoc(student, uid, timestamp) {
+  const actualUid = typeof uid === "string" ? uid : student?.uid;
+  const actualTimestamp =
+    typeof uid === "object" && uid !== null && !timestamp ? uid : timestamp;
+
   return {
-    uid,
+    uid: actualUid,
     email: student.email,
     isDiscoverable: student.isDiscoverable !== false,
     notificationPreferences: {
       connectionRequests: student.notificationPreferences?.connectionRequests !== false,
       connectionAccepted: student.notificationPreferences?.connectionAccepted !== false,
+      eventRsvps: student.notificationPreferences?.eventRsvps !== false,
+      eventCancellations: student.notificationPreferences?.eventCancellations !== false,
+      eventWaitlistOffers: student.notificationPreferences?.eventWaitlistOffers !== false,
     },
-    createdAt: timestamp,
-    updatedAt: timestamp,
+    createdAt: actualTimestamp,
+    updatedAt: actualTimestamp,
   };
 }
 
-function toPublicProfileDoc(student, uid) {
+export function toPublicProfileDoc(student, uid) {
+  const actualUid = typeof uid === "string" ? uid : student?.uid;
+
   return {
-    uid,
+    uid: actualUid,
     displayName: student.displayName,
     photoURL: student.photoURL || null,
     bio: student.bio || "",
@@ -181,15 +191,19 @@ function toPublicProfileDoc(student, uid) {
   };
 }
 
-function toDirectoryIndexDoc(student, uid, timestamp) {
+export function toDirectoryIndexDoc(student, uid, timestamp) {
+  const actualUid = typeof uid === "string" ? uid : student?.uid;
+  const actualTimestamp =
+    typeof uid === "object" && uid !== null && !timestamp ? uid : timestamp;
+
   return {
-    uid,
+    uid: actualUid,
     displayName: student.displayName,
     photoURL: student.photoURL || null,
     department: student.department || "",
     year: student.year || "",
     skills: Array.isArray(student.skills) ? student.skills : [],
-    updatedAt: timestamp,
+    updatedAt: actualTimestamp,
   };
 }
 
@@ -220,6 +234,9 @@ async function seedDemoEnvironment() {
 
   // 1.5. Seed deterministic community members (Milestone 19.2)
   await seedCommunityMembers(db);
+
+  // 1.75. Seed deterministic events including capped fixtures (Milestones 20 & 24)
+  await seedEvents(db, null, { includeCapped: true });
 
   // 2. Resolve or provision the single primary demo student in Firebase Auth
   const demoEmail = DEMO_PRIMARY_STUDENT.email;
@@ -522,7 +539,9 @@ async function seedDemoEnvironment() {
   console.log("=================================================\n");
 }
 
-seedDemoEnvironment().catch((err) => {
-  console.error("\n[seed] Fatal seeding error:", err.message);
-  process.exit(1);
-});
+if (process.argv[1]?.endsWith("seedDemoData.mjs")) {
+  seedDemoEnvironment().catch((err) => {
+    console.error("\n[seed] Fatal seeding error:", err.message);
+    process.exit(1);
+  });
+}

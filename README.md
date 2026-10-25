@@ -1,15 +1,16 @@
 # CampusConnect
 
-CampusConnect is a university student networking platform built with React, Tailwind CSS, and Firebase. It provides a real-time text feed, student discovery, academic profiles, canonical connection management, and scoped connection notifications.
+CampusConnect is a university student networking platform built with React, Tailwind CSS, and Firebase. It provides a real-time text feed, student discovery, academic profiles, canonical connection management, 1-to-1 private messaging, student communities, campus events, event RSVPs, event lifecycle management, resumable cancellation delivery, and capped-event capacity coordination with FIFO waitlists.
 
-- **Live Demo:** [https://campusconnect-cf191.web.app](https://campusconnect-cf191.web.app)
-- **Demo access:** Open `/` and choose **Explore as Demo Student (Alex Rivera)** when the deployment has demo credentials configured.
+- **Live Demo (Hosting):** [https://campusconnect-cf191.web.app](https://campusconnect-cf191.web.app)
+- **Demo access:** Open `/` and choose **Explore as Demo Student (Alex Rivera)** when demo credentials are configured.
+- **Operating Mode:** **Option A** (Firebase Spark Plan, Local Firebase Emulator Suite, ₹0 Cloud Spend).
 
 The interface follows **The Campus Atelier** design system: warm paper and ink tones, terracotta actions, Newsreader editorial headings, Inter body text, and restrained Motion interactions.
 
 ## Recruiter and evaluator quick start
 
-1. Visit the live deployment.
+1. Visit the demo deployment or run locally via the Firebase Emulator Suite.
 2. On the login page, locate **Recruiter & Evaluator Access**.
 3. Choose **Explore as Demo Student (Alex Rivera)**.
 4. Explore the authenticated experience as Alex Rivera, an architecture senior.
@@ -17,11 +18,13 @@ The interface follows **The Campus Atelier** design system: warm paper and ink t
 The seeded demo contains:
 
 - ten text feed posts with comments and likes;
-- Alex's profile plus seven peer profiles;
-- accepted connections with Maya Lin and Marcus Vance;
-- an incoming request from Devon Park;
-- an outgoing request to Elena Rostova;
-- one unread and one read connection notification.
+- Alex's profile plus seven peer profiles across multi-tenant campus boundaries;
+- accepted connections, incoming requests, and outgoing requests;
+- 1-to-1 private messaging threads with unread counters and read-only archive retention upon disconnection;
+- student communities with role-based membership and community feeds;
+- campus events with category filters, temporal tabs (Upcoming, Past, Going), and organizer management toolbar;
+- capped-event capacity coordinators with vacancy progress bars and FIFO waitlist queues;
+- in-app notifications for connection requests, connection acceptances, event RSVPs, event cancellations, and waitlist offers.
 
 The demo login is a normal unprivileged Firebase Auth account. The seeding script uses Firebase Admin SDK only during setup.
 
@@ -32,7 +35,8 @@ The demo login is a normal unprivileged Firebase Auth account. The seeding scrip
 - Email/password registration, login, logout, and password-reset email.
 - Browser-local Auth persistence and protected routes.
 - Editable profile fields: display name, bio, department, academic year, skills, and social links.
-- Public profile view at `/users/:uid` with dynamic connection actions.
+- Public profile view at `/users/:uid` with dynamic connection actions and direct messaging CTAs.
+- Strict public/private separation: private account metadata in `users/{uid}`, public networking fields in `publicProfiles/{uid}`, and search projection in `directoryIndex/{uid}`.
 - Initials avatar fallback when no image URL is available.
 
 ### Feed and interactions
@@ -40,7 +44,7 @@ The demo login is a normal unprivileged Firebase Auth account. The seeding scrip
 - Real-time text feed at `/dashboard`.
 - Real-time subscription to newer posts merged with cursor-based pagination for older posts.
 - Post creation and author-only deletion.
-- Real-time comments with author-only deletion.
+- Real-time comments with author-only deletion and parent counter synchronization.
 - Atomic like/unlike transactions with a denormalized `likesCount`.
 - Motion feedback for likes and expandable comments.
 
@@ -52,20 +56,41 @@ The demo login is a normal unprivileged Firebase Auth account. The seeding scrip
 - Connection IDs use a lexicographically sorted pair of UIDs, ensuring one relationship document per student pair.
 - Supported lifecycle: send, cancel, accept, decline, and remove.
 
+### 1-to-1 Private Messaging
+
+- Protected routes at `/messages` (desktop split-pane) and `/messages/:conversationId` (mobile view).
+- Canonical conversation IDs matching connection IDs (`min_max`).
+- Real-time active threads with cursor pagination for older messages.
+- Connection-gated sends: sending messages requires accepted connection status.
+- Disconnected conversations transition to read-only archives.
+
+### Communities and campus scoping
+
+- Multi-tenant architecture partitioned by `campusId`.
+- Student communities at `/communities` with role-based membership (`member`, `moderator`, `admin`).
+- Sponsoring community integration with event publishing and moderation authority.
+
+### Campus Events & Waitlists
+
+- Campus-wide event discovery on `/events` with Upcoming, Past, and personal Going tabs.
+- Event lifecycle management: role-based edit, cancel, republish, and hard-delete modals on `/events/:eventId`.
+- Event RSVP participation tracking with real-time attendee rosters and Going badges.
+- Resumable cancellation notification fan-out via durable delivery ledgers (`eventNotificationDeliveries/{eventId}`).
+- Capped-event capacity coordination (`eventCapacities/{eventId}`) preventing overbooking.
+- FIFO waitlists (`eventWaitlistSlots`, `eventWaitlistMembers`) with deterministic sequence ordering.
+- Automated seat offers with configurable offer windows (default 24h), live countdown timers, and Claim/Decline actions via `SeatClaimBanner`.
+- Interactive `WaitlistModal` displaying estimated or confirmed queue positions, reservation terms, and voluntary Leave actions.
+- Live occupancy visualization and waitlist badges via `CapacityIndicator`.
+
 ### Notifications and settings
 
 - `/notifications` subscribes to the newest 30 recipient-scoped notifications.
-- Active notification types: connection requests, accepted connections, event RSVPs, and event cancellations.
-- Event notifications support deep-links and durable title rendering even if the referenced event is deleted.
-- Mark one/all as read, dismiss, filter all/unread, and act on incoming requests.
-- `/settings` manages search discoverability, notification preferences (`connectionRequests`, `connectionAccepted`, `eventRsvps`, `eventCancellations`), and sign out.
-- Account deletion is displayed as deferred because backend cascade cleanup is not implemented.
+- Active notification types: connection requests, accepted connections, event RSVPs, event cancellations, and waitlist seat offers.
+- Event and waitlist notifications provide deep-links and durable title rendering even if the referenced event is deleted.
+- Mark one/all as read, dismiss, filter all/unread, and inline connection actions.
+- `/settings` manages search discoverability, notification preferences (`connectionRequests`, `connectionAccepted`, `eventRsvps`, `eventCancellations`, `eventWaitlistOffers`), and sign out.
 
-### Development security audit
-
-In development builds, Settings and Notifications expose a security audit panel that exercises selected Firestore Rule rejection scenarios for notifications and user/settings documents. It is not a production test suite.
-
-## Architecture
+## Architecture & Local-First Zero-Cost Model
 
 ```text
 src/main.jsx
@@ -73,17 +98,26 @@ src/main.jsx
       └── React Router / App
           └── Pages
               └── Components and hooks
-                  └── Service modules
-                      ├── Firebase Auth
-                      └── Cloud Firestore
+                  ├─ Service modules ──▶ Cloud Firestore / Firebase Auth
+                  └─ Callable functions ──▶ Google Cloud Functions v2 (Local Emulators)
 ```
+
+### Option A Operating Mode
+
+The application follows **Option A: Firebase Spark Plan, Local Emulators, ₹0 Cloud Spend**:
+- Static hosting: Firebase Hosting serves the compiled SPA.
+- Database: Cloud Firestore with security rules enforcing tenant boundaries and invariants.
+- Privileged microservices: Google Cloud Functions v2 (HTTPS callables, Cloud Tasks workers, scheduled sweepers, and Firestore triggers) execute locally using the Firebase Emulator Suite.
+- Cloud spend invariant: Strict ₹0 budget; no credit cards, Blaze plans, or paid cloud resources are provisioned.
+- Production cloud deployment of backend functions/tasks remains deferred.
+- An alternative serverless edge proposal using Cloudflare Workers Free ([`ADR-025.md`](ADR-025.md)) remains unapproved (`PROPOSED — PENDING EXPLICIT APPROVAL`).
 
 The active source structure is:
 
 ```text
 src/
 ├── components/
-│   ├── communities/
+│   ├── community/
 │   ├── dev/
 │   ├── events/
 │   ├── feed/
@@ -97,42 +131,35 @@ src/
 ├── firebase/
 ├── hooks/
 ├── pages/
+├── server/
 ├── services/
 └── utils/
 ```
-
-UI components do not call Firestore directly. Service modules own Firebase operations, hooks own subscription lifecycles, and Firestore Security Rules enforce the client authorization boundary.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the runtime flow and [FIRESTORE_SCHEMA.md](FIRESTORE_SCHEMA.md) for the active data model.
 
 ## Security and data model highlights
 
-- Strict three-collection boundary: `users/{uid}` (private authority, owner-only), `publicProfiles/{uid}` (public-profile authority, authenticated read), and `directoryIndex/{uid}` (discoverability search projection).
-- `posts/{postId}/likes/{uid}` stores individual likes instead of an unbounded user-ID array.
-- Like and post-counter updates run in a Firestore transaction.
-- Comment create/delete operations update the parent counter in a write batch.
-- `connections/{minUid_maxUid}` stores one canonical relationship document for each pair.
-- Connection Rules restrict pending creation, receiver-only acceptance, and participant deletion.
-- `conversations/{minUid_maxUid}` stores 1-to-1 conversation metadata with bidirectional transactional coupling to immutable message documents, strictly bounded to accepted connections, with 4-key `lastMessage` summaries and read-only archive retention upon disconnection.
-- Notifications live under `users/{recipientUid}/notifications` and list reads are recipient-scoped.
-- Event cancellation fan-out uses a durable delivery ledger in `eventNotificationDeliveries/{eventId}` with compare-and-set progression, chunking (8 recipients per batch), interruption resumption, and M23.4.2 point-read security isolation.
-- Notification creation is tied by Rules to the corresponding connection transaction, RSVP creation, or cancellation delivery ledger.
-- User identity fields, setting types, exact post schemas, and event lifecycle invariants are strictly validated by Rules.
-
-Private account settings (`users/{uid}`) and public profile fields (`publicProfiles/{uid}`) are strictly decoupled at the Firestore document and security rule layer, ensuring private data like email cannot be accessed by other clients.
+- Strict three-collection boundary: `users/{uid}` (private authority), `publicProfiles/{uid}` (public-profile authority), and `directoryIndex/{uid}` (discoverability projection).
+- Individual like documents with transaction-coupled like counters.
+- Canonical connection pairs (`min_max`) with rule-enforced state transitions.
+- Bidirectional transactional coupling between conversation summaries and immutable child messages.
+- Durable delivery ledgers (`eventNotificationDeliveries/{eventId}`) with compare-and-set progression and point-read security isolation.
+- Capacity coordinators (`eventCapacities/{eventId}`) enforcing direct admission and waitlist invariants.
+- Sequential waitlist slots (`eventWaitlistSlots`) with owner/leader-only read boundaries and non-head withdrawal constraints.
+- Private student waitlist index (`eventWaitlistMembers`) with list queries strictly prohibited.
+- Server-only collections (`eventWaitlistContinuations`, `eventWaitlistOutbox`, `systemWaitlistJobs`) locked unconditionally against client operations (`allow read, write: if false;`).
 
 ## Current limitations
 
-- Automated test suites include 880 Vitest unit tests across 43 files, 486 Firestore Emulator rules tests across 16 suites, and 74 Playwright E2E browser tests across 12 spec files, with a continuous integration pipeline.
-- Directory and notification reads are bounded rather than cursor-paginated (the campus feed supports cursor pagination).
+- 1,032 Vitest unit tests across 55 files (+ 16 Cloud Functions boundary tests = 1,048 total), 579 Firestore Emulator rules tests across 16 suites (including TC-01 through TC-91), and 76 Playwright E2E browser tests across 16 spec files.
+- Directory and notification reads are bounded rather than cursor-paginated (feed and messages support cursor pagination).
 - Discovery uses client-side filtering over the `directoryIndex` projection rather than an external search index.
 - No Firebase Storage integration or media uploads.
 - No post editing, sharing, search, or bookmarks.
 - No presence, read receipts, marketplace, or internship board.
-- No email-verification enforcement, password-change UI, or account-deletion cascade.
-- Notification generation currently occurs in client connection transactions and resumable client delivery chunks rather than a background event processor.
-
-These are explicit MVP boundaries, not undocumented missing routes.
+- Event ticketing, payment processing, QR check-in, and verified attendance tracking remain deferred.
+- Production cloud deployment of Cloud Functions/Tasks remains deferred under Option A.
 
 ## Local development
 
@@ -140,7 +167,8 @@ These are explicit MVP boundaries, not undocumented missing routes.
 
 - Node.js 20 or newer.
 - npm 10 or newer.
-- A Firebase project for Auth and Firestore, or a compatible local environment.
+- Java Runtime Environment (JRE) for running the Firebase Emulator Suite.
+- A Firebase project for Auth and Firestore, or the local emulator.
 
 ### Install
 
@@ -165,8 +193,6 @@ VITE_DEMO_USER_EMAIL=demo.student@campusconnect.edu
 VITE_DEMO_USER_PASSWORD=your_local_demo_password
 ```
 
-The `VITE_FIREBASE_STORAGE_BUCKET` value is part of the standard Firebase web configuration shape; the active client does not initialize or use Firebase Storage.
-
 ### Run locally
 
 ```bash
@@ -175,9 +201,9 @@ npm run dev
 
 Open [http://localhost:5173](http://localhost:5173).
 
-### Seed a separate demo project
+### Seed local or demo data
 
-The hosted demo is already seeded. For another Firebase project, provide Admin credentials through the git-ignored `scripts/credentials/serviceAccountKey.json`, `GOOGLE_APPLICATION_CREDENTIALS`, Application Default Credentials, or a local emulator, then run:
+For a separate Firebase project, provide Admin credentials through the git-ignored `scripts/credentials/serviceAccountKey.json`, `GOOGLE_APPLICATION_CREDENTIALS`, Application Default Credentials, or the local emulator, then run:
 
 ```bash
 npm run seed:demo
@@ -187,27 +213,33 @@ The seeder uses explicit demo ID whitelists, merge-only writes, and no bulk dele
 
 ## Verification commands
 
-Unit tests run via Vitest (880 passing tests across 43 files):
+Unit & boundary tests run via Vitest (1,032 unit tests across 55 files + 16 Cloud Functions boundary tests = 1,048 total):
 
 ```bash
 npm run test:unit
 ```
 
-Firestore Rules tests run inside the fixed synthetic emulator project `demo-campusconnect-rules-test` (486 passing tests):
+To run the Cloud Functions runtime boundary tests specifically:
+
+```bash
+npx vitest run tests/boundary/functions/waitlistBoundary.test.js
+```
+
+Firestore Security Rules tests run inside the fixed synthetic emulator project `demo-campusconnect-rules-test` (579 passing tests across 16 suites, including TC-01 through TC-91):
 
 ```bash
 npm run test:rules
 ```
 
-The Rules command starts and stops the Firestore Emulator automatically. It does not read `.env.local`, use service-account credentials, invoke the demo seeder, or connect to the recruiter project. The Rules suite runs 486 passing security regression tests across 16 suites, verifying strict schemas, permissions, immutability, state transitions, and bidirectional transactional message coupling.
+The Rules command starts and stops the Firestore Emulator automatically. It does not read `.env.local`, use service-account credentials, invoke the demo seeder, or connect to production.
 
-End-to-end browser tests run via Playwright against the Firebase Emulator suite (74 passing tests across 12 spec files):
+End-to-end browser tests run via Playwright against the Firebase Emulator suite (76 passing tests across 16 spec files):
 
 ```bash
 npm run test:e2e
 ```
 
-The broader local checks are:
+The comprehensive local check suite is:
 
 ```bash
 npm run lint
@@ -218,7 +250,7 @@ npm run build
 npm run preview
 ```
 
-Automated verification is also continuously validated via GitHub Actions CI across lint, unit, rules, build, and E2E suites. The development `SecurityTestPanel` remains a separate manual audit tool and is not used by these tests.
+Automated verification is also continuously validated via GitHub Actions CI across lint, unit, rules, build, and E2E suites.
 
 ## Documentation map
 
@@ -229,3 +261,4 @@ Automated verification is also continuously validated via GitHub Actions CI acro
 - [DESIGN_SYSTEM.md](DESIGN_SYSTEM.md) — Campus Atelier visual system.
 - [RECRUITER_DEMO_GUIDE.md](RECRUITER_DEMO_GUIDE.md) — technical walkthrough and demo precautions.
 - [TASKS.md](TASKS.md) — status-aware roadmap.
+- [LOCAL_DEV_GUIDE.md](LOCAL_DEV_GUIDE.md) — local-first Option A development guide.

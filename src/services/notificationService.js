@@ -21,6 +21,61 @@ function requireDb() {
 }
 
 /**
+ * Normalizes an optional offer expiration value into a valid Date instance.
+ * Returns null when the input is absent or malformed.
+ *
+ * @param {any} value
+ * @returns {Date|null}
+ */
+function normalizeOfferExpiresAt(value) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (typeof value?.toDate === "function") {
+    try {
+      const converted = value.toDate();
+      return converted instanceof Date && !Number.isNaN(converted.getTime())
+        ? converted
+        : null;
+    } catch {
+      return null;
+    }
+  }
+  if (value instanceof Date) {
+    return !Number.isNaN(value.getTime()) ? value : null;
+  }
+  if (typeof value?.toMillis === "function") {
+    try {
+      const ms = value.toMillis();
+      if (typeof ms === "number" && Number.isFinite(ms)) {
+        const d = new Date(ms);
+        return !Number.isNaN(d.getTime()) ? d : null;
+      }
+    } catch {
+      return null;
+    }
+    return null;
+  }
+  if (
+    typeof value === "object" &&
+    typeof value.seconds === "number" &&
+    Number.isFinite(value.seconds)
+  ) {
+    const d = new Date(value.seconds * 1000);
+    return !Number.isNaN(d.getTime()) ? d : null;
+  }
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+    const d = new Date(value);
+    return !Number.isNaN(d.getTime()) ? d : null;
+  }
+  if (typeof value === "string" && value.trim().length > 0) {
+    const d = new Date(value.trim());
+    return !Number.isNaN(d.getTime()) ? d : null;
+  }
+  return null;
+}
+
+/**
  * Normalizes a raw Firestore notification document.
  *
  * @param {string} id
@@ -28,23 +83,38 @@ function requireDb() {
  * @returns {object}
  */
 export function normalizeNotification(id, data) {
+  const safeData = data && typeof data === "object" ? data : {};
   const normalized = {
     id,
-    recipientId: data.recipientId,
-    actorId: data.actorId,
-    actorName: data.actorName || "CampusConnect Student",
-    actorAvatar: data.actorAvatar || null,
-    type: data.type, // "connection_request" | "connection_accepted" | "event_rsvp" | "event_cancelled"
-    referenceId: data.referenceId,
-    isRead: Boolean(data.isRead),
-    createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : null,
+    recipientId: safeData.recipientId,
+    actorId: safeData.actorId,
+    actorName: safeData.actorName || "CampusConnect Student",
+    actorAvatar: safeData.actorAvatar || null,
+    type: safeData.type, // "connection_request" | "connection_accepted" | "event_rsvp" | "event_cancelled" | "event_waitlist_offer"
+    referenceId: safeData.referenceId,
+    isRead: Boolean(safeData.isRead),
+    createdAt: safeData.createdAt?.toDate ? safeData.createdAt.toDate() : null,
   };
 
-  if (data.referenceTitle !== undefined) {
-    normalized.referenceTitle = data.referenceTitle;
+  if (safeData.referenceTitle !== undefined) {
+    normalized.referenceTitle = safeData.referenceTitle;
   }
-  if (data.cycleId !== undefined) {
-    normalized.cycleId = data.cycleId;
+  if (safeData.cycleId !== undefined) {
+    normalized.cycleId = safeData.cycleId;
+  }
+  if (typeof safeData.slotId === "string" && safeData.slotId.trim().length > 0) {
+    normalized.slotId = safeData.slotId.trim();
+  }
+  if (
+    typeof safeData.slotSequence === "number" &&
+    Number.isInteger(safeData.slotSequence) &&
+    safeData.slotSequence > 0
+  ) {
+    normalized.slotSequence = safeData.slotSequence;
+  }
+  const normalizedOfferExpiresAt = normalizeOfferExpiresAt(safeData.offerExpiresAt);
+  if (normalizedOfferExpiresAt !== null) {
+    normalized.offerExpiresAt = normalizedOfferExpiresAt;
   }
 
   return normalized;

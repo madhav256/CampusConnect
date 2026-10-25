@@ -1,6 +1,6 @@
 # CampusConnect Firestore Schema
 
-**Status:** Active client schema and Rule reference (Milestone 23 Delivered)
+**Status:** Active client schema and Rule reference (Milestone 24 Delivered)
 
 This document describes the collections used by the current browser application. Firebase Admin SDK demo seeding can add deterministic metadata outside the client write path; those seeder-only details are called out explicitly.
 
@@ -40,6 +40,12 @@ communityMembers/{membershipId} (community membership authority)
 events/{eventId} (campus events & activities authority)
 eventRsvps/{eventId}_{userId} (event participation intent authority)
 eventNotificationDeliveries/{eventId} (event cancellation delivery ledger authority)
+eventCapacities/{eventId} (event capacity coordinator authority)
+eventWaitlistSlots/{eventId}_{sequenceNumber} (FIFO waitlist queue slot log authority)
+eventWaitlistMembers/{eventId}_{userId} (private student waitlist index authority)
+eventWaitlistContinuations/{eventId} (durable continuation task staging - server only)
+eventWaitlistOutbox/{eventId}_{candidateSequence} (waitlist offer notification outbox - server only)
+systemWaitlistJobs/{jobId} (waitlist background jobs checkpoint - server only)
 ```
 
 
@@ -57,7 +63,7 @@ Stores private account metadata, authentication email, search discoverability st
 | `email` | string | Authenticated email address |
 | `campusId` | string (optional) | Tenant campus anchor (`campuses/{campusId}`); validated against existing campus documents |
 | `isDiscoverable` | boolean | Controls discoverability and directory index projection |
-| `notificationPreferences` | map | `connectionRequests` (bool), `connectionAccepted` (bool), `eventRsvps` (optional bool), `eventCancellations` (optional bool) |
+| `notificationPreferences` | map | `connectionRequests` (bool), `connectionAccepted` (bool), `eventRsvps` (optional bool), `eventCancellations` (optional bool), `eventWaitlistOffers` (optional bool) |
 | `createdAt` | timestamp | Account profile creation time |
 | `updatedAt` | timestamp | Last settings update time |
 
@@ -282,6 +288,7 @@ Stores scoped in-app notifications under the intended recipient's user document.
 | `connection_accepted` | `acc_{connectionId}` | Connection request accepted by peer |
 | `event_rsvp` | `rsvp_{eventId}_{actorId}` | Student registered to attend an event created by recipient |
 | `event_cancelled` | `cancel_{eventId}_{cycleId}` | Event registered by student was cancelled by community organizers |
+| `event_waitlist_offer` | `offer_{eventId}_{sequence}` | Candidate at head of FIFO waitlist offered released seat with claim window |
 
 ### Fields
 
@@ -289,19 +296,22 @@ Stores scoped in-app notifications under the intended recipient's user document.
 | --- | --- | --- |
 | `id` | string | Must equal the notification document ID |
 | `recipientId` | string | Must equal the parent `uid` |
-| `actorId` | string | Student or community leader who caused the notification event |
+| `actorId` | string | Student, community leader, or system actor who caused the notification event |
 | `actorName` | string | Denormalized actor display name from `publicProfiles` authority |
 | `actorAvatar` | string or `null` | Denormalized actor avatar URL from `publicProfiles` authority |
-| `type` | string | One of `connection_request`, `connection_accepted`, `event_rsvp`, `event_cancelled` |
-| `referenceId` | string | Referenced entity ID: canonical connection ID for connections; `eventId` for event notifications |
+| `type` | string | One of `connection_request`, `connection_accepted`, `event_rsvp`, `event_cancelled`, `event_waitlist_offer` |
+| `referenceId` | string | Referenced entity ID: canonical connection ID for connections; `eventId` for event and waitlist notifications |
 | `cycleId` | string (optional) | Cancellation delivery cycle ID (10–64 characters). Required for `event_cancelled`; strictly omitted for connection notifications and `event_rsvp` |
-| `referenceTitle` | string (optional) | Bounded string (1–100 characters) matching the parent event's title. Supported for `event_rsvp` and `event_cancelled`; strictly omitted for connection notifications |
+| `referenceTitle` | string (optional) | Bounded string (1–100 characters) matching the parent event's title. Supported for `event_rsvp`, `event_cancelled`, and `event_waitlist_offer`; strictly omitted for connection notifications |
+| `slotSequence` | integer (optional) | Assigned waitlist sequence number for `event_waitlist_offer` notifications |
+| `slotId` | string (optional) | Target slot ID string (`{eventId}_{slotSequence}`) for `event_waitlist_offer` notifications |
+| `offerExpiresAt` | timestamp (optional) | Timestamp when seat offer window expires for `event_waitlist_offer` notifications |
 | `isRead` | boolean | Recipient read state |
 | `createdAt` | timestamp | Notification creation time |
 
 ### Schema Backward Compatibility
 
-Legacy connection notifications (`connection_request`, `connection_accepted`) strictly require the exact original 9-key schema and strictly forbid `cycleId` and `referenceTitle`. Event notifications allow `referenceTitle` validated against the parent event title. `event_cancelled` notifications additionally require `cycleId` to enforce deterministic cancellation-cycle isolation.
+Legacy connection notifications (`connection_request`, `connection_accepted`) strictly require the exact original 9-key schema and strictly forbid `cycleId` and `referenceTitle`. Event notifications allow `referenceTitle` validated against the parent event title. `event_cancelled` notifications additionally require `cycleId` to enforce deterministic cancellation-cycle isolation. Waitlist offer notifications (`event_waitlist_offer`) include `referenceTitle`, `slotSequence`, optional `slotId`, and optional `offerExpiresAt`, and deep-link to `/events/{referenceId}` with CTA "View Event".
 
 The current notification service orders by `createdAt` descending and limits subscriptions to 30 documents.
 
@@ -311,7 +321,8 @@ Notification preferences (`users/{uid}.notificationPreferences`) control whether
 - `connectionRequests` (bool): suppresses incoming connection request notifications when false;
 - `connectionAccepted` (bool): suppresses connection acceptance notifications when false;
 - `eventRsvps` (bool): suppresses event RSVP notifications when false;
-- `eventCancellations` (bool): suppresses event cancellation notifications when false.
+- `eventCancellations` (bool): suppresses event cancellation notifications when false;
+- `eventWaitlistOffers` (bool): suppresses event waitlist offer notifications when false.
 
 Disabling a preference suppresses display without deleting persisted notification records.
 
@@ -320,6 +331,7 @@ Disabling a preference suppresses display without deleting persisted notificatio
 - **Connection Notifications:** `connectionService` writes or cleans up notifications atomically in the same transaction as the connection transition (send, cancel, accept, decline).
 - **Event RSVP Notifications:** `eventRsvpService` writes the `event_rsvp` notification in the atomic write batch creating the attendee's `eventRsvps/{eventId}_{userId}` document.
 - **Event Cancellation Notifications:** `eventNotificationDeliveryService` orchestrates client-side resumable delivery batches (up to 8 attendees per chunk) reading `eventRsvps` and updating `eventNotificationDeliveries/{eventId}` atomically.
+- **Waitlist Offer Notifications:** `deliverWaitlistOfferNotification` server worker (Firestore trigger on `eventWaitlistOutbox`) creates the `event_waitlist_offer` notification via Admin SDK after verifying recipient eligibility and preference state.
 
 ### Rule behavior
 
@@ -555,6 +567,9 @@ Stores authoritative event and activity records sponsored by campus communities.
 | `visibility` | string | Access visibility boundary enum (`campus_public`, `community_only`) |
 | `createdAt` | timestamp | Document creation timestamp (`serverTimestamp()`); immutable |
 | `updatedAt` | timestamp | Last modification timestamp (`serverTimestamp()`) |
+| `capacity` | integer (optional) | Optional maximum attendee capacity (> 0); triggers capped-event capacity coordination |
+| `waitlistCapacity` | integer (optional) | Optional maximum waitlist queue size (> 0) for capped events |
+| `registrationStatus` | string (optional) | Administrative registration gate (e.g. `migration_locked`) |
 
 ### Immutable Fields
 
@@ -770,6 +785,168 @@ Event Cancellation (Pathway B) ─▶ pending (checkpointVersion: 0, cycleId: C1
   - *Supersession:* Allowed for active community leaders when event transitions to `published` or is hard-deleted.
 - **Delete Authorization:** Denied unconditionally (`allow delete: if false;`).
 
+## 17. `eventCapacities/{eventId}` (Capacity Coordinator Authority)
+
+Stores authoritative capacity metrics, headcount counters, and monotonic queue sequence pointers for capped events. Keyed canonically by `eventId` (one coordinator per event).
+
+### Locked 10-Field Schema
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `id` | string | Canonical document identifier; must equal `eventId`; immutable |
+| `eventId` | string | Identifier of the parent capped event (`events/{eventId}`); immutable |
+| `campusId` | string | Tenant campus anchor (`campuses/{campusId}`); must match event campus; immutable |
+| `confirmedCount` | integer | Cumulative count of confirmed attendees (`eventRsvps`); non-negative |
+| `offeredCount` | integer | Count of outstanding active waitlist seat offers; non-negative |
+| `waitlistCount` | integer | Count of students currently waiting in the waitlist queue; non-negative |
+| `headSequence` | integer | Monotonic sequence number pointing to the current queue head; initialized to 1 |
+| `nextSequence` | integer | Monotonic sequence number to be assigned to the next waitlist applicant; initialized to 1 |
+| `createdAt` | timestamp | Timestamp recording coordinator creation; immutable |
+| `updatedAt` | timestamp | Timestamp recording latest coordinator state mutation |
+
+### Invariants & Concurrency Guarantees
+
+- **Overbooking Prevention:** Total allocated seats (`confirmedCount + offeredCount`) cannot exceed event `capacity` during direct admission or promotion.
+- **Head/Tail Invariant:** `nextSequence >= headSequence >= 1` always holds.
+- **Monotonic Sequence Allocation:** Every waitlist applicant receives an incremented sequence number, guaranteeing strict FIFO ordering.
+- **Atomic Registration Coupling:** Direct admissions atomically increment `confirmedCount` and write `eventRsvps/{eventId}_{userId}` in a single Firestore transaction under optimistic concurrency checks.
+
+### Security Rules Behavior (Milestone 24 Delivered — TC-01 to TC-30)
+
+- **Read Authorization:** Readable by all authenticated students belonging to the same campus tenant: `allow read: if isAuthenticated() && resource.data.campusId == getUserCampusId();`.
+- **Create Authorization:** Allowed exclusively during the atomic creation of a capped event (`isValidCoordinatorCreate`) by authorized community leaders (`isCommunityModeratorOrAdmin`), initializing counts to 0, `headSequence: 1`, `nextSequence: 1`.
+- **Update Authorization:** Governed strictly by `isValidCoordinatorUpdate(eventId)`:
+  - *Direct Admission:* Allowed when `confirmedCount + offeredCount < capacity` and `waitlistCount == 0`, incrementing `confirmedCount` by 1 with matching `eventRsvps` creation in the same transaction.
+  - *Waitlist Join:* Allowed when full or waitlist is active, incrementing `waitlistCount` and `nextSequence` by 1 with matching `eventWaitlistSlots` and `eventWaitlistMembers` creation.
+  - *Withdrawal:* Allowed when `waitlistCount == 0`, decrementing `confirmedCount` upon attendee RSVP deletion.
+  - *Non-Head Waiting Withdrawal:* Allowed when student's `sequenceNumber > headSequence`, decrementing `waitlistCount` with slot status transition to `withdrawn` and member document deletion.
+- **Delete Authorization:** Denied unconditionally (`allow delete: if false;`).
+
+## 18. `eventWaitlistSlots/{eventId}_{sequenceNumber}` (Queue Slot Log Authority)
+
+Stores the immutable sequential log of waitlist positions and their full lifecycle audit trail. Keyed canonically by `{eventId}_{sequenceNumber}`.
+
+### Locked 10-Field Schema
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `id` | string | Canonical document identifier; must equal `{eventId}_{sequenceNumber}`; immutable |
+| `eventId` | string | Identifier of the parent event (`events/{eventId}`); immutable |
+| `campusId` | string | Tenant campus anchor (`campuses/{campusId}`); immutable |
+| `userId` | string | Firebase Auth UID of the waiting student; immutable |
+| `sequenceNumber` | integer | Monotonic queue position sequence assigned from coordinator `nextSequence`; immutable |
+| `status` | string | Lifecycle state enum: `waiting`, `offered`, `claimed`, `declined`, `expired`, `withdrawn` |
+| `joinedAt` | timestamp | Timestamp recording waitlist entry; immutable |
+| `offeredAt` | timestamp (optional) | Timestamp when seat offer was extended |
+| `offerExpiresAt` | timestamp (optional) | Timestamp when seat offer expires (default 24h window) |
+| `resolvedAt` | timestamp (optional) | Timestamp when slot entered a terminal lifecycle state |
+
+### Lifecycle State Machine
+
+```text
+waiting ──▶ offered ──┬──▶ claimed (creates eventRsvps record)
+   │           │       └──▶ declined (triggers promotion of next candidate)
+   │           └──▶ expired (swept by processExpiredOffers)
+   └──▶ withdrawn (voluntary cancellation)
+```
+
+- Terminal states (`claimed`, `declined`, `expired`, `withdrawn`) represent permanent outcomes; slots cannot transition out of a terminal state.
+- Normalization treats terminal slots at or behind the head as "holes" and automatically advances past them.
+
+### Security Rules Behavior (Milestone 24 Delivered — TC-31 to TC-60)
+
+- **Read Authorization:** Point reads (`get`) and collection queries (`list`) are allowed only for the slot owner (`resource.data.userId == request.auth.uid`) or authorized community leaders of the parent event (`isSlotParentEventLeader(eventId)`).
+- **Create Authorization:** Allowed exclusively during waitlist join (`isValidSlotCreate`), requiring `userId == request.auth.uid`, `sequenceNumber == coordinator.nextSequence`, `status == 'waiting'`, and atomic coupling with coordinator and member documents.
+- **Update Authorization:** Client updates are restricted exclusively to voluntary withdrawal for non-head waiting slots (`sequenceNumber > headSequence`), updating `status: 'withdrawn'` and `resolvedAt: request.time`. Server callables handle all other state transitions (`offered`, `claimed`, `declined`, `expired`).
+- **Delete Authorization:** Denied unconditionally (`allow delete: if false;`).
+
+## 19. `eventWaitlistMembers/{eventId}_{userId}` (Private Waitlist Index Authority)
+
+Provides fast O(1) point lookups, queue subscriptions, and reciprocal slot references for individual students. Keyed canonically by `{eventId}_{userId}`.
+
+### Locked 8-Field Schema
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `id` | string | Canonical document identifier; must equal `{eventId}_{userId}`; immutable |
+| `eventId` | string | Identifier of the parent event (`events/{eventId}`); immutable |
+| `campusId` | string | Tenant campus anchor (`campuses/{campusId}`); immutable |
+| `userId` | string | Firebase Auth UID of the student; immutable |
+| `sequenceNumber` | integer | Monotonic queue position matching the reciprocal `eventWaitlistSlots` record; immutable |
+| `status` | string | Current lifecycle status matching slot status |
+| `joinedAt` | timestamp | Timestamp recording waitlist entry; immutable |
+| `updatedAt` | timestamp | Timestamp recording latest state mutation |
+
+### Privacy & Security Rules Behavior (Milestone 24 Delivered — TC-31 to TC-60)
+
+- **Collection Query Denial:** Collection-level queries (`list`) are denied unconditionally (`allow list: if false;`), preventing discovery or scraping of the entire waitlist roster.
+- **Point-Read Authorization:** Point reads (`get`) are allowed for the student owner (`userId == request.auth.uid`), authorized community leaders of the parent event, or point reads of unwritten own records (`resource == null && memberId.matches('^.+_' + request.auth.uid + '$')`).
+- **Create Authorization:** Allowed during waitlist join (`isValidMemberCreate`), validating reciprocal slot creation and coordinator sequence matching.
+- **Delete Authorization:** Allowed for the student owner during voluntary non-head withdrawal (`isValidMemberDelete`), requiring `sequenceNumber > headSequence` and reciprocal slot update to `withdrawn`.
+- **Update Authorization:** Denied unconditionally (`allow update: if false;`).
+
+## 20. `eventWaitlistContinuations/{eventId}` (Durable Continuation Task Authority — Server Only)
+
+Stores durable state for asynchronous background continuations and multi-step promotion cascades. Keyed canonically by `continuation_{eventId}`.
+
+### Locked 14-Field Schema
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `id` | string | Canonical identifier (`continuation_{eventId}`); immutable |
+| `eventId` | string | Target event identifier; immutable |
+| `campusId` | string | Tenant campus anchor; immutable |
+| `status` | string | Task state enum: `pending`, `leased`, `completed`, `failed` |
+| `continuationType` | string | Processing type: `promotion`, `normalization`, `expiry` |
+| `vacanciesRemaining` | integer | Vacancies to be filled during promotion |
+| `intermediateHeadSequence` | integer | Current progression cursor of the queue head |
+| `normalizationRequired` | boolean | Flag indicating whether hole-skipping normalization is required |
+| `generation` | integer | Optimistic concurrency fencing token; increments on retry/re-lease |
+| `leaseWorkerId` | string or `null` | Identifier of the active Cloud Tasks worker leasing this task |
+| `leaseExpiresAt` | timestamp or `null` | Worker lease expiration timestamp (lease fencing) |
+| `retryCount` | integer | Non-negative count of execution attempts |
+| `reason` | string | Informational reason triggering the continuation |
+| `updatedAt` | timestamp | Timestamp of last status update |
+
+### Security Rules Behavior
+
+- **Client Access:** Completely locked against all client reads and writes (`allow read, write: if false;`). Managed exclusively by Google Cloud Functions v2 and Cloud Tasks via Firebase Admin SDK.
+
+## 21. `eventWaitlistOutbox/{eventId}_{candidateSequence}` (Waitlist Outbox Authority — Server Only)
+
+Provides a durable transactional outbox for seat offer notifications, decoupling atomic offer creation from notification delivery. Keyed canonically by `{eventId}_{candidateSequence}`.
+
+### Schema Fields
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `id` | string | Canonical identifier (`outbox_{eventId}_{candidateSequence}`); immutable |
+| `eventId` | string | Target event identifier; immutable |
+| `campusId` | string (optional) | Tenant campus anchor |
+| `recipientId` | string | Firebase Auth UID of the offered student candidate |
+| `candidateSequence` | integer | Sequence number of the offered candidate slot |
+| `type` | string | Notification type (`event_waitlist_offer`) |
+| `status` | string | Processing status: `pending`, `processing`, `delivered`, `skipped_preference_disabled`, `abandoned_stale`, `failed_terminal` |
+| `offerExpiresAt` | timestamp | Timestamp when seat offer window expires |
+| `lockedUntil` | timestamp or `null` | Worker lease lock expiration timestamp |
+| `deliveredAt` | timestamp or `null` | Timestamp when notification was delivered |
+| `retryCount` | integer | Retry attempt counter |
+| `errorMessage` | string or `null` | Error message if delivery failed |
+| `createdAt` | timestamp | Outbox record creation timestamp |
+| `updatedAt` | timestamp | Timestamp recording latest update |
+
+### Security Rules Behavior
+
+- **Client Access:** Completely locked against client operations (`allow read, write: if false;`). Consumed by the `deliverWaitlistOfferNotification` Firestore document-created trigger.
+
+## 22. `systemWaitlistJobs/{jobId}` (System Waitlist Jobs Authority — Server Only)
+
+Stores execution state, timestamps, and checkpoint cursors for recurring background maintenance and sweeper workers (e.g. `expirySweeperCheckpoint`).
+
+### Security Rules Behavior
+
+- **Client Access:** Completely locked against client operations (`allow read, write: if false;`). Managed exclusively by Cloud Scheduler background workers via Admin SDK.
+
 ## Demo-only metadata
 
 `scripts/seedDemoData.mjs` uses Firebase Admin SDK and writes `isDemo: true` on selected seeded profiles, posts, comments, likes, connections, and notifications. It also uses deterministic IDs for demo peers, posts, and relationships.
@@ -782,7 +959,7 @@ The following schemas are not active and must not be used as if they already exi
 
 - `friendRequests` and `friendships`: the active relationship collection is `connections`.
 - `bookmarks`: saved posts are not implemented.
-- `eventParticipants` / advanced ticketing: while `eventRsvps` domain, seeding, security rules, and participation discovery are delivered in Milestone 21, ticketing, attendance verification, QR check-in, capacity limits, waitlists, and calendar sync remain deferred.
+- `eventParticipants` / advanced ticketing: while `eventRsvps`, `eventCapacities`, and FIFO waitlist collections are delivered in Milestones 21 and 24, ticketing, attendance verification, QR check-in, and calendar sync remain deferred.
 - external search indexes: discovery currently uses a bounded `directoryIndex` projection read and client-side filtering; external search services (e.g. Algolia/Typesense) will be evaluated only when directory size or observed performance demonstrates a concrete need.
 
 Any future schema should be added only alongside its service code, route/component behavior, Rules, seed/test fixtures, and documentation.

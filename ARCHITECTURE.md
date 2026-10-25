@@ -1,12 +1,14 @@
 # CampusConnect Architecture
 
-**Status:** Current implementation reference (Milestone 23 Delivered)
+**Status:** Current implementation reference (Milestone 24 Delivered)
 
 This document describes the architecture that exists in the repository today. It does not describe proposed messaging, media storage, search infrastructure, or other deferred work.
 
 ## Overview
 
-CampusConnect is a React/Vite single-page application for university student networking. The browser is the application runtime, Firebase Authentication provides identity, and Cloud Firestore provides the live domain data store. Firestore Security Rules are the authorization boundary for client-originated reads and writes.
+CampusConnect is a React/Vite single-page application for university student networking. The browser is the primary application runtime, Firebase Authentication provides identity, and Cloud Firestore provides the live domain data store. Firestore Security Rules are the authorization boundary for client-originated reads and writes.
+
+Under Milestone 24 (Capped Events and FIFO Waitlists), client applications coordinate event capacity, waitlist queues, and seat offers with a trusted server-side microservice architecture implemented using Google Cloud Functions v2 (HTTPS callables, Cloud Tasks queue workers, scheduled cron sweepers, and Firestore triggers). In accordance with **Option A (Firebase Spark Plan, Local Emulators, ₹0 Cloud Spend)**, these trusted backend services run locally against the Firebase Emulator Suite (`demo-campusconnect-rules-test`).
 
 The active request path is:
 
@@ -17,12 +19,9 @@ src/main.jsx
         └─ App / React Router
            └─ protected page
               └─ feature component and/or custom hook
-                 └─ service module
-                    ├─ Firebase Authentication
-                    └─ Cloud Firestore
+                 ├─ service module ──▶ Cloud Firestore / Firebase Auth
+                 └─ callable function ──▶ Google Cloud Functions v2 (Local Emulator)
 ```
-
-The UI does not use a custom HTTP API or server-rendered backend. Firebase Admin SDK is used only by the local/demo seeding script, not by the browser application.
 
 ## Active technology stack
 
@@ -35,9 +34,11 @@ The UI does not use a custom HTTP API or server-rendered backend. Firebase Admin
 | Interaction | Motion for React and Lucide React |
 | Identity | Firebase Authentication, email/password |
 | Database | Cloud Firestore |
+| Server runtime | Google Cloud Functions v2 (HTTPS Callables, Cloud Tasks Workers, Scheduler Sweepers, Firestore Triggers) |
 | Hosting | Firebase Hosting serving the Vite `dist` output |
-| Admin tooling | Firebase Admin SDK seeding script |
-| Quality checks | ESLint; production Vite build; 880 Vitest unit tests across 43 files (`npm run test:unit`); 486 Firestore Emulator security rules tests across 16 suites (`npm run test:rules`); Playwright E2E test suite with 74 passing tests across 12 spec files (`npm run test:e2e`); development-only Firestore security audit panel |
+| Admin tooling | Firebase Admin SDK seeding script and local microservice workers |
+| Operating mode | **Option A**: Firebase Spark plan, local Firebase Emulator Suite, zero cloud spend |
+| Quality checks | ESLint; production Vite build; 1,032 Vitest unit tests across 55 files + 16 Cloud Functions boundary tests (`npm run test:unit`); 579 Firestore Emulator security rules tests across 16 suites (`npm run test:rules`); Playwright E2E test suite with 76 passing tests across 16 spec files (`npm run test:e2e`); development-only Firestore security audit panel |
 
 Firebase Storage is not part of the active client architecture. The Firebase configuration contains a storage-bucket value because it is part of the standard web configuration shape, but the application does not initialize the Storage SDK or upload files.
 
@@ -56,14 +57,14 @@ Firebase Storage is not part of the active client architecture. The Firebase con
 | `/discover` | Authenticated | Bounded student search |
 | `/communities` | Authenticated | Campus-scoped community discovery |
 | `/communities/:communityId` | Authenticated | Community detail, profile, discussion feed, and Events tab with Going badge integration |
-| `/events` | Authenticated | Campus-wide event discovery, Going tab (personal RSVPs), category/community filtering, and attention/retry error states |
-| `/events/:eventId` | Authenticated | Event detail, sponsoring community integration, RSVP lifecycle interaction, real-time attendee roster, and cancellation display |
+| `/events` | Authenticated | Campus-wide event discovery, Going tab (personal RSVPs), category/community filtering, capacity indicators, and attention/retry error states |
+| `/events/:eventId` | Authenticated | Event detail, sponsoring community integration, RSVP lifecycle interaction, real-time attendee roster, capacity coordinator, waitlist modal, seat claim banner, and cancellation display |
 | `/users/:uid` | Authenticated | Public profile and connection CTA |
 | `/connections` | Authenticated | Accepted connections and pending requests |
 | `/messages` | Authenticated | 1-to-1 private messaging overview |
 | `/messages/:conversationId` | Authenticated | Active 1-to-1 private message thread |
 | `/notifications` | Authenticated | Scoped notification inbox |
-| `/settings` | Authenticated | Privacy, notification preferences, and sign out |
+| `/settings` | Authenticated | Privacy, notification preferences (`eventWaitlistOffers`), and sign out |
 | `*` | Public/auth-aware | Not-found page |
 
 `ProtectedRoute` waits for authentication initialization and redirects unauthenticated users to `/`, preserving the attempted location for the login flow.
@@ -78,21 +79,22 @@ src/
 ├── main.jsx
 ├── index.css
 ├── components/
-│   ├── community/        # CommunityCard, CommunityCategoryBadge, CommunityGrid, CommunityHero, CommunityMembersPreview, CommunityPostComposer, CommunityPostFeed
+│   ├── community/        # CommunityCard, CommunityCategoryBadge, CommunityGrid, CommunityHero, CommunityMembersPreview, CommunityModerationPanel, CommunityPostComposer, CommunityPostFeed
 │   ├── dev/              # Development-only security audit panel
-│   ├── events/           # EventCard, EventCategoryBadge, EventStatusBadge, EventFilterBar, EventGrid, EventComposerModal, EventRsvpButton, RsvpStatusBadge, EventAttendeePreview, EventManagementToolbar, EventEditModal, EventCancelModal, EventRepublishModal, EventDeleteModal
+│   ├── events/           # EventCard, EventCategoryBadge, EventStatusBadge, EventFilterBar, EventGrid, EventComposerModal, EventRsvpButton, RsvpStatusBadge, EventAttendeePreview, EventManagementToolbar, EventEditModal, EventCancelModal, EventRepublishModal, EventDeleteModal, CapacityIndicator, SeatClaimBanner, WaitlistModal
 │   ├── feed/             # Feed, posts, comments, composers
 │   ├── layout/           # Navbar, PageContainer, Section
 │   ├── messages/         # ConversationList, ConversationItem, MessageThread, MessageBubble, MessageComposer, DisconnectedNotice
 │   ├── notifications/    # NotificationItem
 │   ├── search/           # StudentCard
-│   └── ui/               # Button, Card, Avatar, Input, Textarea, EmptyState
+│   └── ui/               # Button, Card, Avatar, Input, Textarea, EmptyState, ErrorBoundary
 ├── contexts/             # AuthContext and its context value
-├── data/                 # Deterministic demo data, campus/community/event/RSVP fixtures, and ID whitelists
+├── data/                 # Domain schemas, validators, constants, and deterministic demo data (including eventCapacities, eventWaitlistSlots, eventWaitlistMembers, eventWaitlistContinuations)
 ├── firebase/             # Firebase client initialization
-├── hooks/                # Auth, campus, community, and event hooks (including useEvents, useEvent, useEligibleCommunities, useEventRsvp, useMyRsvps, useEventAttendees, useEventManagement)
-├── pages/                # Route-level screens (including Events.jsx, EventDetail.jsx, CommunityDetail.jsx)
-├── services/             # Firebase Auth/Firestore operations (including eventService.js, eventRsvpService.js, communityService.js)
+├── hooks/                # Auth, campus, community, and event hooks (including useEvents, useEvent, useEligibleCommunities, useEventRsvp, useMyRsvps, useEventAttendees, useEventManagement, useEventCapacity, useEventWaitlist)
+├── pages/                # Route-level screens (including Events.jsx, EventDetail.jsx, CommunityDetail.jsx, Settings.jsx)
+├── server/               # Cloud Functions v2 and microservice workers (index.js, callableFunctions.js, continuationWorker.js, expirySweeper.js, outboxWorker.js, queueHeadNormalization.js, taskDispatcher.js)
+├── services/             # Firebase Auth/Firestore operations (including eventService.js, eventRsvpService.js, eventCapacityService.js, eventWaitlistService.js, communityService.js)
 └── utils/                # Development security test runner
 ```
 
@@ -117,8 +119,10 @@ The main page responsibilities are:
 - `Discover`: debounced student search against `directoryIndex` and result grid.
 - `Connections`: relationship tabs and page-local person cards.
 - `Messages`: authenticated 1-to-1 messaging overview and active thread interaction with responsive split-pane desktop (≥1024px) and single-view mobile (<1024px) layouts.
-- `Notifications`: all/unread filters and notification actions.
-- `Settings`: discoverability, notification preferences, sign out, and development audit panel.
+- `Events`: campus-wide event discovery, Going tab (personal RSVPs), category/community filtering, capacity indicators, and attention/retry error states.
+- `EventDetail`: event overview, sponsoring community link, RSVP lifecycle, capacity indicator, waitlist modal, seat claim banner, and cancellation display.
+- `Notifications`: all/unread filters, notification actions, and event/waitlist offer CTAs.
+- `Settings`: discoverability, notification preferences (`connectionRequests`, `connectionAccepted`, `eventRsvps`, `eventCancellations`, `eventWaitlistOffers`), sign out, and development audit panel.
 - `NotFound`: route fallback.
 
 ### Components
@@ -145,10 +149,22 @@ Active hooks include:
 - `useNotifications`
 - `useConversations`
 - `useConversationMessages`
+- `useCommunities`
+- `useCommunity`
+- `useCommunityMembers`
+- `useEvents`
+- `useEvent`
+- `useEligibleCommunities`
+- `useEventRsvp`
+- `useMyRsvps`
+- `useEventAttendees`
+- `useEventManagement`
+- `useEventCapacity`
+- `useEventWaitlist`
 
 ### Services
 
-The service modules are the Firebase boundary:
+The service modules are the client-side Firebase boundary:
 
 - `authService.js`: Firebase Auth persistence, subscriptions, login, signup, logout, reset, and Auth error normalization.
 - `userService.js`: cutover management, private profile and settings operations (`users/{uid}`), public profile operations (`publicProfiles/{uid}`), directory index queries (`directoryIndex`), normalization, self-healing projection logic, and bounded user-directory caching.
@@ -158,6 +174,22 @@ The service modules are the Firebase boundary:
 - `connectionService.js`: canonical relationship IDs, relationship transactions, notifications associated with connection transitions, and relationship subscriptions.
 - `notificationService.js`: recipient-scoped notification subscription, normalization, read updates, batch mark-as-read, and dismissal.
 - `messageService.js`: canonical conversation IDs, connection-gated message send transactions, conversation subscriptions, active thread listeners, cursor pagination, and mark-as-read updates.
+- `eventService.js`: authoritative event lifecycle management, CRUD operations, query sorting, category filtering, and community integration.
+- `eventRsvpService.js`: event participation intent operations, point reads, Going tab queries, and roster queries.
+- `eventCapacityService.js`: capacity coordinator point lookups, real-time subscriptions, direct admission transactions, and waitlist join transactions.
+- `eventWaitlistService.js`: waitlist slot and member point lookups, subscriptions, non-head voluntary withdrawals, and HTTPS callable invocations (`claimWaitlistOffer`, `declineWaitlistOffer`, `leaveWaitlist`).
+
+### Server layer (`src/server/`)
+
+The server layer provides trusted backend microservice operations conforming strictly to ADR-024 Revision 33:
+
+- `index.js`: registered Cloud Functions v2 exports (HTTPS callables, Tasks queue workers, scheduled sweepers, and Firestore triggers).
+- `callableFunctions.js`: privileged HTTPS callables with authentication and multi-tenant authorization guards (`cancelRsvpWithPromotion`, `claimWaitlistOffer`, `declineWaitlistOffer`, `leaveWaitlist`, `promoteWaitlistCandidates`, `fastForwardWaitlistHead`).
+- `continuationWorker.js`: durable task executor processing `eventWaitlistContinuations` with lease fencing, candidate promotions, and outbox staging.
+- `expirySweeper.js`: scheduled 1-minute sweeper processing expired waitlist offers and checkpointing progress in `systemWaitlistJobs`.
+- `outboxWorker.js`: event-driven worker delivering in-app `event_waitlist_offer` notifications from `eventWaitlistOutbox`.
+- `queueHeadNormalization.js`: queue normalization engine evaluating the 4-outcome discriminated union and skipping terminal holes.
+- `taskDispatcher.js`: Cloud Tasks dispatcher for asynchronous durable continuations.
 
 ## State and data-flow patterns
 
@@ -173,7 +205,10 @@ The application selectively uses Firestore `onSnapshot` for:
 - the current user's active conversations;
 - the active thread's newest messages;
 - the current user's profile/settings;
-- the current user's notifications.
+- the current user's notifications;
+- an event's capacity coordinator document (`eventCapacities/{eventId}`);
+- the current user's waitlist member document (`eventWaitlistMembers/{eventId}_{userId}`);
+- the current user's assigned waitlist slot (`eventWaitlistSlots/{eventId}_{seq}`).
 
 Each subscription is owned by a hook or service caller and is cleaned up on unmount.
 
@@ -197,8 +232,11 @@ The current read limits are deliberate MVP safeguards:
 - Connection requests, acceptance, rejection, cancellation, and removal use transactions.
 - Connection transactions may create or delete deterministic notification documents in the same transaction.
 - Messaging: `runTransaction` in `sendMessage()` atomically creating or updating `conversations/{canonicalConnectionId}` alongside creating the corresponding child message document in `conversations/{canonicalConnectionId}/messages/{messageId}`.
+- Direct Event Admission: `runTransaction` creating `eventRsvps/{eventId}_{uid}` and incrementing `eventCapacities/{eventId}.confirmedCount` under concurrency checks.
+- Waitlist Join: `runTransaction` creating `eventWaitlistSlots/{eventId}_{seq}`, `eventWaitlistMembers/{eventId}_{uid}`, and incrementing `eventCapacities/{eventId}.waitlistCount` and `nextSequence`.
+- Non-Head Waitlist Withdrawal: `runTransaction` marking `eventWaitlistSlots` as `withdrawn`, deleting `eventWaitlistMembers`, and decrementing `eventCapacities.waitlistCount`.
 
-The client uses these atomic paths, while Firestore Rules remain the final authorization boundary.
+The client uses these atomic paths, while Firestore Rules and GCFv2 backend callables remain the authoritative authorization boundaries.
 
 ## Active Firestore domains
 
@@ -211,7 +249,7 @@ The active collections are:
 - `posts/{postId}/comments/{commentId}`: comments;
 - `posts/{postId}/likes/{uid}`: individual likes;
 - `connections/{canonicalConnectionId}`: one relationship document per pair;
-- `users/{uid}/notifications/{notificationId}`: recipient-scoped notifications for connection requests/acceptances, event RSVPs, and resumable event cancellations;
+- `users/{uid}/notifications/{notificationId}`: recipient-scoped notifications for connection requests/acceptances, event RSVPs, event cancellations, and waitlist offers;
 - `conversations/{canonicalConnectionId}`: 1-to-1 conversation metadata between connected peers;
 - `conversations/{canonicalConnectionId}/messages/{messageId}`: append-only immutable message subcollection;
 - `campuses/{campusId}`: authoritative campus metadata for multi-tenancy and the CampusNest domain;
@@ -219,197 +257,105 @@ The active collections are:
 - `communityMembers/{membershipId}`: authoritative community membership records linking students to campus communities with role-based security authority;
 - `events/{eventId}`: authoritative campus event and student activity records (locked 17 fields);
 - `eventRsvps/{eventId}_{userId}`: authoritative event participation intent records (locked 5 fields);
-- `eventNotificationDeliveries/{eventId}`: authoritative event notification delivery ledger records for resumable cancellation fan-out (locked 14 fields).
+- `eventNotificationDeliveries/{eventId}`: authoritative event notification delivery ledger records for resumable cancellation fan-out (locked 14 fields);
+- `eventCapacities/{eventId}`: authoritative capacity coordinator records tracking headcount, offers, and sequence counters (locked 10 fields);
+- `eventWaitlistSlots/{eventId}_{sequenceNumber}`: authoritative FIFO queue slot audit log records (locked 10 fields);
+- `eventWaitlistMembers/{eventId}_{userId}`: authoritative private student waitlist membership index records (locked 8 fields);
+- `eventWaitlistContinuations/{eventId}`: durable background continuation task staging records (locked 14 fields, server-only);
+- `eventWaitlistOutbox/{eventId}_{candidateSequence}`: durable notification outbox records (locked 9 fields, server-only);
+- `systemWaitlistJobs/{jobId}`: sweeper job execution checkpoints (server-only).
 
 The full field-level schema and current rule behavior are documented in [FIRESTORE_SCHEMA.md](FIRESTORE_SCHEMA.md).
 
-### Community Domain, Membership Authority & Content Integration
+## Capped Events & FIFO Waitlists Architecture (Milestone 24 Delivered — ADR-024 Revision 33 Authoritative)
 
-CampusConnect structures collective student life through an institutional hierarchy:
-
-```text
-Campus
- └── Communities
-        └── Community Members
-              ↓
-             Posts
-```
-
-1. **Campus Root:** Every community belongs permanently to an authoritative institutional tenant (`campusId`), inheriting the multi-tenant isolation boundary established in Milestone 18.
-2. **First-Class Communities:** Defined in the root `communities/{communityId}` collection to provide uniform querying, direct identifier resolution, and architectural consistency with `campuses`, `posts`, and `conversations`.
-3. **Community Membership Security Authority (`communityMembers`):**
-   - **Root Collection Pattern:** Memberships reside in the root `communityMembers/{membershipId}` collection rather than subcollections, maintaining repository-wide root-domain conventions.
-   - **Deterministic Canonical IDs:** Keyed deterministically as `{communityId}_{userId}` (e.g. `apex-ai-club_e2e-student-a`), ensuring idempotent writes and preventing duplicate memberships.
-   - **Tenant Boundary Isolation:** Security rules enforce strict tenant parity: the member student's campus, community campus, and membership document campus must match (`campusId == getUserCampusId()`). Cross-campus memberships are rejected.
-   - **Role-Based Authority & Privilege Escalation Prevention:** Supported roles include `member`, `moderator`, and `admin`. Client self-joins are strictly restricted to `member` role; self-promotion or client assignment of `admin` or `moderator` privileges is rejected by security rules. Validated active community admins can manage member roles (`member` <-> `moderator`) and statuses (`active` <-> `removed`). Active community moderators can manage statuses of regular members (`active` <-> `removed`). Privilege escalation is prevented by rules; moderators cannot modify admins or change roles. All moderation actions enforce tenant parity (`r.campusId == getUserCampusId()`).
-   - **Decoupled Social Graph:** Community membership is completely independent of 1-to-1 connections (`connections`) and private messaging (`conversations`), ensuring community participation does not compromise personal connection boundaries.
-4. **Community Content Integration & Post Moderation (`posts` as Single Root Collection):**
-   - **Root Collection Pattern Preserved:** Rather than fracturing the database into separate collections (`communityPosts/{postId}`) or nested subcollections (`communities/{communityId}/posts/{postId}`), `posts/{postId}` remains the single authoritative collection for all posts.
-   - **Optional Community Association:** Post documents optionally specify `communityId?: string`. When omitted, the post is a campus-wide feed item. When provided, the post represents a community discussion thread.
-   - **Membership Authority Enforcement:** Creation of a community post (`communityId != null`) strictly requires active membership in `communityMembers/{communityId}_{authorId}` (`status == 'active'`) and tenant parity across the author's campus, community's campus, and post's campus.
-   - **Post Moderation:** Community moderators and admins belonging to the same campus can delete (moderate) community posts. Campus-wide posts cannot be moderated by community moderators.
-   - **Shared Infrastructure:** Likes, comments, real-time listeners, and cursor pagination reuse the robust, verified `posts` subsystem without divergent schemas.
-5. **Community Client Layer (Services & Hooks):**
-   The frontend exposes the community domain through a decoupled, two-tier client architecture:
-
-   ```text
-   Client Layer
-
-   Community Services (communityService.js, communityMemberService.js)
-           │
-           ▼
-   Community Hooks (useCommunities.js, useCommunity.js, useCommunityMembers.js)
-           │
-           ▼
-   Future Community UI (Views, Cards, Detail Pages)
-   ```
-
-   - **Services Tier:** `communityService.js` and `communityMemberService.js` encapsulate all Firebase Firestore interaction, point lookups, real-time snapshot queries, document normalization, and membership actions (`joinCommunity`, `leaveCommunity`), maintaining clean separation from React components.
-   - **Hooks Tier:** `useCommunities`, `useCommunity`, and `useCommunityMembers` provide React lifecycle integration, managing loading/error states, reactive subscriptions, and derived membership roles (`isMember`, `isAdmin`).
-   - **UI Decoupling:** Client data access is established and unit tested independently prior to mounting UI screens, preserving testability and architectural boundaries.
-
-
-### Messaging Architecture & Contracts
-
-1. **The `updatedAt` Contract:**
-   > `updatedAt` represents the timestamp of the latest message activity and changes only when a message is sent.
-
-   - `sendMessage()` updates `updatedAt` with `serverTimestamp()`;
-   - `markConversationAsRead()` modifies only the authenticated user's unread counter (`unreadCount.${userId} = 0`);
-   - `markConversationAsRead()` must NOT modify `updatedAt`;
-   - Conversation list ordering remains based on message activity (`orderBy("updatedAt", "desc")`), preventing read events from reordering the user's inbox.
-
-2. **Bidirectional Transactional Coupling:**
-   - Enforced strictly in Firestore Security Rules via `getAfter()` and `existsAfter()`.
-   - `conversation.lastMessage` contains strictly four keys: `id`, `content`, `senderId`, and `createdAt`.
-   - Creating a conversation requires the atomic creation of the child message matching `lastMessage.id`, `conversationId`, `senderId`, `content`, and `createdAt`.
-   - Updating conversation metadata on message-send requires the atomic creation of the child message document with matching fields.
-   - Creating a child message document requires `conversation.lastMessage` in `getAfter()` to match the message's `id`, `content`, `senderId`, and `createdAt`.
-   - Neither standalone message creation nor standalone conversation metadata forging can occur.
-
-### Event Architecture & Domain Model (Milestone 20)
-
-The Event domain introduces first-class campus activities and student gatherings, anchored structurally to university campuses and student communities:
+Milestone 24 implements high-concurrency event capacity coordination and deterministic FIFO waitlist queues, resolving the capacity limit and overbooking challenges inherent in open event RSVPs.
 
 ```text
-Campus (Tenant Boundary)
-   │
-   ▼
-Communities (Sponsoring Student Organizations)
-   │
-   ▼
-Community Members / Authority (Moderator/Admin Leadership Gate)
-   │
-   ▼
-Events (events/{eventId})
+Student Registration Request
+            │
+            ▼
+    Event Capped?
+     ├── No ──▶ Direct RSVP (Uncapped Open Registration)
+     └── Yes ──▶ Check Capacity Coordinator (eventCapacities/{eventId})
+                   │
+                   ├── Vacancy Available & Waitlist Empty?
+                   │     └── Yes ──▶ Direct Admission Transaction
+                   │                   ├─ Write eventRsvps/{eventId}_{userId}
+                   │                   └─ Increment eventCapacities.confirmedCount
+                   │
+                   └── Event Full or Waitlist Active?
+                         └── Yes ──▶ Waitlist Join Transaction
+                                       ├─ Allocate sequenceNumber = nextSequence
+                                       ├─ Write eventWaitlistSlots/{eventId}_{seq} (waiting)
+                                       ├─ Write eventWaitlistMembers/{eventId}_{userId} (waiting)
+                                       └─ Increment waitlistCount & nextSequence
 ```
 
-1. **Campus Tenancy & Storage Structure:**
-   - Events reside in the root `events/{eventId}` collection, matching the flat collection architecture of `posts`, `communities`, and `connections`.
-   - Every event is strictly and permanently bound to a parent campus via `campusId`.
-   - Firestore Security Rules enforce tenant isolation: `resource.data.campusId == getUserCampusId()`. Cross-campus event discovery, detail reads, and creation are strictly denied.
+### 1. Three-Tier Data Model & Canonical Root Collections
 
-2. **Sponsoring Community Relationship:**
-   - Events are sponsored by a student organization identified by `communityId`.
-   - Security rules require the parent community to exist and verify tenant parity (`get(/communities/$(communityId)).data.campusId == campusId`).
-   - The event detail view integrates bidirectional navigation back to the sponsoring community at `/communities/:communityId`.
-   - Communities surface a dedicated "Events" tab alongside "Discussion" at `/communities/:communityId`, presenting filtered community-specific events.
+1. **Coordinator Document (`eventCapacities/{eventId}`):**
+   - Single point of synchronization per event, tracking `confirmedCount`, `offeredCount`, `waitlistCount`, `headSequence`, and `nextSequence`.
+   - Maintained atomically during direct admissions, waitlist joins, voluntary withdrawals, and server promotions.
+2. **Queue Slot Log (`eventWaitlistSlots/{eventId}_{sequenceNumber}`):**
+   - Immutable audit trail of every queue position assigned.
+   - Keyed deterministically by `{eventId}_{sequenceNumber}` with monotonic integer sequence numbers starting at 1.
+   - Lifecycle statuses: `waiting`, `offered`, `claimed`, `declined`, `expired`, `withdrawn`.
+3. **Private Queue Index (`eventWaitlistMembers/{eventId}_{userId}`):**
+   - Student-indexed pointer providing efficient `O(1)` point lookups and subscriptions for a student's active queue position on a specific event.
+   - Keyed deterministically by `{eventId}_{userId}`.
+   - Strictly private to the student and parent event leaders; collection queries (`list`) are prohibited to protect student privacy.
 
-3. **Two-Tier Visibility Model:**
-   - `campus_public`: Discoverable campus-wide by all authenticated students of the host university on `/events` and `/communities/:communityId`.
-   - `community_only`: Restricted to active members of the sponsoring organization. Non-members cannot read the document via direct lookups or collection queries. Active community membership is verified via `isCommunityActiveMember(communityId)`.
+### 2. Client vs. Server Authority Boundaries
 
-4. **Stored Lifecycle Status vs. Derived Temporal State:**
-   - **Stored Lifecycle (`status`):**
-     - Allowed stored values: `published`, `cancelled`.
-     - Creation requires initial status `published`.
-     - Cancellation is an explicit organizer/moderator action that preserves event metadata for informational transparency while rendering a prominent cancellation banner.
-   - **Derived Temporal State:**
-     - Purely derived client-side from `startAt` and `endAt` timestamps relative to the current reference time:
-       - `upcoming`: `referenceDate < startAt`
-       - `ongoing`: `startAt <= referenceDate <= endAt`
-       - `completed`: `referenceDate > endAt`
-     - No persisted temporal state field exists in Firestore, eliminating synchronization drift, stale status bugs, and maintenance cron dependencies.
+To maintain strict data integrity without exposing cross-student mutation authority to client tokens, ADR-024 Revision 33 delineates client-originating and server-originating pathways:
 
-5. **Client Service, Hook, and UI Layering:**
-   - **Services Layer (`eventService.js`):** Authoritative data access layer managing normalization (locked 17-field schema), date sorting, pure temporal/category filtering, rule-compatible Firestore collection queries, and lifecycle mutations (`createEvent`, `updateEvent`, `cancelEvent`, `deleteEvent`).
-   - **Hooks Layer (`useEvents.js`, `useEvent.js`, `useEligibleCommunities.js`):** Manages component lifecycle, reactive subscriptions (`onSnapshot`), loading/error state machines, and leadership role detection.
-   - **UI Surfaces:**
-     - `/events`: Campus-wide discovery grid, search bar, temporal tabs (`Upcoming` / `Past Events`), category filter pills, community filter dropdown, and creation action.
-     - `/events/:eventId`: Detailed event overview, date/time, venue location, organizer, category, status badge, visibility indicator, and sponsoring community card.
-     - `/communities/:communityId`: "Events" navigation tab rendering community-scoped events.
-     - `EventComposerModal.jsx`: Accessible modal dialog allowing eligible community leaders to publish new events.
+- **Client-Originated Mutations (Governed by Firestore Security Rules):**
+  - *Direct Admission (Pathway 1):* Admitted into a vacancy when `confirmedCount + offeredCount < capacity` and `waitlistCount == 0`.
+  - *Waitlist Join (Pathway 2):* Appended to the tail of the queue when full or waitlist is active, allocating `nextSequence`.
+  - *Non-Head Waiting Withdrawal (Pathway 5 Non-Head):* A waiting candidate whose `sequenceNumber > headSequence` may withdraw directly, marking their slot `withdrawn`, deleting their member record, and decrementing `waitlistCount`.
+  - *Coordinator Creation (Pathway 13):* Created in an atomic batch with event creation by authorized community leaders.
+- **Server-Originated Mutations (Executed via GCFv2 HTTPS Callables & Workers):**
+  - *Attendee Cancellation with Promotion (Pathway 4):* When a confirmed attendee cancels on a full event with a waiting queue, the server callable `cancelRsvpWithPromotion` removes the RSVP and immediately promotes the head candidate or dispatches a continuation.
+  - *Offer Claiming (Pathway 8):* An offered candidate claims their seat via `claimWaitlistOffer`, transitioning slot to `claimed`, incrementing `confirmedCount`, decrementing `offeredCount`, and creating confirmed `eventRsvps`.
+  - *Offer Declining (Pathway 9):* An offered candidate declines via `declineWaitlistOffer`, transitioning slot to `declined`, decrementing `offeredCount`, and promoting the next waiting candidate.
+  - *Head-of-Queue Withdrawal (Pathway 5 Head):* A waiting candidate at `sequenceNumber == headSequence` calls `leaveWaitlist`, prompting the server to normalize the queue head and promote the next candidate.
+  - *Candidate Promotion (Pathway 7B):* Community leaders or system processes promote candidates into available vacancies via `promoteWaitlistCandidates`.
+  - *Fast-Forward Head Pointer (Pathway 12):* Recovery helper `fastForwardWaitlistHead` advances the head pointer past terminal holes.
 
-6. **Authority & Creation Gate:**
-   - Event creation is gated strictly to users with active leadership roles (`admin` or `moderator`) within the selected sponsoring community: `isCommunityModeratorOrAdmin(communityId)`.
-   - The UI disables creation affordances for regular non-leader students, and Firestore Security Rules authoritatively reject unauthorized creation attempts.
-   - Six fields are permanently immutable on creation: `id`, `campusId`, `communityId`, `createdBy`, `createdAt`, and `visibility`.
+### 3. Queue Head Normalization Engine (`normalizeQueueHead`)
 
-7. **Event RSVP and Participation Discovery Architecture (Milestone 21 Delivered):**
-   - **Root Collection Pattern (`eventRsvps/{eventId}_{userId}`):** First-class root collection keyed by deterministic composite ID `{eventId}_{userId}`. Eliminates subcollections and allows global user-centric queries across events.
-   - **Strict Five-Field Schema:** `id`, `eventId`, `campusId`, `userId`, `createdAt`. All fields are permanently immutable on creation. Document updates are prohibited in Security Rules (`allow update: if false;`).
-   - **Existence-as-State Model:** The presence of an `eventRsvps` document represents "going"; absence represents "not going". There are no mutable status fields, capacity counters, or waitlist queues stored on the document.
-   - **Three Locked Query Patterns:**
-     - **Q1 (Point Read / Subscription):** `doc(eventRsvps, "${eventId}_${userId}")` to subscribe to the current user's RSVP state on an individual event.
-     - **Q2 (User Participation Query):** `collection("eventRsvps").where("userId", "==", uid).where("campusId", "==", campusId)` driving the personal "Going" tab across all active events.
-     - **Q3 (Event Attendee Query):** `collection("eventRsvps").where("eventId", "==", eventId).where("campusId", "==", campusId).limit(51)` feeding the attendee preview roster with a 50+ overflow cap.
-   - **Derived Display States (`getRsvpDisplayState`):** Client-derived state computed from event temporal state and resolution without persisted flags:
-     - `not_going`: No RSVP record exists.
-     - `going`: Active RSVP on an accessible, upcoming/ongoing event.
-     - `attended_window_passed`: Active RSVP on an event whose temporal window has completed.
-     - `event_cancelled`: Active RSVP on a cancelled event; cancellation retains attendee record for visibility while disabling new registrations.
-     - `event_unavailable`: Active RSVP where parent event is inaccessible (e.g. lost community membership or deleted parent event).
-   - **Authorization Rules:**
-     - Creation requires authenticated student, matching tenant campus, upcoming event (`request.time < event.startAt`), published event status, and parent event readability (`campus_public` or verified active member of sponsoring community).
-     - Deletion is restricted to the RSVP owner (`resource.data.userId == request.auth.uid`), permitted after event ends, after event is cancelled, or if the parent event was deleted.
-     - Reads are permitted for the owner, or for peers within the same campus if the parent event is readable.
-   - **Participation Discovery Surfaces:**
-     - Personal "Going" tab on `/events`: filters to user's RSVP'd events, resolves parent event documents with user/campus cache isolation, provides an attention section for inaccessible RSVPs and resolution errors, and includes an explicit "Remove RSVP" action for orphaned records.
-     - Event card "Going" badges: rendered on `/events` discovery feed and community detail "Events" tabs.
-     - Event detail registration card & mobile bar: interactive RSVP/Cancel button, derived badge, and real-time attendee avatar preview.
+When evaluating candidates for promotion, the queue head may encounter "holes" left by candidates who withdrew, expired, or declined while in the queue. The normalization engine implements ADR-024 Revision 33 Section 6.2.2 as a 4-outcome discriminated union:
 
-8. **Event Lifecycle Architecture & Management (Milestone 22 Delivered — Locked Revision 9):**
-   - **Role-Based Leadership Authorization:**
-     - Community Admin (`isCommunityAdmin(communityId)`): full lifecycle authority including detail updates, cancellation, republishing, and permanent hard delete.
-     - Community Moderator (`isCommunityModerator(communityId)`): operational lifecycle authority including detail updates and cancellation; hard deletion is strictly prohibited.
-     - Regular Members & Cross-Campus Students: read-only access within visibility bounds; management affordances are strictly omitted from the DOM.
-   - **Adaptive Mutability State Machine:**
-     - *Upcoming Events (`now < startAt`):* allows modifying all 9 domain allowlisted fields (`title`, `slug`, `description`, `category`, `location`, `startAt`, `endAt`, `imageURL`, `organizerName`). Strict absence and rejection of unsupported fields (`capacity`, `tags`). `startAt` must remain in the future, and `endAt >= startAt`.
-     - *Ongoing Events (`startAt <= now <= endAt`):* core identity fields (`title`, `slug`, `category`, `organizerName`, `startAt`) are locked to prevent attendee confusion. Allows modifying `location`, `description`, `imageURL`, and non-shortening `endAt` extensions (`endAt >= originalEndAt`).
-     - *Completed Events (`now > endAt`):* strictly read-only invariant; management toolbar and mutation actions are omitted.
-   - **Dedicated Lifecycle Action Pathways:**
-     - *Dedicated Cancellation (`published -> cancelled`):* permitted for upcoming and ongoing events (`now <= endAt`). Mutates only `status` and `updatedAt`. Closes attendee registration immediately while preserving existing attendee RSVPs for voluntary withdrawal.
-     - *Dedicated Republishing (`cancelled -> published`):* permitted exclusively for upcoming events (`now < startAt`). Mutates only `status` and `updatedAt`. Removes cancellation warnings and reopens registration.
-     - *Permanent Hard Deletion:* restricted exclusively to Community Administrators for upcoming events (`now < startAt`). Deletes event document from Firestore. Orphaned attendee RSVP documents are retained and surface under "RSVPs Requiring Attention" on the Going tab until voluntarily dismissed.
-   - **Client Integration (`useEventManagement`):**
-     - Custom hook evaluating authority hierarchy, campus parity, reactive boundary timers (triggering automatic state transitions without polling), persistent concurrency locks, and zero-flash optimistic state transitions.
-     - UI surfaces: `EventManagementToolbar.jsx`, `EventEditModal.jsx`, `EventCancelModal.jsx`, `EventRepublishModal.jsx`, `EventDeleteModal.jsx`.
+1. `normal_waiting`: Candidate at head sequence exists with status `waiting`. Candidate is eligible for promotion.
+2. `terminal_hole`: Slot at head sequence exists in a terminal state (`withdrawn`, `declined`, `expired`, `claimed`). Head pointer advances past the hole without consuming an offer.
+3. `out_of_bounds`: Head sequence has reached or exceeded `nextSequence`. The queue is completely empty.
+4. `unexpected_status`: Slot exists with an unexpected status (e.g. `offered`). Normalization halts to avoid skipping in-flight offers.
 
-9. **Event Notification & Resumable Cancellation Delivery Architecture (Milestone 23 Delivered):**
-   - **Supported Notification Types & Contracts:**
-     - `event_rsvp`: Generated upon attendee RSVP creation and delivered to the event organizer (`event.createdBy`) with deterministic ID `rsvp_${eventId}_${actorId}`. Contains actor profile snapshot and optional `referenceTitle` strictly matching event title (max 100 characters). Suppressed from visible inbox and unread count when recipient disables `eventRsvp` notification preference.
-     - `event_cancelled`: Generated upon event cancellation fan-out to all confirmed attendees. Keyed deterministically as `cancel_${eventId}_${cycleId}`, guaranteeing at most one notification per attendee per cancellation cycle. Suppressed from visible inbox and unread count when recipient disables `eventCancelled` notification preference.
-     - **Backward Compatibility:** Connection notifications (`connection_request`, `connection_accepted`) strictly omit `cycleId` and `referenceTitle` to maintain backward-compatible schemas.
-   - **Two-Way Atomic Handshake & Cancellation Ledger:**
-     - Event cancellation (Pathway B) atomically transitions `events/{eventId}` to `status: 'cancelled'` and creates/updates `eventNotificationDeliveries/{eventId}` with initial status `pending`, unique `cycleId` (10–64 characters), `checkpointVersion: 0`, and `processedCount: 0`.
-   - **Resumable Fan-Out Orchestration (`CHUNK_SIZE = 8`):**
-     - Client delivery service batches attendee notifications in chunks of 8 to comply with the 20-access Firestore rule limit (`CHUNK_SIZE = 8`, up to 8 attendee writes + 1 ledger update = 9 operations per batch).
-     - Queries `eventRsvps` ordered deterministically by `documentId()` with cursor progression (`startAfter(lastProcessedRsvpId)`).
-     - Concurrency protection: Optimistic compare-and-set updates on `checkpointVersion == resource.checkpointVersion + 1`.
-   - **Cancellation-Cycle Isolation & Republishing Supersession:**
-     - When an in-progress or pending cancellation cycle is superseded by republishing (`published`) or event deletion, the ledger transitions to `status: 'superseded'`, immediately halting further delivery attempts.
-     - Subsequent re-cancellation generates a fresh, isolated `cycleId` (`cycleId != resource.cycleId`), resetting `checkpointVersion: 0`, `processedCount: 0`, and status to `pending`, delivering new notifications without corrupting or reusing historical cycle records.
-   - **Multi-Admin Resumption & Preserved Attribution:**
-     - If cancellation fan-out is interrupted, any authorized community leader (admin or moderator) or the original event creator may resume delivery from the last durable checkpoint.
-     - Security rules enforce that `actorId`, `actorName`, and `actorAvatar` on generated notifications remain permanently bound to the original cancelling actor recorded on the ledger, preventing spoofing or attribution changes during resumption.
-   - **Point-Read Security & Multi-Tenant Isolation (Milestone 23.4.2 Invariants):**
-     - Point reads of existing delivery ledgers require caller to belong to the same campus and be either the original cancelling actor (`actorId`) or an active community leader (`isCommunityModeratorOrAdmin`).
-     - Point reads of nonexistent delivery-ledger documents require an existing parent event in the caller's campus and an active community leadership role (`isCommunityModeratorOrAdmin`).
-     - Creator UID alone without active community leadership authority confers no read access to nonexistent ledgers.
-     - Foreign-campus and unauthorized callers receive `permission-denied` regardless of whether the ledger document exists, eliminating existence-disclosure side-channels.
+The engine iterates iteratively or in batch, skipping holes until a valid waiting candidate or end-of-queue is reached.
 
-10. **Deferred Features:**
-    - Capacity limits, waitlists, attendance verification, QR check-ins, ticketing, payment gateways, calendar synchronization (ICS / Google Calendar), background Cloud Functions, push notifications, and event comment threads remain explicitly deferred.
+### 4. Asynchronous Continuations & Failure Isolation
+
+When promotions or cascade processing require multi-document operations exceeding interactive latency budgets:
+- Producers transactionally write a staging document to `eventWaitlistContinuations/{eventId}` with `status: 'pending'`, generation counter, and vacancy requirements.
+- The producer dispatches a Cloud Task to `processWaitlistContinuationTask` (us-central1) with rate-limiting and retry configurations.
+- The worker claims the continuation using lease fencing (`leaseWorkerId`, `leaseExpiresAt`), processes the promotions, and marks the task `completed`.
+- If task enqueue fails or a task is lost, the 1-minute fallback scheduler `processWaitlistContinuations` sweeps pending continuations to guarantee eventual consistency.
+
+### 5. Outbox Pattern for Notifications
+
+To decouple transactional seat offers from notification delivery:
+- Promoting transactions write an outbox record to `eventWaitlistOutbox/{eventId}_{candidateSequence}`.
+- A Firestore document-created trigger `deliverWaitlistOfferNotification` consumes the outbox record, checks the recipient's `eventWaitlistOffers` preference, and writes the `event_waitlist_offer` notification to `users/{recipientId}/notifications/`.
+- Notification deep-links to `/events/{eventId}` with CTA "View Event", where the active `SeatClaimBanner` displays the remaining offer window and Claim/Decline controls.
+
+### 6. Operating Mode Invariant: Option A
+
+Under Option A, the entire Milestone 24 architecture is executed and verified strictly locally:
+- Firebase Spark plan is retained (₹0 cloud spend).
+- Cloud Functions v2 and Cloud Tasks run inside the local Firebase Emulator Suite on project `demo-campusconnect-rules-test`.
+- No credit card or paid billing is linked.
+- The unapproved Cloudflare Worker alternative (`ADR-025`) remains `PROPOSED — PENDING EXPLICIT APPROVAL`.
 
 ## Security model
 
@@ -440,39 +386,34 @@ The browser is treated as untrusted. Firestore Rules enforce the active authoriz
 - RSVP creation gated by matching campus, upcoming event (`request.time < event.startAt`), published status, and parent event readability;
 - immutable RSVP documents (`allow update: if false;`);
 - owner-only RSVP deletion authority (`resource.data.userId == request.auth.uid`), preserved after event ends, after cancellation, or after parent deletion;
-- owner and parent-readable non-owner RSVP read boundaries;
-- delivery ledger collection `eventNotificationDeliveries/{eventId}` with locked 14-field schema, atomic cancellation handshake, and immutable creation identity;
-- compare-and-set versioning (`checkpointVersion + 1`) and chunk size cap (`CHUNK_SIZE = 8`) within Firestore rule call budgets;
-- strict cancellation-cycle isolation preventing stale cycle notification forgery;
-- delivery ledger point-read security isolation (M23.4.2) preventing cross-campus existence disclosure side-channels and requiring active leadership authority for nonexistent document queries;
-- actor attribution preservation ensuring secondary admin resumption retains the original cancelling actor's identity.
-
-The development-only `SecurityTestPanel` exercises selected notification and user/settings rejection scenarios. It is not a production test runner and is not a replacement for automated emulator tests.
-
-The Rules intentionally retain one documented limitation: the parent `/posts/{postId}` match can validate an exact nonnegative counter delta but cannot identify which arbitrary child comment changed in the same batch. Child-side `getAfter()` checks reject standalone and mismatched comment writes, while a parent-only exact delta remains possible until the data model adds a causality marker or ledger.
+- delivery ledger collection `eventNotificationDeliveries/{eventId}` with locked 14-field schema, atomic cancellation handshake, and compare-and-set progression;
+- delivery ledger point-read security isolation (M23.4.2) preventing cross-campus existence disclosure side-channels;
+- capacity coordinator collection `eventCapacities/{eventId}` with locked 10-field schema, direct admission invariants, waitlist join invariants, and non-head withdrawal constraints;
+- waitlist slots collection `eventWaitlistSlots/{slotId}` with locked 10-field schema, owner-only creation at queue tail, withdrawal restricted to `sequenceNumber > headSequence`, and owner/leader-only read boundaries;
+- waitlist members collection `eventWaitlistMembers/{memberId}` with locked 8-field schema, reciprocal slot coupling, owner-only deletion for non-head withdrawals, private point reads, and list query prohibition;
+- server-only collections `eventWaitlistContinuations/{eventId}`, `eventWaitlistOutbox/{outboxId}`, and `systemWaitlistJobs/{jobId}` locked unconditionally against client reads and writes (`allow read, write: if false;`).
 
 ## Demo and deployment
 
 Firebase Hosting serves the Vite build from `dist` and rewrites application routes to `index.html`.
 
-The recruiter demo uses a normal Firebase Auth account configured through `VITE_DEMO_USER_EMAIL` and `VITE_DEMO_USER_PASSWORD`. The Admin SDK script in `scripts/seedDemoData.mjs` resolves or creates that account and writes deterministic demo profiles, posts, comments, likes, connections, and notifications. It uses an explicit whitelist and merge-only writes; Admin SDK writes bypass client Firestore Rules by design.
+The recruiter demo uses a normal Firebase Auth account configured through `VITE_DEMO_USER_EMAIL` and `VITE_DEMO_USER_PASSWORD`. The Admin SDK script in `scripts/seedDemoData.mjs` resolves or creates that account and writes deterministic demo profiles, posts, comments, likes, connections, notifications, communities, events, event RSVPs, capacity coordinators, and waitlist slots.
 
 ## Current limitations
 
-- 880 unit tests across 43 files, 486 Firestore Emulator rules tests across 16 suites, and 12 Playwright E2E spec files (74 passing tests) are active.
+- 1,032 unit tests across 55 files (+ 16 Cloud Functions boundary tests = 1,048 total), 579 Firestore Emulator rules tests across 16 suites (including TC-01 through TC-91), and 16 Playwright E2E spec files (76 passing tests) are active.
 - Email verification is not required after sign-up.
 - Non-discoverable students are excluded from `directoryIndex` search queries; authenticated direct public profile reads (`/users/:uid`) remain accessible by design.
 - Notifications are bounded to the newest 30 items rather than cursor-paginated.
 - No media upload or Firebase Storage integration exists.
 - No post editing, post sharing, post search, bookmarks, marketplace, or direct account deletion exists.
-- Within the Event domain, ticketing, QR check-in, verified attendance, capacity caps, waitlists, calendar sync, push notifications, email delivery, and event comments remain deferred.
-- Event cancellation notification fan-out is managed client-side in chunks of 8 with durable ledger recovery; trusted background event processors (Cloud Functions) remain deferred.
-- The parent-only exact comment-counter limitation remains; a future ledger or server-side event model would be needed to prove arbitrary child causality.
+- Within the Event domain, ticketing, QR check-in, verified attendance, payment processing, calendar sync, push notifications, and event comments remain deferred.
+- Cloud Functions v2 and Cloud Tasks run locally under Firebase Emulators (Option A, ₹0 spend); production cloud deployment remains deferred pending cloud plan decisions.
 
 ## Deferred architecture, not current implementation
 
 The following are possible later milestones and should not be treated as active architecture:
 
-- trusted server-side event processing for notifications;
+- production cloud deployment of Cloud Functions v2 and Cloud Tasks (pending Blaze plan or zero-cost edge alternatives per unapproved ADR-025);
 - media storage with separate Storage Rules and lifecycle cleanup;
-- capacity caps, waitlists, QR check-in, ticketing, and calendar synchronization.
+- QR check-in, ticketing, attendance verification, and calendar synchronization.

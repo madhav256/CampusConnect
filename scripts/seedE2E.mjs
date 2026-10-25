@@ -52,8 +52,8 @@ export async function seedE2EData() {
   // 1.5 Seed deterministic community members (Milestone 19.2)
   await seedCommunityMembers(db, now);
 
-  // 1.75 Seed deterministic events (Milestone 20)
-  await seedEvents(db, now);
+  // 1.75 Seed deterministic events (Milestone 20 & 24)
+  await seedEvents(db, now, { includeCapped: true });
 
   // 2. Establish deterministic Auth users
   for (const user of Object.values(E2E_USERS)) {
@@ -88,6 +88,9 @@ export async function seedE2EData() {
       notificationPreferences: {
         connectionRequests: true,
         connectionAccepted: true,
+        eventRsvps: true,
+        eventCancellations: true,
+        eventWaitlistOffers: true,
       },
       createdAt: now,
       updatedAt: now,

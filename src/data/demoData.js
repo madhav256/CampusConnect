@@ -31,6 +31,9 @@ export const DEMO_PRIMARY_STUDENT = {
   notificationPreferences: {
     connectionRequests: true,
     connectionAccepted: true,
+    eventRsvps: true,
+    eventCancellations: true,
+    eventWaitlistOffers: true,
   },
   isDemo: true,
 };
@@ -56,6 +59,9 @@ export const DEMO_PEER_PROFILES = [
     notificationPreferences: {
       connectionRequests: true,
       connectionAccepted: true,
+      eventRsvps: true,
+      eventCancellations: true,
+      eventWaitlistOffers: true,
     },
     isDemo: true,
   },
@@ -78,6 +84,9 @@ export const DEMO_PEER_PROFILES = [
     notificationPreferences: {
       connectionRequests: true,
       connectionAccepted: true,
+      eventRsvps: true,
+      eventCancellations: true,
+      eventWaitlistOffers: true,
     },
     isDemo: true,
   },
@@ -100,6 +109,9 @@ export const DEMO_PEER_PROFILES = [
     notificationPreferences: {
       connectionRequests: true,
       connectionAccepted: true,
+      eventRsvps: true,
+      eventCancellations: true,
+      eventWaitlistOffers: true,
     },
     isDemo: true,
   },
@@ -122,6 +134,9 @@ export const DEMO_PEER_PROFILES = [
     notificationPreferences: {
       connectionRequests: true,
       connectionAccepted: true,
+      eventRsvps: true,
+      eventCancellations: true,
+      eventWaitlistOffers: true,
     },
     isDemo: true,
   },
@@ -144,6 +159,9 @@ export const DEMO_PEER_PROFILES = [
     notificationPreferences: {
       connectionRequests: true,
       connectionAccepted: true,
+      eventRsvps: true,
+      eventCancellations: true,
+      eventWaitlistOffers: true,
     },
     isDemo: true,
   },
@@ -166,6 +184,9 @@ export const DEMO_PEER_PROFILES = [
     notificationPreferences: {
       connectionRequests: true,
       connectionAccepted: true,
+      eventRsvps: true,
+      eventCancellations: true,
+      eventWaitlistOffers: true,
     },
     isDemo: true,
   },
@@ -188,6 +209,9 @@ export const DEMO_PEER_PROFILES = [
     notificationPreferences: {
       connectionRequests: true,
       connectionAccepted: true,
+      eventRsvps: true,
+      eventCancellations: true,
+      eventWaitlistOffers: true,
     },
     isDemo: true,
   },

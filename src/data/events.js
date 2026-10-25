@@ -367,7 +367,7 @@ export function resolveEventFixture(def, referenceDate = new Date()) {
   const createdAt = new Date(refMs + createdOffsetMs).toISOString();
   const updatedAt = createdAt;
 
-  return {
+  const res = {
     id: def.id,
     campusId: def.campusId,
     communityId: def.communityId,
@@ -386,6 +386,16 @@ export function resolveEventFixture(def, referenceDate = new Date()) {
     createdAt,
     updatedAt,
   };
+
+  if (typeof def.capacity === "number" && Number.isInteger(def.capacity) && def.capacity > 0) {
+    res.capacity = def.capacity;
+  }
+
+  if (typeof def.confirmedCount === "number" && Number.isInteger(def.confirmedCount) && def.confirmedCount >= 0) {
+    res.confirmedCount = def.confirmedCount;
+  }
+
+  return res;
 }
 
 /**
@@ -423,3 +433,76 @@ export const EVENT_LIST = [
 ];
 
 export const EVENTS = Object.fromEntries(EVENT_LIST.map((e) => [e.id, e]));
+
+// ---------------------------------------------------------------------------
+// Milestone 24 — Capped Event Demo Fixtures
+// ---------------------------------------------------------------------------
+
+// 9. Apex Institute of Technology - Capped Autonomous Systems Hands-On Lab (Workshop, Upcoming: +3d, Capacity: 12, Available)
+export const EVENT_CAPPED_MICRO_LAB_DEF = {
+  id: "e2e-event-capped-micro-lab",
+  campusId: APEX_CAMPUS_ID,
+  communityId: COMMUNITY_APEX_AI.id,
+  title: "Apex Autonomous Systems Hands-On Lab",
+  slug: "autonomous-systems-hands-on-lab",
+  description:
+    "Intensive hands-on lab covering autonomous perception and embedded control. Limited workbench capacity with direct hardware stations.",
+  category: EVENT_CATEGORIES.WORKSHOP,
+  location: "Tech Block 3, Hardware Lab B",
+  startOffsetMs: 3 * DAY_MS,
+  endOffsetMs: 3 * DAY_MS + 3 * HOUR_MS,
+  imageURL: null,
+  createdBy: "e2e-student-a",
+  organizerName: "Apex AI & Robotics Society",
+  status: EVENT_STATUSES.PUBLISHED,
+  visibility: EVENT_VISIBILITIES.CAMPUS_PUBLIC,
+  capacity: 12,
+  confirmedCount: 0,
+};
+
+// 10. Apex Institute of Technology - Capped Executive AI Ethics & Safety Roundtable (Tech, Upcoming: +4d, Capacity: 2, Full)
+export const EVENT_CAPPED_FULL_WAITLIST_DEF = {
+  id: "e2e-event-capped-full-waitlist",
+  campusId: APEX_CAMPUS_ID,
+  communityId: COMMUNITY_APEX_AI.id,
+  title: "Executive AI Ethics & Safety Roundtable",
+  slug: "ai-ethics-safety-roundtable",
+  description:
+    "High-level closed-door roundtable on AI alignment, campus governance, and safety benchmarks. Strict conference room capacity cap.",
+  category: EVENT_CATEGORIES.TECH,
+  location: "Senate Room, Central Administration Building",
+  startOffsetMs: 4 * DAY_MS,
+  endOffsetMs: 4 * DAY_MS + 2 * HOUR_MS,
+  imageURL: null,
+  createdBy: "e2e-student-a",
+  organizerName: "Apex AI & Robotics Society",
+  status: EVENT_STATUSES.PUBLISHED,
+  visibility: EVENT_VISIBILITIES.CAMPUS_PUBLIC,
+  capacity: 2,
+  confirmedCount: 2,
+};
+
+export const CAPPED_EVENT_DEFINITIONS = [
+  EVENT_CAPPED_MICRO_LAB_DEF,
+  EVENT_CAPPED_FULL_WAITLIST_DEF,
+];
+
+/**
+ * Builds all deterministic capped-event fixtures resolved against a specific reference date.
+ *
+ * @param {Date|number|string} [referenceDate=new Date()]
+ * @returns {Array<object>}
+ */
+export function buildCappedEventFixtures(referenceDate = new Date()) {
+  return CAPPED_EVENT_DEFINITIONS.map((def) => resolveEventFixture(def, referenceDate));
+}
+
+export const EVENT_CAPPED_MICRO_LAB = resolveEventFixture(EVENT_CAPPED_MICRO_LAB_DEF);
+export const EVENT_CAPPED_FULL_WAITLIST = resolveEventFixture(EVENT_CAPPED_FULL_WAITLIST_DEF);
+
+export const CAPPED_EVENT_LIST = [
+  EVENT_CAPPED_MICRO_LAB,
+  EVENT_CAPPED_FULL_WAITLIST,
+];
+
+export const CAPPED_EVENTS = Object.fromEntries(CAPPED_EVENT_LIST.map((e) => [e.id, e]));

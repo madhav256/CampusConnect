@@ -347,6 +347,50 @@ export default function Settings() {
                     />
                   </button>
                 </div>
+
+                {/* Event Waitlist Offers Toggle */}
+                <div className="flex items-center justify-between py-3">
+                  <div className="pr-4">
+                    <label
+                      htmlFor="toggle-notif-waitlist-offers"
+                      className="cursor-pointer text-sm font-semibold text-ink"
+                    >
+                      Event Waitlist Offers
+                    </label>
+                    <p className="text-xs text-ink-muted">
+                      Receive an inbox notification when a seat opens up for an event waitlist you joined.
+                    </p>
+                  </div>
+                  <button
+                    id="toggle-notif-waitlist-offers"
+                    type="button"
+                    role="switch"
+                    aria-checked={
+                      settings.notificationPreferences.eventWaitlistOffers !== false
+                    }
+                    disabled={isSaving}
+                    onClick={() =>
+                      updateNotificationPreference(
+                        "eventWaitlistOffers",
+                        settings.notificationPreferences.eventWaitlistOffers === false
+                      )
+                    }
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-terracotta-500 focus:ring-offset-2 disabled:opacity-50 ${
+                      settings.notificationPreferences.eventWaitlistOffers !== false
+                        ? "bg-terracotta-600"
+                        : "bg-stone-300"
+                    }`}
+                  >
+                    <span
+                      aria-hidden="true"
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                        settings.notificationPreferences.eventWaitlistOffers !== false
+                          ? "translate-x-5"
+                          : "translate-x-0"
+                      }`}
+                    />
+                  </button>
+                </div>
               </div>
             </Card>
 

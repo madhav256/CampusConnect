@@ -81,6 +81,9 @@ export async function seedEmulatorData() {
     notificationPreferences: {
       connectionRequests: true,
       connectionAccepted: true,
+      eventRsvps: true,
+      eventCancellations: true,
+      eventWaitlistOffers: true,
     },
     createdAt: now,
     updatedAt: now,
@@ -120,6 +123,9 @@ export async function seedEmulatorData() {
     notificationPreferences: {
       connectionRequests: true,
       connectionAccepted: false,
+      eventRsvps: true,
+      eventCancellations: true,
+      eventWaitlistOffers: true,
     },
     createdAt: now,
     updatedAt: now,
@@ -152,6 +158,9 @@ export async function seedEmulatorData() {
     notificationPreferences: {
       connectionRequests: true,
       connectionAccepted: true,
+      eventRsvps: true,
+      eventCancellations: true,
+      eventWaitlistOffers: true,
     },
     createdAt: now,
     updatedAt: now,

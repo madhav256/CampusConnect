@@ -628,6 +628,7 @@ export async function resetUserPreferences(userId) {
     connectionAccepted: true,
     eventRsvps: true,
     eventCancellations: true,
+    eventWaitlistOffers: true,
   });
 }
 

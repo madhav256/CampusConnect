@@ -1,6 +1,6 @@
 # CampusConnect Features
 
-**Status:** Current implementation inventory (Milestone 23 Delivered)
+**Status:** Current implementation inventory (Milestone 24 Delivered)
 
 This document distinguishes shipped behavior from deferred ideas. A feature is marked implemented only when it exists in the current application source and active Firebase model.
 
@@ -106,7 +106,8 @@ The active notification types are:
 - `connection_request`: connection request received from peer;
 - `connection_accepted`: connection request accepted by peer;
 - `event_rsvp`: attendee RSVP intent registered on an event created by the current user;
-- `event_cancelled`: registered campus event cancelled by community leadership with cancelling leader attribution.
+- `event_cancelled`: registered campus event cancelled by community leadership with cancelling leader attribution;
+- `event_waitlist_offer`: candidate at head of FIFO waitlist offered a released seat with a live offer expiration window; CTA "View Event" deep-links to `/events/{referenceId}` where the seat claim occurs.
 
 Like, comment, message, and generic social notifications are not implemented.
 
@@ -119,6 +120,7 @@ Like, comment, message, and generic social notifications are not implemented.
 - Accepted-connection notification preference (`connectionAccepted`).
 - Event RSVP notification preference (`eventRsvps`).
 - Event cancellation notification preference (`eventCancellations`).
+- Event waitlist offer notification preference (`eventWaitlistOffers`).
 - Sign out.
 - Disabled account-deletion control explaining that backend cascade cleanup is deferred.
 
@@ -143,7 +145,7 @@ The discoverability toggle updates `users/{uid}` and atomically adds or removes 
 ### Multi-Tenancy & Campus Scoping
 
 - Explicit multi-tenant architecture scoped by `campusId`.
-- Every primary application entity (posts, connections, notifications, conversations, communities, events, event RSVPs) enforces campus isolation.
+- Every primary application entity (posts, connections, notifications, conversations, communities, events, event RSVPs, event capacity coordinators, waitlist slots, waitlist members) enforces campus isolation.
 - Cross-tenant queries and writes are strictly rejected at the Firestore security boundary.
 - Active campus session resolved from student profile.
 
@@ -170,7 +172,7 @@ The discoverability toggle updates `users/{uid}` and atomically adds or removes 
 
 - **Dedicated Management Toolbar (`EventManagementToolbar`):** Rendered on `/events/:eventId` exclusively for authorized community leaders (admins and moderators) within the matching campus tenant.
 - **Adaptive Mutability (`EventEditModal`):**
-  - Upcoming events: Allows updating all 9 domain allowlisted fields (`title`, `slug`, `description`, `category`, `location`, `startAt`, `endAt`, `imageURL`, `organizerName`). Strict absence and rejection of unsupported fields (`capacity`, `tags`).
+  - Upcoming events: Allows updating all 9 domain allowlisted fields (`title`, `slug`, `description`, `category`, `location`, `startAt`, `endAt`, `imageURL`, `organizerName`). Strict absence and rejection of unsupported fields (`tags`).
   - Ongoing events: Core identity fields (`title`, `slug`, `category`, `organizerName`, `startAt`) are strictly locked. Allows updating location, description, banner image, and non-shortening end time extensions.
 - **Dedicated Cancellation (`EventCancelModal`):** Permitted for upcoming and ongoing events (`now <= endAt`). Immediately closes new registration, displays prominent cancellation banners and badges, preserves attendee RSVP records for voluntary withdrawal, and allows republishing before start time.
 - **Dedicated Republishing (`EventRepublishModal`):** Permitted exclusively for cancelled upcoming events (`now < startAt`). Restores event status to `published`, removes cancellation alerts, and reopens attendee registration.
@@ -223,6 +225,38 @@ The discoverability toggle updates `users/{uid}` and atomically adds or removes 
   - Suppressed from visible notifications and unread badges when recipient disables `eventCancellations` preference.
   - Resilient UI rendering: deleted referenced events gracefully display durable `referenceTitle` snapshot.
 
+### Capped Events & FIFO Waitlists (Milestone 24 Delivered)
+
+- **Event Capacity Coordinator (`eventCapacities/{eventId}`):**
+  - Atomic tracking of `confirmedCount`, `offeredCount`, `waitlistCount`, `headSequence`, and `nextSequence`.
+  - Concurrency-safe direct admissions for events with remaining capacity (`confirmedCount + offeredCount < capacity` and `waitlistCount == 0`).
+  - Strict overbooking prevention through transactional compare-and-set validation and optimistic concurrency retries.
+- **FIFO Waitlist Queue Engine (`eventWaitlistSlots` & `eventWaitlistMembers`):**
+  - Deterministic sequence allocation (`sequenceNumber`) providing strict first-in, first-out ordering.
+  - Multi-slot queue log stored in root `eventWaitlistSlots/{eventId}_{sequenceNumber}`.
+  - Private student index stored in root `eventWaitlistMembers/{eventId}_{userId}` with tenant-isolated access.
+  - Waitlist joining permitted when capacity is reached up to optional `waitlistCapacity`.
+- **Waitlist Withdrawal Pathways:**
+  - Non-head waiting candidates withdraw via direct client transaction (`useEventWaitlist.withdraw()`), updating slot status to `withdrawn`, decrementing coordinator `waitlistCount`, and deleting the private member record.
+  - Head-of-queue candidates withdraw via privileged GCFv2 HTTPS callable `leaveWaitlist`, ensuring queue normalization and automatic promotion of the next waiting candidate.
+- **Automated Seat Offer Progression & Expiration Lifecycle:**
+  - When confirmed attendees cancel (`cancelRsvpWithPromotion`) or offered candidates decline (`declineWaitlistOffer`), the head candidate is promoted to `offered` status with a configurable offer expiration window (`offerExpiresAt`, default 24h).
+  - Seat Claiming (`claimWaitlistOffer`): offered candidates claim seats directly on the event view, transitioning slot to `claimed`, incrementing `confirmedCount`, decrementing `offeredCount`, and creating confirmed `eventRsvps` record.
+  - Seat Declining (`declineWaitlistOffer`): offered candidates decline seats, transitioning slot to `declined`, decrementing `offeredCount`, and promoting the next waiting candidate.
+  - Offer Expiry Sweeper (`processExpiredOffers`): automated 1-minute scheduled sweeper sweeping expired offers, transitioning slot to `expired`, decrementing `offeredCount`, and promoting successors.
+- **Queue Head Normalization Engine (`normalizeQueueHead`):**
+  - 4-outcome discriminated union (`normal_waiting`, `terminal_hole`, `out_of_bounds`, `unexpected_status`).
+  - Automatic hole-skipping past withdrawn, expired, or declined slots until a valid waiting candidate or end of queue is found.
+- **Dedicated UI Components:**
+  - `CapacityIndicator`: live occupancy bar, vacancy count, waitlist headcount badge, and uncapped fallback.
+  - `SeatClaimBanner`: sticky event banner with live countdown timer, primary Claim action, and secondary Decline action.
+  - `WaitlistModal`: interactive modal displaying live queue position, estimated wait, policies, and Leave action.
+- **Server Microservices & Cloud Tasks Workers (Option A Local Emulators):**
+  - GCFv2 HTTPS callables: `cancelRsvpWithPromotion`, `claimWaitlistOffer`, `declineWaitlistOffer`, `leaveWaitlist`, `promoteWaitlistCandidates`, `fastForwardWaitlistHead`.
+  - Primary Cloud Tasks worker: `processWaitlistContinuationTask` handling asynchronous durable continuations (`eventWaitlistContinuations/{eventId}`).
+  - Outbox Notification Worker: `deliverWaitlistOfferNotification` triggered by document creation in `eventWaitlistOutbox`.
+  - Scheduled sweepers: `processExpiredOffers` (1-min offer expiration) and `processWaitlistContinuations` (1-min continuation recovery).
+
 ### Interface and accessibility behavior
 
 - Campus Atelier paper/ink/terracotta visual language.
@@ -245,9 +279,9 @@ Settings and Notifications render a development-only `SecurityTestPanel`. The av
 
 Automated verification includes:
 
-- **880 Vitest unit tests** across 43 files covering cutover, services, messaging, communities, events, event RSVPs, event management, event notifications, delivery ledgers, normalization, hooks, and helper logic;
-- **486 Firestore Emulator security rules tests** across 16 suites, covering users, publicProfiles, directoryIndex, discoverability transitions, posts, comments, likes, connections, notifications, conversations, messages, communities, communityMembers, events, eventRsvps, and eventNotificationDeliveries (including M23.4.2 point-read isolation);
-- **74 Playwright E2E browser tests** across 12 spec files executed against the Firebase Emulator suite, verifying authentication, feed, discovery, connections, messaging, mobile responsiveness, multi-tenancy, notifications, profile, communities, events, event RSVPs, complete event lifecycle management, and event notification delivery orchestration.
+- **1,032 Vitest unit tests** across 55 files (+ 16 Cloud Functions boundary tests = 1,048 total) covering cutover, services, messaging, communities, events, event RSVPs, event management, event notifications, delivery ledgers, capacity coordinators, waitlist queues, queue head normalization, task dispatchers, seed scripts, hooks, and helper logic;
+- **579 Firestore Emulator security rules tests** across 16 suites (including TC-01 through TC-91), covering users, publicProfiles, directoryIndex, discoverability transitions, posts, comments, likes, connections, notifications, conversations, messages, communities, communityMembers, events, eventRsvps, eventNotificationDeliveries, eventCapacities, eventWaitlistSlots, and eventWaitlistMembers (including M23.4.2 point-read isolation);
+- **76 Playwright E2E browser tests** across 16 spec files executed against the Firebase Emulator suite, verifying authentication, feed, discovery, connections, messaging, mobile responsiveness, multi-tenancy, notifications, profile, communities, events, event RSVPs, complete event lifecycle management, event notification delivery orchestration, and capped-event waitlist offer flows.
 
 ### Recruiter demo and seeding
 
@@ -255,7 +289,7 @@ Automated verification includes:
 - Demo persona: Alex Rivera.
 - Admin SDK seeding script with deterministic peer/post/relationship IDs.
 - Merge-only seeding with explicit whitelists and no bulk-deletion routine.
-- Seeded feed activity, student profiles, connection states, notifications, communities, events, and event RSVPs.
+- Seeded feed activity, student profiles, connection states, notifications, communities, events, event RSVPs, capped-event capacity coordinators, and deterministic waitlist slots.
 
 ## Not implemented / deferred
 
@@ -265,7 +299,7 @@ The following ideas are intentionally outside the current MVP:
 - Image, file, or rich-media uploads.
 - Firebase Storage integration.
 - Group messaging, read receipts, typing indicators, or presence (minimal 1-to-1 private messaging is implemented).
-- Like, comment, or direct message notifications (connection and event notifications are implemented).
+- Like, comment, or direct message notifications (connection, event RSVP, cancellation, and waitlist offer notifications are implemented).
 - Email verification enforcement.
 - Password-change UI.
 - Account deletion and cascading cleanup.
@@ -273,11 +307,10 @@ The following ideas are intentionally outside the current MVP:
 - Global admin dashboard.
 - Dark mode or theme switching.
 - External full-text search (e.g. Algolia/Typesense).
-- Background Cloud Functions for notification processing.
 - Event ticketing, payment processing, or QR code check-in.
-- Event capacity caps, waitlists, or attendance quotas.
 - Verified attendance tracking or check-in verification.
 - Organizer removal/management of other students' RSVPs.
 - Calendar export/sync (iCal, Google Calendar).
+- Production cloud deployment of Cloud Functions/Tasks (Option A operates locally under Spark at ₹0 spend; ADR-025 Cloudflare proposal remains `PROPOSED — PENDING EXPLICIT APPROVAL`).
 
 These are future possibilities, not current routes, collections, or components.

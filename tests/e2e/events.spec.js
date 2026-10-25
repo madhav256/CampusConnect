@@ -161,10 +161,10 @@ test.describe("Milestone 20 — Unit 20.6: Campus Events E2E Suite", () => {
       "Cancelled"
     );
 
-    // 6. Verify count label displays total public events in upcoming view (5 events)
+    // 6. Verify count label displays total public events in upcoming view (7 events: 5 uncapped + 2 capped)
     const countLabel = page.locator("[data-testid='events-count-label']");
     await expect(countLabel).toBeVisible();
-    await expect(countLabel).toContainText("5 events");
+    await expect(countLabel).toContainText("7 events");
   });
 
   test("2. Category Filtering: filters events by category and resets back to all", async ({

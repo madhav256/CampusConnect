@@ -769,5 +769,56 @@ describe("userService — Firestore Service Methods", () => {
       expect(mocks.setDoc).not.toHaveBeenCalled();
       expect(mockBatch.set).not.toHaveBeenCalled();
     });
+
+    it("persists and normalizes eventWaitlistOffers in notificationPreferences", async () => {
+      await updateUserSettings("notif-user-waitlist", {
+        notificationPreferences: {
+          connectionRequests: true,
+          connectionAccepted: true,
+          eventRsvps: true,
+          eventCancellations: true,
+          eventWaitlistOffers: false,
+        },
+      });
+
+      expect(mocks.updateDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: "users/notif-user-waitlist" }),
+        expect.objectContaining({
+          notificationPreferences: {
+            connectionRequests: true,
+            connectionAccepted: true,
+            eventRsvps: true,
+            eventCancellations: true,
+            eventWaitlistOffers: false,
+          },
+        }),
+      );
+
+      const normalizedDisabled = normalizeUserSettings("notif-user-waitlist", {
+        email: "waitlist@apex.test",
+        isDiscoverable: true,
+        notificationPreferences: {
+          connectionRequests: true,
+          connectionAccepted: true,
+          eventRsvps: true,
+          eventCancellations: true,
+          eventWaitlistOffers: false,
+        },
+      });
+      expect(normalizedDisabled.notificationPreferences.eventWaitlistOffers).toBe(false);
+
+      const normalizedEnabled = normalizeUserSettings("notif-user-waitlist", {
+        email: "waitlist@apex.test",
+        isDiscoverable: true,
+        notificationPreferences: {
+          connectionRequests: true,
+          connectionAccepted: true,
+          eventRsvps: true,
+          eventCancellations: true,
+          eventWaitlistOffers: true,
+        },
+      });
+      expect(normalizedEnabled.notificationPreferences.eventWaitlistOffers).toBe(true);
+    });
   });
 });

@@ -312,5 +312,134 @@ describe("Milestone 23.4 — Notification UX & Presentation Tests", () => {
       });
       expect(getTextContent(accTree)).toContain("accepted your connection request.");
     });
+
+    describe("Milestone 24.4.1 — Waitlist Offer Notification UX", () => {
+      it("renders event_waitlist_offer notification with seat-offer icon, actionable message, and View Event link without leaking internal metadata", () => {
+        const onMarkAsRead = vi.fn();
+        const notification = {
+          id: "offer_evt-cap-1_4",
+          recipientId: "recipient-456",
+          actorId: "system",
+          actorName: "CampusConnect Queue",
+          actorAvatar: null,
+          type: "event_waitlist_offer",
+          referenceId: "evt-cap-1",
+          referenceTitle: "AI Systems Symposium",
+          slotId: "evt-cap-1_4",
+          slotSequence: 4,
+          offerExpiresAt: new Date("2026-10-26T12:00:00Z"),
+          createdAt: new Date(),
+          isRead: false,
+        };
+
+        const tree = renderNotificationItem({
+          notification,
+          currentUid: "recipient-456",
+          onMarkAsRead,
+          onDelete: vi.fn(),
+        });
+
+        const text = getTextContent(tree);
+        expect(text).toContain(
+          "A seat is available for “AI Systems Symposium”. Claim your spot before the offer expires."
+        );
+        // Must not imply seat is already claimed or leak internal actor/slot identifiers
+        expect(text).not.toContain("CampusConnect Queue");
+        expect(text).not.toContain("system");
+        expect(text).not.toContain("evt-cap-1_4");
+        expect(text).not.toContain("interacted with you");
+
+        // Verify distinctive seat-offer icon badge renders instead of user profile link
+        const offerIcon = findInTree(
+          tree,
+          (el) => el?.props?.["data-testid"] === `notif-offer-icon-${notification.id}`
+        );
+        expect(offerIcon).not.toBeNull();
+        expect(offerIcon.props["aria-label"]).toBe("Waitlist seat offer");
+
+        const brokenSystemProfileLink = findInTree(
+          tree,
+          (el) => el?.props?.to === "/users/system"
+        );
+        expect(brokenSystemProfileLink).toBeNull();
+
+        // Verify View Event CTA link points to /events/evt-cap-1
+        const viewEventLink = findInTree(
+          tree,
+          (el) => el?.props?.["data-testid"] === `notif-view-event-${notification.id}`
+        );
+        expect(viewEventLink).not.toBeNull();
+        expect(viewEventLink.props.to).toBe("/events/evt-cap-1");
+        expect(getTextContent(viewEventLink)).toBe("View Event");
+
+        // Verify unread indicator and mark-as-read action remain intact
+        const markAsReadBtn = findInTree(
+          tree,
+          (el) => el?.type === "button" && el?.props?.title === "Mark as read"
+        );
+        expect(markAsReadBtn).not.toBeNull();
+        markAsReadBtn.props.onClick();
+        expect(onMarkAsRead).toHaveBeenCalledWith("offer_evt-cap-1_4");
+      });
+
+      it("renders safe fallback copy when referenceTitle is missing, null, or whitespace", () => {
+        for (const missingTitle of [undefined, null, "", "   "]) {
+          const notification = {
+            id: "offer_evt-cap-2_1",
+            recipientId: "recipient-456",
+            actorId: "system",
+            actorName: "CampusConnect Queue",
+            type: "event_waitlist_offer",
+            referenceId: "evt-cap-2",
+            referenceTitle: missingTitle,
+            createdAt: new Date(),
+            isRead: false,
+          };
+
+          const tree = renderNotificationItem({
+            notification,
+            currentUid: "recipient-456",
+            onMarkAsRead: vi.fn(),
+            onDelete: vi.fn(),
+          });
+
+          const text = getTextContent(tree);
+          expect(text).toContain(
+            "A seat is available for an event you joined on the waitlist. Claim your spot before the offer expires."
+          );
+          expect(text).not.toContain("undefined");
+          expect(text).not.toContain("null");
+        }
+      });
+
+      it("omits the View Event link when referenceId is missing or invalid", () => {
+        for (const invalidRefId of [undefined, null, "", "   ", 123, "bad/path"]) {
+          const notification = {
+            id: "offer_evt-invalid_1",
+            recipientId: "recipient-456",
+            actorId: "system",
+            type: "event_waitlist_offer",
+            referenceId: invalidRefId,
+            referenceTitle: "Capped Workshop",
+            createdAt: new Date(),
+            isRead: false,
+          };
+
+          const tree = renderNotificationItem({
+            notification,
+            currentUid: "recipient-456",
+            onMarkAsRead: vi.fn(),
+            onDelete: vi.fn(),
+          });
+
+          const viewEventLink = findInTree(
+            tree,
+            (el) =>
+              el?.props?.["data-testid"] === `notif-view-event-${notification.id}`
+          );
+          expect(viewEventLink).toBeNull();
+        }
+      });
+    });
   });
 });

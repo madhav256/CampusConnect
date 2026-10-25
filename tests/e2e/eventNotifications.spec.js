@@ -601,4 +601,107 @@ test.describe("Milestone 23.4 — Event Notifications & Delivery Orchestration E
       await logout(page);
     }
   });
+
+  test("Journey 6: Waitlist offer notification presentation, View Event navigation, and Settings preference persistence across reload", async ({
+    page,
+  }) => {
+    const eventId = "e2e-isolated-waitlist-offer-evt";
+    const eventTitle = "Capped Systems Workshop";
+    const notifId = `offer_${eventId}_1`;
+    const now = Timestamp.now();
+
+    await createIsolatedTestEvent({
+      id: eventId,
+      title: eventTitle,
+      status: "published",
+      createdBy: E2E_USERS.studentA.uid,
+      organizerName: E2E_USERS.studentA.displayName,
+      communityId: "apex-ai-club",
+      campusId: "apex-university",
+    });
+
+    await db
+      .collection("users")
+      .doc(E2E_USERS.studentB.uid)
+      .collection("notifications")
+      .doc(notifId)
+      .set({
+        id: notifId,
+        recipientId: E2E_USERS.studentB.uid,
+        actorId: "system",
+        actorName: "CampusConnect Queue",
+        actorAvatar: null,
+        type: "event_waitlist_offer",
+        referenceId: eventId,
+        referenceTitle: eventTitle,
+        slotSequence: 1,
+        isRead: false,
+        createdAt: now,
+      });
+
+    try {
+      await loginAs(page, E2E_USERS.studentB);
+
+      const notifBadge = page
+        .locator('header nav[aria-label="Main Navigation"]')
+        .getByLabel(/unread notifications/i);
+      await expect(notifBadge).toBeVisible();
+      await expect(notifBadge).toHaveText("1");
+
+      // 1. Verify waitlist offer notification presentation in /notifications
+      await page.goto("/notifications");
+      await expect(page.getByRole("heading", { name: "Notifications", exact: true })).toBeVisible();
+      await expect(page.locator(`[data-testid='notif-offer-icon-${notifId}']`)).toBeVisible();
+      await expect(
+        page.getByText(
+          `A seat is available for “${eventTitle}”. Claim your spot before the offer expires.`
+        )
+      ).toBeVisible();
+
+      // 2. Click View Event CTA and verify navigation to /events/{eventId}
+      const viewEventLink = page.locator(`[data-testid='notif-view-event-${notifId}']`);
+      await expect(viewEventLink).toBeVisible();
+      await expect(viewEventLink).toHaveText("View Event");
+      await viewEventLink.click();
+      await page.waitForURL(`**/events/${eventId}`);
+      await expect(page.locator("[data-testid='event-detail-title']")).toHaveText(eventTitle);
+
+      // 3. Toggle Event Waitlist Offers preference in Settings and verify persistence across reload
+      await page.goto("/settings");
+      const waitlistOffersToggle = page.locator("#toggle-notif-waitlist-offers");
+      await expect(waitlistOffersToggle).toBeVisible();
+      await expect(waitlistOffersToggle).toHaveAttribute("aria-checked", "true");
+
+      await waitlistOffersToggle.click();
+      await expect(waitlistOffersToggle).toHaveAttribute("aria-checked", "false");
+
+      await page.reload();
+      await expect(page.locator("#toggle-notif-waitlist-offers")).toHaveAttribute(
+        "aria-checked",
+        "false"
+      );
+
+      // 4. Verify waitlist offer notification is filtered out when preference is disabled
+      await page.goto("/notifications");
+      await expect(page.getByText("No notifications yet")).toBeVisible();
+      await expect(page.getByText(`“${eventTitle}”`)).not.toBeVisible();
+      await expect(notifBadge).not.toBeVisible();
+
+      // 5. Re-enable preference and verify notification reappears
+      await page.goto("/settings");
+      await page.locator("#toggle-notif-waitlist-offers").click();
+      await expect(page.locator("#toggle-notif-waitlist-offers")).toHaveAttribute(
+        "aria-checked",
+        "true"
+      );
+
+      await page.goto("/notifications");
+      await expect(page.getByText(`“${eventTitle}”`)).toBeVisible();
+    } finally {
+      await cleanupEventNotifications(eventId, [E2E_USERS.studentB.uid]);
+      await deleteIsolatedTestEvent(eventId);
+      await resetUserPreferences(E2E_USERS.studentB.uid);
+      await logout(page);
+    }
+  });
 });

@@ -1,6 +1,6 @@
 # CampusConnect Roadmap
 
-**Status:** Status-aware roadmap (Milestone 23 Delivered)
+**Status:** Status-aware roadmap (Milestone 24 Delivered)
 
 Checked items describe work that exists in the current repository. Unchecked items are proposed or deferred; they are not implemented merely because they appear here.
 
@@ -37,7 +37,8 @@ Checked items describe work that exists in the current repository. Unchecked ite
 - [x] Milestone 21: Event RSVPs & Participation Discovery (RSVP lifecycle, attendee preview, Going tab, badges, resolution pipeline, error recovery).
 - [x] Milestone 22: Event Lifecycle Management (adaptive mutability, cancellation, republishing, hard delete, reactive timers).
 - [x] Milestone 23: Event Notifications & Resumable Cancellation Delivery (RSVP notifications, cancellation fan-out, delivery ledger, point-read security isolation).
-- [x] Automated test suites: 880 Vitest unit tests across 43 files, 486 Firestore Emulator security rules tests across 16 suites, and 74 Playwright E2E browser tests across 12 spec files passing.
+- [x] Milestone 24: Capped Events and FIFO Waitlists (Option A local-first release: capacity coordinator, FIFO waitlist queue progression, automated seat offers, UI components, Cloud Functions v2 and Tasks workers).
+- [x] Automated test suites: 1,032 Vitest unit tests across 55 files (+ 16 Cloud Functions boundary tests = 1,048 total), 579 Firestore Emulator security rules tests across 16 suites (including TC-01 through TC-91), and 76 Playwright E2E browser tests across 16 spec files passing.
 
 ## Current maintenance contract
 
@@ -122,14 +123,21 @@ Checked items describe work that exists in the current repository. Unchecked ite
 - [x] **23.4.2 Delivery Ledger Point-Read Isolation Audit & Resolution:** Resolve cross-campus ledger existence-disclosure side-channel, enforce community leadership check for nonexistent ledger reads, and prevent creator authorization bypass (`v23.4.2-delivery-ledger-point-read-isolation`).
 - [x] **23.5 E2E Verification & Documentation Reconciliation:** Comprehensive E2E regression coverage across multi-chunk boundaries, deleted notification non-recreation, republishing supersession, and cycle-isolated repeat cancellation; reconcile all project documentation; verify complete test suites (880 unit tests across 43 files, 486 rules tests across 16 suites, 74 Playwright E2E tests across 12 spec files).
 
+### Milestone 24 — Capped Events and FIFO Waitlists (Delivered)
+
+- [x] **24.1 Event Capacity Coordinator & Waitlist Queue Domain:** Exact schema definitions and validators for `eventCapacities`, `eventWaitlistSlots`, `eventWaitlistMembers`, and `eventWaitlistContinuations`; monotonic sequence allocations, circular checkpoint pagination, generation fencing, and domain validation unit tests (`v24.3.0-capped-events-and-fifo-waitlists`).
+- [x] **24.2 Client Service, Hooks, and UI Layering:** Implement `eventCapacityService.js`, `eventWaitlistService.js`, `useEventCapacity`, `useEventWaitlist`, `CapacityIndicator.jsx`, `SeatClaimBanner.jsx`, and `WaitlistModal.jsx`.
+- [x] **24.3 Firestore Security Rules & Server Microservice Architecture (Option A):** Implement Section 7 Firestore Security Rules covering TC-01 through TC-91; implement GCFv2 HTTPS callables (`cancelRsvpWithPromotion`, `claimWaitlistOffer`, `declineWaitlistOffer`, `leaveWaitlist`, `promoteWaitlistCandidates`, `fastForwardWaitlistHead`), background Cloud Tasks queue worker `processWaitlistContinuationTask`, scheduled offer expiry sweeper `processExpiredOffers`, fallback continuation sweeper `processWaitlistContinuations`, and notification worker `deliverWaitlistOfferNotification` conforming strictly to ADR-024 Revision 33 under Option A (Firebase Spark, local emulators, ₹0 cloud spend).
+- [x] **24.4.1 Waitlist Offer Notification UX & Settings Preference Integration:** Add `event_waitlist_offer` notification type with "View Event" CTA deep-linking to `/events/:eventId`, add `eventWaitlistOffers` toggle in `/settings` persisting to `users/{uid}.notificationPreferences`, and add unit test coverage for notification filtering, service, and settings hook.
+- [x] **24.4.2 Seed Script Parity & CI Pipeline Alignment:** Update `seedDemoData.mjs`, `seedE2E.mjs`, `seedEmulator14b.mjs`, and `seedEvents.mjs` with deterministic capped-event fixtures (`e2e-event-capped-micro-lab`, `e2e-event-capped-full-waitlist`), add seed parity unit tests, and integrate Cloud Functions boundary tests into the CI workflow.
+- [x] **24.4.3 Documentation Reconciliation & Final Verification:** Reconcile all eight canonical project documents (`TASKS.md`, `FEATURES.md`, `ARCHITECTURE.md`, `FIRESTORE_SCHEMA.md`, `PROJECT_CONTEXT.md`, `README.md`, `COMPONENT_LIBRARY.md`, `RECRUITER_DEMO_GUIDE.md`) with actual implementation and ADR-024 Revision 33; reconcile E2E event discovery count; verify 76/76 Playwright E2E tests passing, clean linting, zero whitespace errors, and clean build.
+
 ## Proposed next engineering milestones
 
-### 1. Trusted event processing
+### 1. Production Cloud Readiness & Hosting Evaluation (Deferred)
 
-- [ ] Evaluate whether notification volume and event types justify Cloud Functions.
-- [ ] If justified, move connection notification generation into idempotent server-side triggers.
-- [ ] Preserve recipient-only notification reads and read-state updates.
-- [ ] Add emulator coverage for trigger retries and duplicate delivery.
+- [ ] Evaluate deployment pathways for Cloud Functions v2 and Cloud Tasks (Firebase Blaze plan transition vs. zero-cost edge alternatives per unapproved ADR-025, pending explicit approval).
+- [ ] Preserve ₹0 cloud spend operating invariant unless explicitly authorized.
 
 ### 2. Search infrastructure scaling
 
@@ -147,7 +155,6 @@ These ideas are not commitments for the next release:
 - dark mode and theme switching;
 - rich media and advanced profile customization;
 - event ticketing, payment processing, or QR code check-in;
-- event capacity caps, waitlists, or attendance quotas;
 - verified attendance tracking or check-in verification;
 - organizer removal/management of other students' RSVPs;
 - calendar export/sync (iCal, Google Calendar).

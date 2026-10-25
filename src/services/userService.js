@@ -360,6 +360,13 @@ export async function updateUserSettings(uid, settingsUpdates) {
       prefs.eventCancellations =
         settingsUpdates.notificationPreferences.eventCancellations;
     }
+    if (
+      typeof settingsUpdates.notificationPreferences.eventWaitlistOffers ===
+      "boolean"
+    ) {
+      prefs.eventWaitlistOffers =
+        settingsUpdates.notificationPreferences.eventWaitlistOffers;
+    }
     if (Object.keys(prefs).length > 0) {
       updates.notificationPreferences = prefs;
     }

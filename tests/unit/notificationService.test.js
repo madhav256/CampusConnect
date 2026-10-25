@@ -106,6 +106,115 @@ describe("notificationService", () => {
         createdAt: null,
       });
     });
+
+    it("preserves valid slotId, slotSequence, and offerExpiresAt metadata for event_waitlist_offer notifications", () => {
+      const createdDate = new Date("2026-10-25T10:00:00Z");
+      const expiresDate = new Date("2026-10-26T10:00:00Z");
+      const raw = {
+        recipientId: "alice",
+        actorId: "system",
+        actorName: "CampusConnect Queue",
+        actorAvatar: null,
+        type: "event_waitlist_offer",
+        referenceId: "evt-capped-1",
+        referenceTitle: "AI Systems Symposium",
+        slotId: "  evt-capped-1_3  ",
+        slotSequence: 3,
+        offerExpiresAt: { toDate: () => expiresDate },
+        isRead: false,
+        createdAt: { toDate: () => createdDate },
+      };
+
+      const result = normalizeNotification("offer_evt-capped-1_3", raw);
+
+      expect(result).toEqual({
+        id: "offer_evt-capped-1_3",
+        recipientId: "alice",
+        actorId: "system",
+        actorName: "CampusConnect Queue",
+        actorAvatar: null,
+        type: "event_waitlist_offer",
+        referenceId: "evt-capped-1",
+        referenceTitle: "AI Systems Symposium",
+        slotId: "evt-capped-1_3",
+        slotSequence: 3,
+        offerExpiresAt: expiresDate,
+        isRead: false,
+        createdAt: createdDate,
+      });
+    });
+
+    it("normalizes offerExpiresAt when provided as Date, toMillis, seconds object, or ISO string", () => {
+      const targetDate = new Date("2026-10-26T12:00:00.000Z");
+
+      const fromDate = normalizeNotification("n-date", {
+        recipientId: "u1",
+        actorId: "system",
+        type: "event_waitlist_offer",
+        referenceId: "evt-1",
+        offerExpiresAt: targetDate,
+      });
+      expect(fromDate.offerExpiresAt).toEqual(targetDate);
+
+      const fromMillisFn = normalizeNotification("n-millis", {
+        recipientId: "u1",
+        actorId: "system",
+        type: "event_waitlist_offer",
+        referenceId: "evt-1",
+        offerExpiresAt: { toMillis: () => targetDate.getTime() },
+      });
+      expect(fromMillisFn.offerExpiresAt).toEqual(targetDate);
+
+      const fromSeconds = normalizeNotification("n-seconds", {
+        recipientId: "u1",
+        actorId: "system",
+        type: "event_waitlist_offer",
+        referenceId: "evt-1",
+        offerExpiresAt: { seconds: Math.floor(targetDate.getTime() / 1000) },
+      });
+      expect(fromSeconds.offerExpiresAt).toEqual(targetDate);
+
+      const fromIso = normalizeNotification("n-iso", {
+        recipientId: "u1",
+        actorId: "system",
+        type: "event_waitlist_offer",
+        referenceId: "evt-1",
+        offerExpiresAt: targetDate.toISOString(),
+      });
+      expect(fromIso.offerExpiresAt).toEqual(targetDate);
+    });
+
+    it("safely omits missing or malformed slotId, slotSequence, and offerExpiresAt metadata", () => {
+      const malformedCases = [
+        { slotId: "", slotSequence: 0, offerExpiresAt: null },
+        { slotId: "   ", slotSequence: -2, offerExpiresAt: undefined },
+        { slotId: 12345, slotSequence: "3", offerExpiresAt: "not-a-valid-date" },
+        { slotId: null, slotSequence: 1.5, offerExpiresAt: {} },
+        { slotId: undefined, offerExpiresAt: new Date("invalid") },
+        {
+          slotId: {},
+          offerExpiresAt: {
+            toDate: () => {
+              throw new Error("corrupt timestamp");
+            },
+          },
+        },
+      ];
+
+      for (const extra of malformedCases) {
+        const result = normalizeNotification("offer_malformed", {
+          recipientId: "alice",
+          actorId: "system",
+          type: "event_waitlist_offer",
+          referenceId: "evt-capped-1",
+          ...extra,
+        });
+
+        expect(result).not.toHaveProperty("slotId");
+        expect(result).not.toHaveProperty("slotSequence");
+        expect(result).not.toHaveProperty("offerExpiresAt");
+      }
+    });
   });
 
   describe("subscribeToNotifications", () => {
